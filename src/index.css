@@ -1,0 +1,100 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Inter", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-bahnschrift-sc: "Bahnschrift SemiCondensed", "Bahnschrift", "Barlow Semi Condensed", "Plus Jakarta Sans", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer utilities {
+  .font-bahnschrift-sc {
+    font-family: var(--font-bahnschrift-sc);
+    font-stretch: semi-condensed;
+  }
+}
+
+@layer base {
+  :root {
+    --site-bg: var(--site-bg-light, #F8FAFC);
+  }
+
+  .dark {
+    --site-bg: var(--site-bg-dark, #0B0F17);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-[var(--site-bg)] text-slate-900 dark:text-slate-100 antialiased selection:bg-blue-600/20 selection:text-blue-700 dark:selection:text-blue-300;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply outline-2 outline-offset-2 outline-blue-600;
+  }
+}
+
+@keyframes gentle-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-logo-bounce {
+  will-change: transform;
+  animation: gentle-float 2.4s ease-in-out infinite;
+}
+
+@keyframes marquee-rtl {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee-rtl {
+  display: flex;
+  width: max-content;
+  white-space: nowrap;
+  will-change: transform;
+  animation: marquee-rtl 48s linear infinite;
+}
+
+.animate-marquee-rtl:hover {
+  animation-play-state: paused;
+}
+
+@keyframes typewriter-caret {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+.animate-typewriter-caret {
+  animation: typewriter-caret 0.9s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-logo-bounce,
+  .animate-marquee-rtl,
+  .animate-typewriter-caret {
+    animation: none;
+    transform: none;
+  }
+}

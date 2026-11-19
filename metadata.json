@@ -1,0 +1,6 @@
+{
+  "name": "SureDeal Store",
+  "description": "Instant virtual SMS verification numbers, automated social media boosting campaigns, and a verified digital asset marketplace with Moniepoint funding.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
