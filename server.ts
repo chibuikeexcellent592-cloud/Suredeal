@@ -126,8 +126,40 @@ function buildCredentialFromTemplate(template: string): string {
 
 async function startServer() {
   const app = express();
+
+  const allowedOrigins = (process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  app.use((req, res, next) => {
+    const reqOrigin = req.headers.origin;
+    if (allowedOrigins.length === 0) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    } else if (reqOrigin && allowedOrigins.includes(reqOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+      res.setHeader('Vary', 'Origin');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '60mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
+
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      service: 'suredeal-store-api',
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // --- PUBLIC CATALOG ---
   app.get('/api/public/catalog', (_req, res) => {
@@ -2579,6 +2611,10 @@ async function startServer() {
     store.logAudit(req.currentUser!.email, 'UPDATE_SETTINGS', 'Overwatch Settings', 'Saved global configuration');
     store.save();
     res.json({ settings: s });
+  });
+
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found' });
   });
 
   // --- VITE / STATIC SERVING ---

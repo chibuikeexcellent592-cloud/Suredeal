@@ -19,7 +19,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { formatNaira } from '../lib/api';
+import { formatNaira, resolveApiUrl } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
 import { SafeImage } from './SafeImage';
 
@@ -143,12 +143,13 @@ export function LandingPage({ onNavigateAuth, onEnterWorkspace }: LandingPagePro
     );
   }
 
-  const videoUrl = settings?.landingVideoUrl || '';
+  const rawVideoUrl = settings?.landingVideoUrl || '';
   const isUploadedVideo =
-    videoUrl.startsWith('/uploads/') ||
-    videoUrl.endsWith('.mp4') ||
-    videoUrl.endsWith('.webm') ||
-    videoUrl.endsWith('.mov');
+    rawVideoUrl.startsWith('/uploads/') ||
+    rawVideoUrl.endsWith('.mp4') ||
+    rawVideoUrl.endsWith('.webm') ||
+    rawVideoUrl.endsWith('.mov');
+  const videoUrl = rawVideoUrl.startsWith('/uploads/') ? resolveApiUrl(rawVideoUrl) : rawVideoUrl;
 
   const heroKicker =
     settings?.heroKicker && settings.heroKicker !== LEGACY_KICKER

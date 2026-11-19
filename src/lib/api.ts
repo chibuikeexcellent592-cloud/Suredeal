@@ -1,10 +1,14 @@
 const TOKEN_KEY = 'suredeal_auth_token';
-const API_BASE_URL = String(import.meta.env.VITE_API_URL || '')
+const API_BASE_URL = String(
+  import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '',
+)
   .trim()
   .replace(/\/+$/, '');
 
-function resolveApiUrl(url: string): string {
-  if (/^https?:\/\//i.test(url)) return url;
+export function resolveApiUrl(url: string): string {
+  if (!url || /^https?:\/\//i.test(url) || url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
   if (!API_BASE_URL) return url;
   return url.startsWith('/') ? `${API_BASE_URL}${url}` : `${API_BASE_URL}/${url}`;
 }
