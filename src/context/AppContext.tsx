@@ -94,8 +94,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshCatalog = useCallback(async () => {
     try {
       const data = await apiFetch<PublicCatalogResponse>('/api/public/catalog');
-      setCatalog(data);
-      applyWebsitePalette(data.settings);
+      if (data && typeof data === 'object' && data.settings && typeof data.settings === 'object') {
+        setCatalog(data);
+        applyWebsitePalette(data.settings);
+      }
     } catch (err) {
       console.error('Failed to load catalog:', err);
     } finally {
@@ -112,7 +114,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       const res = await apiFetch<{ user: PublicUser }>('/api/auth/me');
-      setUser(res.user);
+      if (res && typeof res === 'object' && res.user) {
+        setUser(res.user);
+      } else {
+        setStoredToken('');
+        setUser(null);
+      }
     } catch {
       setStoredToken('');
       setUser(null);

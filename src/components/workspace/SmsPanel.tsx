@@ -6,7 +6,7 @@ import type { SmsCountry, SmsOrder, SmsService } from '../../types';
 
 export function SmsPanel() {
   const { catalog, updateLocalBalance, notify } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
 
   const [services, setServices] = useState<SmsService[]>([]);
   const [countries, setCountries] = useState<SmsCountry[]>([]);

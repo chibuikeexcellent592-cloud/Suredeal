@@ -1,4 +1,13 @@
 const TOKEN_KEY = 'suredeal_auth_token';
+const API_BASE_URL = String(import.meta.env.VITE_API_URL || '')
+  .trim()
+  .replace(/\/+$/, '');
+
+function resolveApiUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (!API_BASE_URL) return url;
+  return url.startsWith('/') ? `${API_BASE_URL}${url}` : `${API_BASE_URL}/${url}`;
+}
 
 export function getStoredToken(): string {
   try {
@@ -33,25 +42,36 @@ export async function apiFetch<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(url, {
+  const res = await fetch(resolveApiUrl(url), {
     ...options,
     headers,
   });
 
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
   const text = await res.text();
   let data: unknown = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { error: text || 'Unexpected server response' };
+  let jsonValid = true;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      jsonValid = false;
+      data = { error: text };
+    }
   }
 
   if (!res.ok) {
     const errMsg =
-      typeof data === 'object' && data !== null && 'error' in data
+      jsonValid && typeof data === 'object' && data !== null && 'error' in data
         ? String((data as { error: unknown }).error)
         : `Request failed (${res.status})`;
     throw new Error(errMsg);
+  }
+
+  if (!jsonValid || contentType.includes('text/html')) {
+    throw new Error(
+      'Backend API is unreachable or returned HTML instead of JSON. Ensure the API server is running.',
+    );
   }
 
   return data as T;
@@ -79,8 +99,27 @@ export function fileToDataUrl(file: File): Promise<string> {
 
 export async function copyText(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text);
-    return true;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall back to execCommand for iOS Safari / restricted contexts
+  }
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.top = '-9999px';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    el.setSelectionRange(0, text.length);
+    const copied = document.execCommand('copy');
+    document.body.removeChild(el);
+    return copied;
   } catch {
     return false;
   }

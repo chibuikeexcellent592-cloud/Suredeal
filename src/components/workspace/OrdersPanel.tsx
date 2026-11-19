@@ -24,7 +24,7 @@ type OrderFilter = 'all' | 'vault' | 'sms' | 'boosting';
 
 export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
   const { catalog, notify, updateLocalBalance } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
 
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
   const [smsOrders, setSmsOrders] = useState<SmsOrder[]>([]);

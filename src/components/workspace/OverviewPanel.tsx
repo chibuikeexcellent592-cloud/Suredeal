@@ -34,7 +34,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
   const { user, catalog } = useApp();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
 
   useEffect(() => {
     let active = true;
@@ -102,7 +102,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
             onClick={() => onNavigate('wallet')}
             className="mt-3 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
           >
-            Deposit via {catalog?.settings.bankName || 'Moniepoint'}
+            Deposit via {catalog?.settings?.bankName || 'Moniepoint'}
           </button>
         </div>
 
@@ -179,7 +179,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
           ) : !data || data.recentTransactions.length === 0 ? (
             <div className="py-10 text-center">
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                No transactions yet. Fund your wallet via {catalog?.settings.bankName || 'Moniepoint'} to begin.
+                No transactions yet. Fund your wallet via {catalog?.settings?.bankName || 'Moniepoint'} to begin.
               </p>
               <button
                 type="button"

@@ -145,7 +145,7 @@ function ProductInlineLogo({
 
 export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
   const { catalog, updateLocalBalance, notify } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
 
   const [tab, setTab] = useState<'store' | 'vault'>('store');
   const [categories, setCategories] = useState<MarketplaceCategory[]>([]);
@@ -176,12 +176,12 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
       setListings(res.listings);
       setVault(res.vault);
       setDefaultBuyWarning(
-        res.defaultBuyWarning || catalog?.settings.defaultBuyWarning || '',
+        res.defaultBuyWarning || catalog?.settings?.defaultBuyWarning || '',
       );
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to load marketplace', 'error');
     }
-  }, [notify, catalog?.settings.defaultBuyWarning]);
+  }, [notify, catalog?.settings?.defaultBuyWarning]);
 
   useEffect(() => {
     void loadData();
@@ -759,8 +759,8 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
 
 export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
   const { catalog, updateLocalBalance, notify } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
-  const defaultBuyWarning = catalog?.settings.defaultBuyWarning || '';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
+  const defaultBuyWarning = catalog?.settings?.defaultBuyWarning || '';
   const [section, setSection] = useState<CustomSection | null>(null);
   const [loading, setLoading] = useState(true);
   const [buyingId, setBuyingId] = useState<string | null>(null);

@@ -17,7 +17,7 @@ interface WalletResponse {
 
 export function WalletPanel() {
   const { user, catalog, updateLocalBalance, refreshUser, notify } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
 
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [minDeposit, setMinDeposit] = useState(500);

@@ -6,7 +6,7 @@ import type { BoostingOrder, BoostingService } from '../../types';
 
 export function BoostingPanel() {
   const { catalog, updateLocalBalance, notify } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
 
   const [services, setServices] = useState<BoostingService[]>([]);
   const [orders, setOrders] = useState<BoostingOrder[]>([]);

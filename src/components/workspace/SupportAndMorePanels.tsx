@@ -386,7 +386,7 @@ export function SupportPanel() {
 
 export function SettingsPanel() {
   const { user, catalog, refreshUser, notify } = useApp();
-  const symbol = catalog?.settings.currencySymbol || '₦';
+  const symbol = catalog?.settings?.currencySymbol || '₦';
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [currentPassword, setCurrentPassword] = useState('');
