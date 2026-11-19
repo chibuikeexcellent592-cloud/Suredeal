@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiFetch, getStoredToken, setStoredToken } from '../lib/api';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { ApiError, apiFetch, getStoredToken, setStoredToken } from '../lib/api';
 import { applyCachedPalette, applyWebsitePalette } from '../lib/themeColor';
 import type { PublicCatalogResponse, PublicUser } from '../types';
 
@@ -91,6 +91,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, 4500);
   }, []);
 
+  const prevMaintenanceRef = useRef<boolean | undefined>(undefined);
+
   const refreshCatalog = useCallback(async () => {
     try {
       const data = await apiFetch<PublicCatalogResponse>('/api/public/catalog');
@@ -120,18 +122,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setStoredToken('');
         setUser(null);
       }
-    } catch {
-      setStoredToken('');
-      setUser(null);
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        setStoredToken('');
+        setUser(null);
+      } else if (err instanceof ApiError && err.status === 503) {
+        void refreshCatalog();
+      }
     } finally {
       setAuthLoading(false);
     }
-  }, []);
+  }, [refreshCatalog]);
 
   useEffect(() => {
     void refreshCatalog();
     void refreshUser();
+
+    const intervalId = window.setInterval(() => {
+      void refreshCatalog();
+    }, 15_000);
+
+    const onFocus = () => {
+      void refreshCatalog();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshCatalog();
+      }
+    };
+    const onMaintenanceEvent = () => {
+      void refreshCatalog();
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('suredeal:maintenance', onMaintenanceEvent);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('suredeal:maintenance', onMaintenanceEvent);
+    };
   }, [refreshCatalog, refreshUser]);
+
+  useEffect(() => {
+    const isMaint = catalog?.settings?.maintenanceMode;
+    if (prevMaintenanceRef.current === true && isMaint === false && getStoredToken() && !user) {
+      void refreshUser();
+    }
+    prevMaintenanceRef.current = isMaint;
+  }, [catalog?.settings?.maintenanceMode, user, refreshUser]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiFetch<{ token: string; user: PublicUser }>('/api/auth/login', {

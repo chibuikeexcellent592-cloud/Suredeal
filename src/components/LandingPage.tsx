@@ -26,6 +26,7 @@ import { SafeImage } from './SafeImage';
 interface LandingPageProps {
   onNavigateAuth: (mode: 'login' | 'signup') => void;
   onEnterWorkspace: () => void;
+  onOpenAdmin?: () => void;
 }
 
 const LEGACY_KICKER = 'Social Boosting · SMS Verification · Digital Vault';
@@ -34,10 +35,15 @@ const LEGACY_HEADLINE =
 const LEGACY_SUBHEADLINE =
   'Power your Instagram, TikTok, and YouTube campaigns, rent instant virtual OTP numbers, and acquire CLiproxy, 9Proxy, PIAVPN, and creator accounts from one clean dashboard.';
 
-export function LandingPage({ onNavigateAuth, onEnterWorkspace }: LandingPageProps) {
+export function LandingPage({
+  onNavigateAuth,
+  onEnterWorkspace,
+  onOpenAdmin,
+}: LandingPageProps) {
   const { user, catalog, theme, toggleTheme } = useApp();
   const [rateTab, setRateTab] = useState<'sms' | 'boosting' | 'marketplace'>('boosting');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [previewMaintenance, setPreviewMaintenance] = useState(false);
   const maintenanceTapCountRef = useRef(0);
   const maintenanceTapTimerRef = useRef<number | null>(null);
 
@@ -69,13 +75,29 @@ export function LandingPage({ onNavigateAuth, onEnterWorkspace }: LandingPagePro
     }, 4500);
   };
 
-  // Maintenance Mode screen (10 taps anywhere opens Admin login)
-  if (settings?.maintenanceMode && user?.role !== 'admin') {
+  // Maintenance Mode screen (10 taps anywhere or Team Access opens Admin login)
+  if (settings?.maintenanceMode && (user?.role !== 'admin' || previewMaintenance)) {
     return (
       <div
         onClick={handleMaintenanceScreenTap}
-        className="min-h-screen flex flex-col justify-between px-6 py-12 bg-white dark:bg-[#090D16] text-slate-900 dark:text-slate-100 select-none"
+        className="min-h-screen flex flex-col justify-between px-6 py-12 bg-white dark:bg-[#090D16] text-slate-900 dark:text-slate-100 select-none touch-manipulation"
       >
+        {user?.role === 'admin' && previewMaintenance && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-xl w-full mx-auto mb-4 px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-sm"
+          >
+            <span>Previewing public Maintenance Screen (as normal users see it)</span>
+            <button
+              type="button"
+              onClick={() => setPreviewMaintenance(false)}
+              className="px-3 py-1 rounded-lg bg-slate-950 text-white hover:bg-slate-800 cursor-pointer"
+            >
+              Exit Preview
+            </button>
+          </div>
+        )}
+
         <div className="max-w-xl w-full mx-auto pt-4 flex items-center justify-between">
           <span className="font-display text-base font-bold tracking-tight uppercase">
             {siteName}
@@ -137,7 +159,19 @@ export function LandingPage({ onNavigateAuth, onEnterWorkspace }: LandingPagePro
 
         <footer className="max-w-xl w-full mx-auto pb-4 border-t border-slate-100 dark:border-slate-800 pt-5 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-2">
           <span>&copy; {new Date().getFullYear()} {creatorName}. All rights reserved.</span>
-          <span>Back online shortly</span>
+          <div className="flex items-center gap-3">
+            <span>Back online shortly</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateAuth('login');
+              }}
+              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline cursor-pointer"
+            >
+              Team Access
+            </button>
+          </div>
         </footer>
       </div>
     );
@@ -351,6 +385,29 @@ export function LandingPage({ onNavigateAuth, onEnterWorkspace }: LandingPagePro
 
   return (
     <div className="min-h-screen bg-[var(--site-bg)] text-slate-900 dark:text-slate-100">
+      {settings?.maintenanceMode && user?.role === 'admin' && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex flex-wrap items-center justify-center gap-3">
+          <span>
+            Maintenance Lockdown is ACTIVE — public visitors &amp; regular users see the maintenance page.
+          </span>
+          <button
+            type="button"
+            onClick={() => setPreviewMaintenance(true)}
+            className="px-3 py-1 rounded-full bg-slate-950 text-white hover:bg-slate-800 cursor-pointer"
+          >
+            Preview Maintenance Screen
+          </button>
+          {onOpenAdmin && (
+            <button
+              type="button"
+              onClick={onOpenAdmin}
+              className="px-3 py-1 rounded-full bg-white text-slate-950 hover:bg-slate-100 cursor-pointer"
+            >
+              Overwatch Console
+            </button>
+          )}
+        </div>
+      )}
       {/* Clean Header Inspired by Reference Image */}
       <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-200/70 dark:border-slate-800">
         <div className="max-w-7xl mx-auto px-5 sm:px-6 h-16 flex items-center justify-between gap-4">

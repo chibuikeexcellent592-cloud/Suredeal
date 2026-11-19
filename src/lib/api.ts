@@ -6,7 +6,14 @@ const API_BASE_URL = String(
   .replace(/\/+$/, '');
 
 export function resolveApiUrl(url: string): string {
-  if (!url || /^https?:\/\//i.test(url) || url.startsWith('data:') || url.startsWith('blob:')) {
+  if (
+    !url ||
+    /^https?:\/\//i.test(url) ||
+    url.startsWith('data:') ||
+    url.startsWith('blob:') ||
+    url.startsWith('/src/') ||
+    url.startsWith('/assets/')
+  ) {
     return url;
   }
   if (!API_BASE_URL) return url;
@@ -33,6 +40,16 @@ export function setStoredToken(token: string): void {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 export async function apiFetch<T>(
   url: string,
   options: RequestInit = {},
@@ -47,6 +64,7 @@ export async function apiFetch<T>(
   }
 
   const res = await fetch(resolveApiUrl(url), {
+    cache: 'no-store',
     ...options,
     headers,
   });
@@ -65,11 +83,14 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
+    if (res.status === 503 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('suredeal:maintenance'));
+    }
     const errMsg =
       jsonValid && typeof data === 'object' && data !== null && 'error' in data
         ? String((data as { error: unknown }).error)
         : `Request failed (${res.status})`;
-    throw new Error(errMsg);
+    throw new ApiError(errMsg, res.status);
   }
 
   if (!jsonValid || contentType.includes('text/html')) {

@@ -37,6 +37,7 @@ import {
   formatAccountCredential,
   formatNaira,
   parseAccountCredential,
+  resolveApiUrl,
 } from '../../lib/api';
 import { applyWebsitePalette, COLOR_PRESETS, DEFAULT_PALETTE } from '../../lib/themeColor';
 import type {
@@ -583,13 +584,17 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   type="button"
                   onClick={async () => {
                     if (!newCatName.trim()) return;
-                    await apiFetch('/api/admin/marketplace-categories', {
-                      method: 'POST',
-                      body: JSON.stringify({ name: newCatName.trim() }),
-                    });
-                    setNewCatName('');
-                    notify('Category added', 'success');
-                    await syncAll();
+                    try {
+                      await apiFetch('/api/admin/marketplace-categories', {
+                        method: 'POST',
+                        body: JSON.stringify({ name: newCatName.trim() }),
+                      });
+                      setNewCatName('');
+                      notify('Category added', 'success');
+                      await syncAll();
+                    } catch (err) {
+                      notify(err instanceof Error ? err.message : 'Failed to add category', 'error');
+                    }
                   }}
                   className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 dark:bg-blue-600 rounded-xl cursor-pointer"
                 >
@@ -603,10 +608,17 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     <button
                       type="button"
                       onClick={async () => {
-                        await apiFetch(`/api/admin/marketplace-categories/${c.id}`, {
-                          method: 'DELETE',
-                        });
-                        await syncAll();
+                        try {
+                          await apiFetch(`/api/admin/marketplace-categories/${c.id}`, {
+                            method: 'DELETE',
+                          });
+                          await syncAll();
+                        } catch (err) {
+                          notify(
+                            err instanceof Error ? err.message : 'Failed to delete category',
+                            'error',
+                          );
+                        }
                       }}
                       className="text-rose-500 hover:text-rose-600 cursor-pointer"
                       aria-label={`Delete ${c.name}`}
@@ -659,16 +671,29 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <input
                         type="number"
+                        min={0}
                         defaultValue={item.price}
                         onBlur={async (e) => {
                           const val = Number(e.target.value);
+                          if (!Number.isFinite(val) || val < 0) {
+                            e.target.value = String(item.price);
+                            return;
+                          }
                           if (val !== item.price) {
-                            await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ price: val }),
-                            });
-                            notify(`Updated ${item.title} price`, 'success');
-                            await syncAll();
+                            try {
+                              await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ price: val }),
+                              });
+                              notify(`Updated ${item.title} price`, 'success');
+                              await syncAll();
+                            } catch (err) {
+                              e.target.value = String(item.price);
+                              notify(
+                                err instanceof Error ? err.message : 'Failed to update price',
+                                'error',
+                              );
+                            }
                           }
                         }}
                         className="w-24 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
@@ -676,16 +701,29 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       />
                       <input
                         type="number"
+                        min={0}
                         defaultValue={item.stock}
                         onBlur={async (e) => {
                           const val = Number(e.target.value);
+                          if (!Number.isFinite(val) || val < 0) {
+                            e.target.value = String(item.stock);
+                            return;
+                          }
                           if (val !== item.stock) {
-                            await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ stock: val }),
-                            });
-                            notify(`Updated ${item.title} stock`, 'success');
-                            await syncAll();
+                            try {
+                              await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ stock: val }),
+                              });
+                              notify(`Updated ${item.title} stock`, 'success');
+                              await syncAll();
+                            } catch (err) {
+                              e.target.value = String(item.stock);
+                              notify(
+                                err instanceof Error ? err.message : 'Failed to update stock',
+                                'error',
+                              );
+                            }
                           }
                         }}
                         className="w-16 px-2 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
@@ -702,11 +740,18 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       <button
                         type="button"
                         onClick={async () => {
-                          await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                            method: 'PATCH',
-                            body: JSON.stringify({ active: !item.active }),
-                          });
-                          await syncAll();
+                          try {
+                            await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({ active: !item.active }),
+                            });
+                            await syncAll();
+                          } catch (err) {
+                            notify(
+                              err instanceof Error ? err.message : 'Failed to toggle listing',
+                              'error',
+                            );
+                          }
                         }}
                         className={`px-2.5 py-1.5 text-[11px] font-semibold rounded-lg cursor-pointer ${
                           item.active
@@ -719,11 +764,18 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       <button
                         type="button"
                         onClick={async () => {
-                          await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                            method: 'DELETE',
-                          });
-                          notify('Listing deleted', 'info');
-                          await syncAll();
+                          try {
+                            await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                              method: 'DELETE',
+                            });
+                            notify('Listing deleted', 'info');
+                            await syncAll();
+                          } catch (err) {
+                            notify(
+                              err instanceof Error ? err.message : 'Failed to delete listing',
+                              'error',
+                            );
+                          }
                         }}
                         className="text-rose-500 hover:text-rose-600 p-1.5 cursor-pointer"
                         aria-label="Delete listing"
@@ -1077,19 +1129,23 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await apiFetch('/api/admin/sms-services', {
-                method: 'POST',
-                body: JSON.stringify({
-                  name: svcName,
-                  category: svcCat,
-                  basePrice: Number(svcPrice),
-                  stock: Number(svcStock),
-                  sampleTemplate: svcTemplate,
-                }),
-              });
-              setSvcName('');
-              notify('SMS service added!', 'success');
-              await syncAll();
+              try {
+                await apiFetch('/api/admin/sms-services', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    name: svcName,
+                    category: svcCat,
+                    basePrice: Number(svcPrice),
+                    stock: Number(svcStock),
+                    sampleTemplate: svcTemplate,
+                  }),
+                });
+                setSvcName('');
+                notify('SMS service added!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Failed to add SMS service', 'error');
+              }
             }}
             className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3"
           >
@@ -1159,16 +1215,26 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     <span className="text-xs text-slate-400">{symbol}</span>
                     <input
                       type="number"
+                      min={0}
                       defaultValue={svc.basePrice}
                       onBlur={async (e) => {
                         const val = Number(e.target.value);
+                        if (!Number.isFinite(val) || val < 0) {
+                          e.target.value = String(svc.basePrice);
+                          return;
+                        }
                         if (val !== svc.basePrice) {
-                          await apiFetch(`/api/admin/sms-services/${svc.id}`, {
-                            method: 'PATCH',
-                            body: JSON.stringify({ basePrice: val }),
-                          });
-                          notify(`Updated ${svc.name} price`, 'success');
-                          await syncAll();
+                          try {
+                            await apiFetch(`/api/admin/sms-services/${svc.id}`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({ basePrice: val }),
+                            });
+                            notify(`Updated ${svc.name} price`, 'success');
+                            await syncAll();
+                          } catch (err) {
+                            e.target.value = String(svc.basePrice);
+                            notify(err instanceof Error ? err.message : 'Price update failed', 'error');
+                          }
                         }
                       }}
                       className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
@@ -1176,11 +1242,15 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     <button
                       type="button"
                       onClick={async () => {
-                        await apiFetch(`/api/admin/sms-services/${svc.id}`, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ active: !svc.active }),
-                        });
-                        await syncAll();
+                        try {
+                          await apiFetch(`/api/admin/sms-services/${svc.id}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ active: !svc.active }),
+                          });
+                          await syncAll();
+                        } catch (err) {
+                          notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
+                        }
                       }}
                       className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
                         svc.active
@@ -1193,8 +1263,12 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     <button
                       type="button"
                       onClick={async () => {
-                        await apiFetch(`/api/admin/sms-services/${svc.id}`, { method: 'DELETE' });
-                        await syncAll();
+                        try {
+                          await apiFetch(`/api/admin/sms-services/${svc.id}`, { method: 'DELETE' });
+                          await syncAll();
+                        } catch (err) {
+                          notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                        }
                       }}
                       className="text-rose-500 p-1 cursor-pointer"
                     >
@@ -1214,18 +1288,22 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await apiFetch('/api/admin/sms-countries', {
-                method: 'POST',
-                body: JSON.stringify({
-                  name: cntName,
-                  code: cntCode,
-                  dialCode: cntDial,
-                  multiplier: Number(cntMult),
-                }),
-              });
-              setCntName('');
-              notify('Country added!', 'success');
-              await syncAll();
+              try {
+                await apiFetch('/api/admin/sms-countries', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    name: cntName,
+                    code: cntCode,
+                    dialCode: cntDial,
+                    multiplier: Number(cntMult),
+                  }),
+                });
+                setCntName('');
+                notify('Country added!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Failed to add country', 'error');
+              }
             }}
             className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3"
           >
@@ -1285,16 +1363,26 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   <input
                     type="number"
                     step="0.05"
+                    min={0.1}
                     defaultValue={c.multiplier}
                     onBlur={async (e) => {
                       const val = Number(e.target.value);
+                      if (!Number.isFinite(val) || val < 0.1) {
+                        e.target.value = String(c.multiplier);
+                        return;
+                      }
                       if (val !== c.multiplier) {
-                        await apiFetch(`/api/admin/sms-countries/${c.id}`, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ multiplier: val }),
-                        });
-                        notify(`Updated ${c.name} rate multiplier`, 'success');
-                        await syncAll();
+                        try {
+                          await apiFetch(`/api/admin/sms-countries/${c.id}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ multiplier: val }),
+                          });
+                          notify(`Updated ${c.name} rate multiplier`, 'success');
+                          await syncAll();
+                        } catch (err) {
+                          e.target.value = String(c.multiplier);
+                          notify(err instanceof Error ? err.message : 'Multiplier update failed', 'error');
+                        }
                       }
                     }}
                     className="w-20 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
@@ -1302,11 +1390,15 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      await apiFetch(`/api/admin/sms-countries/${c.id}`, {
-                        method: 'PATCH',
-                        body: JSON.stringify({ active: !c.active }),
-                      });
-                      await syncAll();
+                      try {
+                        await apiFetch(`/api/admin/sms-countries/${c.id}`, {
+                          method: 'PATCH',
+                          body: JSON.stringify({ active: !c.active }),
+                        });
+                        await syncAll();
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
+                      }
                     }}
                     className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
                       c.active
@@ -1319,8 +1411,12 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      await apiFetch(`/api/admin/sms-countries/${c.id}`, { method: 'DELETE' });
-                      await syncAll();
+                      try {
+                        await apiFetch(`/api/admin/sms-countries/${c.id}`, { method: 'DELETE' });
+                        await syncAll();
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                      }
                     }}
                     className="text-rose-500 p-1 cursor-pointer"
                   >
@@ -1339,22 +1435,26 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await apiFetch('/api/admin/boosting-services', {
-                method: 'POST',
-                body: JSON.stringify({
-                  platform: bstPlatform,
-                  category: bstCategory,
-                  name: bstName,
-                  ratePer1k: Number(bstRate),
-                  minQty: Number(bstMin),
-                  maxQty: Number(bstMax),
-                  speedLabel: bstSpeed,
-                  refillPolicy: bstRefill,
-                }),
-              });
-              setBstName('');
-              notify('Boosting package created!', 'success');
-              await syncAll();
+              try {
+                await apiFetch('/api/admin/boosting-services', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    platform: bstPlatform,
+                    category: bstCategory,
+                    name: bstName,
+                    ratePer1k: Number(bstRate),
+                    minQty: Number(bstMin),
+                    maxQty: Number(bstMax),
+                    speedLabel: bstSpeed,
+                    refillPolicy: bstRefill,
+                  }),
+                });
+                setBstName('');
+                notify('Boosting package created!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Failed to add boosting service', 'error');
+              }
             }}
             className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3"
           >
@@ -1446,16 +1546,26 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
+                    min={0}
                     defaultValue={b.ratePer1k}
                     onBlur={async (e) => {
                       const val = Number(e.target.value);
+                      if (!Number.isFinite(val) || val < 0) {
+                        e.target.value = String(b.ratePer1k);
+                        return;
+                      }
                       if (val !== b.ratePer1k) {
-                        await apiFetch(`/api/admin/boosting-services/${b.id}`, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ ratePer1k: val }),
-                        });
-                        notify(`Updated ${b.name} rate`, 'success');
-                        await syncAll();
+                        try {
+                          await apiFetch(`/api/admin/boosting-services/${b.id}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ ratePer1k: val }),
+                          });
+                          notify(`Updated ${b.name} rate`, 'success');
+                          await syncAll();
+                        } catch (err) {
+                          e.target.value = String(b.ratePer1k);
+                          notify(err instanceof Error ? err.message : 'Rate update failed', 'error');
+                        }
                       }
                     }}
                     className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
@@ -1463,11 +1573,15 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      await apiFetch(`/api/admin/boosting-services/${b.id}`, {
-                        method: 'PATCH',
-                        body: JSON.stringify({ active: !b.active }),
-                      });
-                      await syncAll();
+                      try {
+                        await apiFetch(`/api/admin/boosting-services/${b.id}`, {
+                          method: 'PATCH',
+                          body: JSON.stringify({ active: !b.active }),
+                        });
+                        await syncAll();
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
+                      }
                     }}
                     className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
                       b.active
@@ -1480,8 +1594,12 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      await apiFetch(`/api/admin/boosting-services/${b.id}`, { method: 'DELETE' });
-                      await syncAll();
+                      try {
+                        await apiFetch(`/api/admin/boosting-services/${b.id}`, { method: 'DELETE' });
+                        await syncAll();
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                      }
                     }}
                     className="text-rose-500 p-1 cursor-pointer"
                   >
@@ -1501,15 +1619,19 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const res = await apiFetch<{ section: CustomSection }>('/api/admin/sections', {
-                  method: 'POST',
-                  body: JSON.stringify({ name: secName, description: secDesc }),
-                });
-                setSecName('');
-                setSecDesc('');
-                setProdSectionId(res.section.id);
-                notify('Custom navigation section created!', 'success');
-                await syncAll();
+                try {
+                  const res = await apiFetch<{ section: CustomSection }>('/api/admin/sections', {
+                    method: 'POST',
+                    body: JSON.stringify({ name: secName, description: secDesc }),
+                  });
+                  setSecName('');
+                  setSecDesc('');
+                  setProdSectionId(res.section.id);
+                  notify('Custom navigation section created!', 'success');
+                  await syncAll();
+                } catch (err) {
+                  notify(err instanceof Error ? err.message : 'Failed to create section', 'error');
+                }
               }}
               className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3"
             >
@@ -1544,25 +1666,29 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  await apiFetch('/api/admin/section-products', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                      sectionId: prodSectionId || data.customSections[0]?.id,
-                      title: prodTitle,
-                      shortSpec: prodSpec,
-                      description: prodDesc,
-                      buyWarning: prodWarning,
-                      price: Number(prodPrice),
-                      stock: Number(prodStock),
-                      credentialTemplate: prodTemplate,
-                    }),
-                  });
-                  setProdTitle('');
-                  setProdSpec('');
-                  setProdDesc('');
-                  setProdWarning('');
-                  notify('Product added to custom section!', 'success');
-                  await syncAll();
+                  try {
+                    await apiFetch('/api/admin/section-products', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        sectionId: prodSectionId || data.customSections[0]?.id,
+                        title: prodTitle,
+                        shortSpec: prodSpec,
+                        description: prodDesc,
+                        buyWarning: prodWarning,
+                        price: Number(prodPrice),
+                        stock: Number(prodStock),
+                        credentialTemplate: prodTemplate,
+                      }),
+                    });
+                    setProdTitle('');
+                    setProdSpec('');
+                    setProdDesc('');
+                    setProdWarning('');
+                    notify('Product added to custom section!', 'success');
+                    await syncAll();
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : 'Failed to add product', 'error');
+                  }
                 }}
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3"
               >
@@ -1664,8 +1790,12 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     <button
                       type="button"
                       onClick={async () => {
-                        await apiFetch(`/api/admin/sections/${sec.id}`, { method: 'DELETE' });
-                        await syncAll();
+                        try {
+                          await apiFetch(`/api/admin/sections/${sec.id}`, { method: 'DELETE' });
+                          await syncAll();
+                        } catch (err) {
+                          notify(err instanceof Error ? err.message : 'Failed to delete section', 'error');
+                        }
                       }}
                       className="text-rose-500 hover:text-rose-600 cursor-pointer"
                     >
@@ -1682,10 +1812,17 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                           <button
                             type="button"
                             onClick={async () => {
-                              await apiFetch(`/api/admin/section-products/${p.id}`, {
-                                method: 'DELETE',
-                              });
-                              await syncAll();
+                              try {
+                                await apiFetch(`/api/admin/section-products/${p.id}`, {
+                                  method: 'DELETE',
+                                });
+                                await syncAll();
+                              } catch (err) {
+                                notify(
+                                  err instanceof Error ? err.message : 'Failed to remove product',
+                                  'error',
+                                );
+                              }
                             }}
                             className="text-rose-500 cursor-pointer"
                           >
@@ -1979,24 +2116,28 @@ export function AdminCommsAndSettingsPanel({
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            await apiFetch('/api/admin/notifications', {
-              method: 'POST',
-              body: JSON.stringify({
-                title: ntfTitle,
-                message: ntfMsg,
-                type: ntfType,
-                targetUserId: ntfTarget,
-              }),
-            });
-            setNtfTitle('');
-            setNtfMsg('');
-            notify(
-              selectedRecipientUser
-                ? `Notification sent to ${selectedRecipientUser.name}!`
-                : 'Broadcast notification dispatched to all users!',
-              'success',
-            );
-            await onRefresh();
+            try {
+              await apiFetch('/api/admin/notifications', {
+                method: 'POST',
+                body: JSON.stringify({
+                  title: ntfTitle,
+                  message: ntfMsg,
+                  type: ntfType,
+                  targetUserId: ntfTarget,
+                }),
+              });
+              setNtfTitle('');
+              setNtfMsg('');
+              notify(
+                selectedRecipientUser
+                  ? `Notification sent to ${selectedRecipientUser.name}!`
+                  : 'Broadcast notification dispatched to all users!',
+                'success',
+              );
+              await onRefresh();
+            } catch (err) {
+              notify(err instanceof Error ? err.message : 'Failed to send notification', 'error');
+            }
           }}
           className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4"
         >
@@ -2169,8 +2310,12 @@ export function AdminCommsAndSettingsPanel({
                   <button
                     type="button"
                     onClick={async () => {
-                      await apiFetch(`/api/admin/notifications/${n.id}`, { method: 'DELETE' });
-                      await onRefresh();
+                      try {
+                        await apiFetch(`/api/admin/notifications/${n.id}`, { method: 'DELETE' });
+                        await onRefresh();
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                      }
                     }}
                     className="text-rose-500 shrink-0 cursor-pointer"
                   >
@@ -2185,16 +2330,20 @@ export function AdminCommsAndSettingsPanel({
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            await apiFetch('/api/admin/email', {
-              method: 'POST',
-              body: JSON.stringify({ to: emailTo, subject: emailSubject, body: emailBody }),
-            });
-            setEmailTo('');
-            setEmailUserSearch('');
-            setEmailSubject('');
-            setEmailBody('');
-            notify('Direct message dispatched to user!', 'success');
-            await onRefresh();
+            try {
+              await apiFetch('/api/admin/email', {
+                method: 'POST',
+                body: JSON.stringify({ to: emailTo, subject: emailSubject, body: emailBody }),
+              });
+              setEmailTo('');
+              setEmailUserSearch('');
+              setEmailSubject('');
+              setEmailBody('');
+              notify('Direct message dispatched to user!', 'success');
+              await onRefresh();
+            } catch (err) {
+              notify(err instanceof Error ? err.message : 'Failed to send email message', 'error');
+            }
           }}
           className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4"
         >
@@ -2303,23 +2452,27 @@ export function AdminCommsAndSettingsPanel({
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            await apiFetch('/api/admin/tutorials', {
-              method: 'POST',
-              body: JSON.stringify({
-                title: tutTitle,
-                category: tutCat,
-                duration: tutDur,
-                summary: tutSum,
-                content: tutBody,
-                videoUrl: tutVideo,
-              }),
-            });
-            setTutTitle('');
-            setTutSum('');
-            setTutBody('');
-            setTutVideo('');
-            notify('Tutorial published to users!', 'success');
-            await onRefresh();
+            try {
+              await apiFetch('/api/admin/tutorials', {
+                method: 'POST',
+                body: JSON.stringify({
+                  title: tutTitle,
+                  category: tutCat,
+                  duration: tutDur,
+                  summary: tutSum,
+                  content: tutBody,
+                  videoUrl: tutVideo,
+                }),
+              });
+              setTutTitle('');
+              setTutSum('');
+              setTutBody('');
+              setTutVideo('');
+              notify('Tutorial published to users!', 'success');
+              await onRefresh();
+            } catch (err) {
+              notify(err instanceof Error ? err.message : 'Failed to publish tutorial', 'error');
+            }
           }}
           className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3"
         >
@@ -2394,8 +2547,12 @@ export function AdminCommsAndSettingsPanel({
               <button
                 type="button"
                 onClick={async () => {
-                  await apiFetch(`/api/admin/tutorials/${t.id}`, { method: 'DELETE' });
-                  await onRefresh();
+                  try {
+                    await apiFetch(`/api/admin/tutorials/${t.id}`, { method: 'DELETE' });
+                    await onRefresh();
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                  }
                 }}
                 className="text-rose-500 p-1 cursor-pointer"
               >
@@ -2449,12 +2606,16 @@ export function AdminCommsAndSettingsPanel({
                 <select
                   value={activeTicket.status}
                   onChange={async (e) => {
-                    await apiFetch(`/api/admin/tickets/${activeTicket.id}/status`, {
-                      method: 'PATCH',
-                      body: JSON.stringify({ status: e.target.value }),
-                    });
-                    notify('Ticket status updated', 'success');
-                    await onRefresh();
+                    try {
+                      await apiFetch(`/api/admin/tickets/${activeTicket.id}/status`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ status: e.target.value }),
+                      });
+                      notify('Ticket status updated', 'success');
+                      await onRefresh();
+                    } catch (err) {
+                      notify(err instanceof Error ? err.message : 'Status update failed', 'error');
+                    }
                   }}
                   className="px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                 >
@@ -2487,13 +2648,17 @@ export function AdminCommsAndSettingsPanel({
                 onSubmit={async (e) => {
                   e.preventDefault();
                   if (!ticketReply.trim()) return;
-                  await apiFetch(`/api/tickets/${activeTicket.id}/reply`, {
-                    method: 'POST',
-                    body: JSON.stringify({ text: ticketReply.trim() }),
-                  });
-                  setTicketReply('');
-                  notify('Admin reply sent', 'success');
-                  await onRefresh();
+                  try {
+                    await apiFetch(`/api/tickets/${activeTicket.id}/reply`, {
+                      method: 'POST',
+                      body: JSON.stringify({ text: ticketReply.trim() }),
+                    });
+                    setTicketReply('');
+                    notify('Admin reply sent', 'success');
+                    await onRefresh();
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : 'Reply failed', 'error');
+                  }
                 }}
                 className="flex gap-2"
               >
@@ -2634,7 +2799,7 @@ export function AdminCommsAndSettingsPanel({
               >
                 <div className="relative h-36 bg-slate-200 dark:bg-slate-800">
                   <img
-                    src={card.imageUrl}
+                    src={resolveApiUrl(card.imageUrl)}
                     alt={card.title}
                     className="w-full h-full object-cover"
                   />
@@ -3282,7 +3447,7 @@ export function AdminCommsAndSettingsPanel({
           {formSettings.landingVideoUrl && (
             <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-w-md">
               <video
-                src={formSettings.landingVideoUrl}
+                src={resolveApiUrl(formSettings.landingVideoUrl)}
                 controls
                 className="w-full aspect-video object-cover"
               />
@@ -3676,16 +3841,24 @@ export function AdminCommsAndSettingsPanel({
 
       {/* Overwatch Master Platform Controls (Control Over Everything) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <Sliders className="w-4 h-4 text-blue-600" />
-          <div>
-            <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
-              Overwatch Master Controls (Total Platform Authority)
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Enable or pause any core feature, registration gate, checkout rule, or storefront section instantly.
-            </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Sliders className="w-4 h-4 text-blue-600" />
+            <div>
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Overwatch Master Controls (Total Platform Authority)
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Enable or pause any core feature, registration gate, checkout rule, or storefront section, then click Save Controls.
+              </p>
+            </div>
           </div>
+          <button
+            type="submit"
+            className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs cursor-pointer"
+          >
+            Save Master Controls
+          </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

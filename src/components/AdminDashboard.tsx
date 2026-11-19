@@ -48,7 +48,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { apiFetch, copyText, formatCountdown, formatNaira } from '../lib/api';
+import { apiFetch, copyText, formatCountdown, formatNaira, resolveApiUrl } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
 import type {
   AdminAlert,
@@ -394,19 +394,23 @@ export function AdminDashboard({ onBackHome, onOpenWorkspace }: AdminDashboardPr
     }
     setAirdropping(true);
     try {
-      const res = await apiFetch<{ creditedUsers: number; totalCredited: number }>(
-        '/api/admin/users/airdrop-bonus',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            amount: Number(airdropAmount),
-            title: airdropTitle.trim() || 'Creator Loyalty Bonus',
-            message: airdropMessage.trim(),
-          }),
-        },
-      );
+      const res = await apiFetch<{
+        creditedCount?: number;
+        totalDistributed?: number;
+        creditedUsers?: number;
+        totalCredited?: number;
+      }>('/api/admin/users/airdrop-bonus', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: Number(airdropAmount),
+          title: airdropTitle.trim() || 'Creator Loyalty Bonus',
+          message: airdropMessage.trim(),
+        }),
+      });
+      const count = res.creditedCount ?? res.creditedUsers ?? 0;
+      const total = res.totalDistributed ?? res.totalCredited ?? count * Number(airdropAmount);
       notify(
-        `Airdropped ${formatNaira(airdropAmount, symbol)} to ${res.creditedUsers} active users (${formatNaira(res.totalCredited, symbol)} total)!`,
+        `Airdropped ${formatNaira(airdropAmount, symbol)} to ${count} active users (${formatNaira(total, symbol)} total)!`,
         'success',
       );
       await loadAdmin();
@@ -2299,12 +2303,16 @@ export function AdminDashboard({ onBackHome, onOpenWorkspace }: AdminDashboardPr
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
+                      const activePoolCountry =
+                        data.smsCountries.find((c) => c.id === poolCountry)?.id ||
+                        data.smsCountries[0]?.id ||
+                        poolCountry;
                       try {
                         await apiFetch('/api/admin/sms-pool', {
                           method: 'POST',
                           body: JSON.stringify({
                             phoneNumber: poolNumber,
-                            countryId: poolCountry,
+                            countryId: activePoolCountry,
                             serviceId: poolService,
                             presetOtp: poolOtp,
                           }),
@@ -2329,7 +2337,11 @@ export function AdminDashboard({ onBackHome, onOpenWorkspace }: AdminDashboardPr
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <select
-                        value={poolCountry}
+                        value={
+                          data.smsCountries.find((c) => c.id === poolCountry)?.id ||
+                          data.smsCountries[0]?.id ||
+                          poolCountry
+                        }
                         onChange={(e) => setPoolCountry(e.target.value)}
                         className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                       >
@@ -3200,7 +3212,7 @@ export function AdminDashboard({ onBackHome, onOpenWorkspace }: AdminDashboardPr
               </button>
             </div>
             <img
-              src={receiptPreview}
+              src={resolveApiUrl(receiptPreview)}
               alt="Moniepoint receipt"
               className="w-full max-h-[70vh] object-contain rounded-lg bg-slate-100 dark:bg-slate-950"
             />

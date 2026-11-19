@@ -180,6 +180,8 @@ export function SmsPanel() {
     }
   };
 
+  const smsPaused = catalog?.settings?.enableSmsService === false;
+
   return (
     <div className="space-y-6">
       <div>
@@ -191,6 +193,12 @@ export function SmsPanel() {
           cancelled before delivery.
         </p>
       </div>
+
+      {smsPaused && (
+        <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
+          Virtual SMS verification orders are temporarily paused by our team. You can still view active numbers and refunds below.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Order Configurator: Country First, then Service */}
@@ -276,10 +284,10 @@ export function SmsPanel() {
             <button
               type="button"
               onClick={handleRent}
-              disabled={renting || !activeService || !activeCountry}
+              disabled={renting || smsPaused || !activeService || !activeCountry}
               className="px-5 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              {renting ? 'Placing Order...' : 'Rent Virtual Number'}
+              {smsPaused ? 'Paused' : renting ? 'Placing Order...' : 'Rent Virtual Number'}
             </button>
           </div>
 

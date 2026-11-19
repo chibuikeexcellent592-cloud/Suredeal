@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatNaira } from '../../lib/api';
 import type { NotificationItem, SupportTicket, TutorialItem } from '../../types';
 
-export function NotificationsPanel() {
+export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
   const { user, notify } = useApp();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +26,7 @@ export function NotificationsPanel() {
             : n,
         ),
       );
+      onRead?.();
     } catch {
       // ignore
     }
@@ -397,6 +398,13 @@ export function SettingsPanel() {
     invited: { id: string; name: string; email: string; createdAt: string }[];
     totalEarned: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      setName(user.name);
+      setEmail(user.email);
+    }
+  }, [user]);
 
   useEffect(() => {
     apiFetch<{

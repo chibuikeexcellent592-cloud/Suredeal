@@ -53,10 +53,14 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
   const currencyCode = settings?.currencyCode || 'NGN';
   const customSections = catalog?.customSections || [];
 
-  useEffect(() => {
+  const refreshUnread = () => {
     apiFetch<{ stats: { unreadNotifications: number } }>('/api/dashboard/overview')
       .then((res) => setUnreadCount(res.stats.unreadNotifications))
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshUnread();
   }, [activeTab]);
 
   const marketplaceNav = [
@@ -401,7 +405,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
             )}
             {customSectionId && <CustomSectionPanel sectionId={customSectionId} />}
             {activeTab === 'wallet' && <WalletPanel />}
-            {activeTab === 'notifications' && <NotificationsPanel />}
+            {activeTab === 'notifications' && <NotificationsPanel onRead={refreshUnread} />}
             {activeTab === 'tutorials' && <TutorialsPanel />}
             {activeTab === 'support' && <SupportPanel />}
             {activeTab === 'settings' && <SettingsPanel />}

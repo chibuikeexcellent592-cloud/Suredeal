@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
+import { resolveApiUrl } from '../lib/api';
 
 interface SafeImageProps {
   src: string;
@@ -9,13 +10,14 @@ interface SafeImageProps {
 }
 
 export function SafeImage({ src, alt, className = '', fallbackTitle }: SafeImageProps) {
+  const resolvedSrc = resolveApiUrl(src);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setFailed(false);
-  }, [src]);
+  }, [resolvedSrc]);
 
-  if (!src || failed) {
+  if (!resolvedSrc || failed) {
     return (
       <div
         className={`flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 via-slate-200 to-slate-100 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800 text-slate-500 dark:text-slate-400 p-6 ${className}`}
@@ -32,7 +34,7 @@ export function SafeImage({ src, alt, className = '', fallbackTitle }: SafeImage
 
   return (
     <img
-      src={src}
+      src={resolvedSrc}
       alt={alt}
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}

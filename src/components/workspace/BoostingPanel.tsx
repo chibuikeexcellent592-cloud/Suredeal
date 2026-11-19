@@ -92,6 +92,8 @@ export function BoostingPanel() {
     }
   };
 
+  const boostingPaused = catalog?.settings?.enableBoostingService === false;
+
   return (
     <div className="space-y-6">
       <div>
@@ -103,6 +105,12 @@ export function BoostingPanel() {
           our Team fulfillment desk.
         </p>
       </div>
+
+      {boostingPaused && (
+        <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
+          Social Media Boosting orders are temporarily paused by our team. Existing orders continue updating below.
+        </div>
+      )}
 
       {/* Platform Segmented Filter */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -217,10 +225,10 @@ export function BoostingPanel() {
             </div>
             <button
               type="submit"
-              disabled={submitting || !activeService}
+              disabled={submitting || boostingPaused || !activeService}
               className="px-5 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
             >
-              {submitting ? 'Sending to Our Team...' : 'Purchase'}
+              {boostingPaused ? 'Paused' : submitting ? 'Sending to Our Team...' : 'Purchase'}
             </button>
           </div>
 

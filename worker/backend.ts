@@ -1497,15 +1497,27 @@ export class SureDealStoreDO {
       // --- USER PROFILE & REFERRALS ---
       if (method === 'PATCH' && pathname === '/api/user/profile') {
         const body = await readJsonBody(request);
-        const name = String(body.name || '').trim();
-        const email = String(body.email || '').trim().toLowerCase();
-        if (name.length >= 2) currentUser.name = name;
-        if (email && email.includes('@') && email !== currentUser.email.toLowerCase()) {
-          const taken = db.users.some(
-            (u) => u.id !== currentUser.id && u.email.toLowerCase() === email,
-          );
-          if (taken) return errJson('Email already used by another account', 409);
-          currentUser.email = email;
+        const hasName = body.name !== undefined;
+        const hasEmail = body.email !== undefined;
+        const name = String(body.name ?? '').trim();
+        const email = String(body.email ?? '').trim().toLowerCase();
+        if (hasName) {
+          if (name.length < 2) {
+            return errJson('Display name must be at least 2 characters', 400);
+          }
+          currentUser.name = name;
+        }
+        if (hasEmail) {
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return errJson('Please enter a valid email address', 400);
+          }
+          if (email !== currentUser.email.toLowerCase()) {
+            const taken = db.users.some(
+              (u) => u.id !== currentUser.id && u.email.toLowerCase() === email,
+            );
+            if (taken) return errJson('Email already used by another account', 409);
+            currentUser.email = email;
+          }
         }
         this.persistKeys('users');
         return okJson({ user: toPublicUser(currentUser) });
@@ -2298,11 +2310,23 @@ export class SureDealStoreDO {
           if (!svc) return errJson('SMS service not found', 404);
           const body = await readJsonBody(request);
           Object.assign(svc, {
-            name: typeof body.name === 'string' ? body.name : svc.name,
-            category: typeof body.category === 'string' ? body.category : svc.category,
-            basePrice: typeof body.basePrice === 'number' ? body.basePrice : svc.basePrice,
-            successRate: typeof body.successRate === 'number' ? body.successRate : svc.successRate,
-            stock: typeof body.stock === 'number' ? body.stock : svc.stock,
+            name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : svc.name,
+            category:
+              typeof body.category === 'string' && body.category.trim()
+                ? body.category.trim()
+                : svc.category,
+            basePrice:
+              typeof body.basePrice === 'number' && Number.isFinite(body.basePrice)
+                ? Math.max(50, body.basePrice)
+                : svc.basePrice,
+            successRate:
+              typeof body.successRate === 'number' && Number.isFinite(body.successRate)
+                ? Math.min(100, Math.max(0, body.successRate))
+                : svc.successRate,
+            stock:
+              typeof body.stock === 'number' && Number.isFinite(body.stock)
+                ? Math.max(0, Math.floor(body.stock))
+                : svc.stock,
             active: typeof body.active === 'boolean' ? body.active : svc.active,
             sampleTemplate:
               typeof body.sampleTemplate === 'string' ? body.sampleTemplate : svc.sampleTemplate,
@@ -2340,10 +2364,19 @@ export class SureDealStoreDO {
           if (!country) return errJson('Country not found', 404);
           const body = await readJsonBody(request);
           Object.assign(country, {
-            name: typeof body.name === 'string' ? body.name : country.name,
-            code: typeof body.code === 'string' ? body.code : country.code,
-            dialCode: typeof body.dialCode === 'string' ? body.dialCode : country.dialCode,
-            multiplier: typeof body.multiplier === 'number' ? body.multiplier : country.multiplier,
+            name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : country.name,
+            code:
+              typeof body.code === 'string' && body.code.trim()
+                ? body.code.trim().toUpperCase()
+                : country.code,
+            dialCode:
+              typeof body.dialCode === 'string' && body.dialCode.trim()
+                ? body.dialCode.trim()
+                : country.dialCode,
+            multiplier:
+              typeof body.multiplier === 'number' && Number.isFinite(body.multiplier)
+                ? Math.max(0.1, body.multiplier)
+                : country.multiplier,
             active: typeof body.active === 'boolean' ? body.active : country.active,
           });
           this.persistKeys('smsCountries');
@@ -2383,12 +2416,27 @@ export class SureDealStoreDO {
           if (!item) return errJson('Boosting service not found', 404);
           const body = await readJsonBody(request);
           Object.assign(item, {
-            platform: typeof body.platform === 'string' ? body.platform : item.platform,
-            category: typeof body.category === 'string' ? body.category : item.category,
-            name: typeof body.name === 'string' ? body.name : item.name,
-            ratePer1k: typeof body.ratePer1k === 'number' ? body.ratePer1k : item.ratePer1k,
-            minQty: typeof body.minQty === 'number' ? body.minQty : item.minQty,
-            maxQty: typeof body.maxQty === 'number' ? body.maxQty : item.maxQty,
+            platform:
+              typeof body.platform === 'string' && body.platform.trim()
+                ? body.platform.trim()
+                : item.platform,
+            category:
+              typeof body.category === 'string' && body.category.trim()
+                ? body.category.trim()
+                : item.category,
+            name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : item.name,
+            ratePer1k:
+              typeof body.ratePer1k === 'number' && Number.isFinite(body.ratePer1k)
+                ? Math.max(10, body.ratePer1k)
+                : item.ratePer1k,
+            minQty:
+              typeof body.minQty === 'number' && Number.isFinite(body.minQty)
+                ? Math.max(1, Math.floor(body.minQty))
+                : item.minQty,
+            maxQty:
+              typeof body.maxQty === 'number' && Number.isFinite(body.maxQty)
+                ? Math.max(1, Math.floor(body.maxQty))
+                : item.maxQty,
             speedLabel: typeof body.speedLabel === 'string' ? body.speedLabel : item.speedLabel,
             refillPolicy:
               typeof body.refillPolicy === 'string' ? body.refillPolicy : item.refillPolicy,
@@ -2509,8 +2557,8 @@ export class SureDealStoreDO {
           const nextStock =
             body.stockKeys !== undefined && item.stockKeys.length > 0
               ? item.stockKeys.length
-              : typeof body.stock === 'number'
-                ? body.stock
+              : typeof body.stock === 'number' && Number.isFinite(body.stock)
+                ? Math.max(0, Math.floor(body.stock))
                 : item.stock;
           Object.assign(item, {
             title: typeof body.title === 'string' ? body.title : item.title,
@@ -2521,7 +2569,10 @@ export class SureDealStoreDO {
             buyWarning: typeof body.buyWarning === 'string' ? body.buyWarning : item.buyWarning,
             deliveryType:
               typeof body.deliveryType === 'string' ? body.deliveryType : item.deliveryType,
-            price: typeof body.price === 'number' ? body.price : item.price,
+            price:
+              typeof body.price === 'number' && Number.isFinite(body.price)
+                ? Math.max(0, body.price)
+                : item.price,
             stock: nextStock,
             imageUrl: typeof body.imageUrl === 'string' ? body.imageUrl : item.imageUrl,
             logoUrl: typeof body.logoUrl === 'string' ? body.logoUrl : item.logoUrl,
@@ -2719,8 +2770,8 @@ export class SureDealStoreDO {
           const to = String(body.to || '').trim().toLowerCase();
           const subject = String(body.subject || '').trim();
           const emailBody = String(body.body || '').trim();
-          if (!to || !subject || !emailBody) {
-            return errJson('Recipient email, subject, and body are required', 400);
+          if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to) || !subject || !emailBody) {
+            return errJson('Valid recipient email, subject, and body are required', 400);
           }
           const now = new Date().toISOString();
           const log = {

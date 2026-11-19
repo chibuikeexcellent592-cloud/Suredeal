@@ -59,11 +59,24 @@ function AppRouter() {
     }
   }, [catalog?.settings?.siteName]);
 
+  const isMaintenanceLocked =
+    Boolean(catalog?.settings?.maintenanceMode) && user?.role !== 'admin';
+
   useEffect(() => {
     if (!authLoading && user && view === 'auth') {
+      if (isMaintenanceLocked) {
+        setView('landing');
+      } else {
+        setView('workspace');
+      }
+    }
+  }, [authLoading, user, view, isMaintenanceLocked]);
+
+  useEffect(() => {
+    if (view === 'admin' && user && user.role !== 'admin') {
       setView('workspace');
     }
-  }, [authLoading, user, view]);
+  }, [view, user]);
 
   if (authLoading) {
     return (
@@ -75,7 +88,28 @@ function AppRouter() {
 
   return (
     <>
-      {view === 'admin' && user?.role === 'admin' ? (
+      {isMaintenanceLocked ? (
+        view === 'auth' ? (
+          <AuthView
+            initialMode="login"
+            onBack={() => setView('landing')}
+            onSuccess={(loggedUser) =>
+              setView(loggedUser.role === 'admin' ? 'admin' : 'landing')
+            }
+          />
+        ) : (
+          <LandingPage
+            onNavigateAuth={(mode) => {
+              setAuthMode(mode);
+              setView('auth');
+            }}
+            onEnterWorkspace={() => {
+              setAuthMode('login');
+              setView('auth');
+            }}
+          />
+        )
+      ) : view === 'admin' && user?.role === 'admin' ? (
         <AdminPage
           onBackHome={() => setView('landing')}
           onOpenWorkspace={() => setView('workspace')}
@@ -105,9 +139,10 @@ function AppRouter() {
               setView('auth');
             }
           }}
+          onOpenAdmin={user?.role === 'admin' ? () => setView('admin') : undefined}
         />
       )}
-      {view !== 'admin' && <FloatingWhatsAppButton />}
+      {view !== 'admin' && !isMaintenanceLocked && <FloatingWhatsAppButton />}
       <ToastContainer />
     </>
   );

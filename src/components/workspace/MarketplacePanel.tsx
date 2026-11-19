@@ -285,6 +285,8 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
     defaultBuyWarning ||
     'Verify proxy format and platform rules before deployment. Credentials are delivered once.';
 
+  const marketplacePaused = catalog?.settings?.enableMarketplace === false;
+
   return (
     <div className="space-y-6 pb-20 relative">
       {/* Header Row with Store / Vault toggle */}
@@ -325,6 +327,12 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
           </button>
         </div>
       </div>
+
+      {marketplacePaused && (
+        <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
+          Marketplace &amp; Vault purchases are temporarily paused by our team. Previously purchased Vault items remain accessible.
+        </div>
+      )}
 
       {tab === 'store' ? (
         <>
@@ -737,16 +745,20 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
 
                 <button
                   type="button"
-                  disabled={buyingId === checkoutItem.id || checkoutItem.stock <= 0}
+                  disabled={
+                    buyingId === checkoutItem.id || checkoutItem.stock <= 0 || marketplacePaused
+                  }
                   onClick={() => handleConfirmPurchase(checkoutItem)}
                   className="inline-flex items-center gap-2 px-5 py-3 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 disabled:opacity-50 rounded-xl shadow-md cursor-pointer"
                 >
                   <Zap className="w-4 h-4" />
-                  {checkoutItem.stock <= 0
-                    ? 'Out of Stock'
-                    : buyingId === checkoutItem.id
-                      ? 'Delivering...'
-                      : 'Confirm & Buy Now'}
+                  {marketplacePaused
+                    ? 'Purchases Paused'
+                    : checkoutItem.stock <= 0
+                      ? 'Out of Stock'
+                      : buyingId === checkoutItem.id
+                        ? 'Delivering...'
+                        : 'Confirm & Buy Now'}
                 </button>
               </div>
             </div>

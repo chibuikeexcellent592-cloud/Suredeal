@@ -152,6 +152,10 @@ async function startServer() {
 
   app.use(express.json({ limit: '60mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({
@@ -1158,18 +1162,32 @@ async function startServer() {
   // --- USER PROFILE & REFERRALS ---
   app.patch('/api/user/profile', requireAuth, (req: AuthedRequest, res) => {
     const user = req.currentUser!;
-    const name = String(req.body?.name || '').trim();
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    if (name.length >= 2) user.name = name;
-    if (email && email.includes('@') && email !== user.email.toLowerCase()) {
-      const taken = store.db.users.some(
-        (u) => u.id !== user.id && u.email.toLowerCase() === email,
-      );
-      if (taken) {
-        res.status(409).json({ error: 'Email already used by another account' });
+    const hasName = req.body?.name !== undefined;
+    const hasEmail = req.body?.email !== undefined;
+    const name = String(req.body?.name ?? '').trim();
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    if (hasName) {
+      if (name.length < 2) {
+        res.status(400).json({ error: 'Display name must be at least 2 characters' });
         return;
       }
-      user.email = email;
+      user.name = name;
+    }
+    if (hasEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        res.status(400).json({ error: 'Please enter a valid email address' });
+        return;
+      }
+      if (email !== user.email.toLowerCase()) {
+        const taken = store.db.users.some(
+          (u) => u.id !== user.id && u.email.toLowerCase() === email,
+        );
+        if (taken) {
+          res.status(409).json({ error: 'Email already used by another account' });
+          return;
+        }
+        user.email = email;
+      }
     }
     store.save();
     res.json({ user: toPublicUser(user) });
@@ -1898,11 +1916,20 @@ async function startServer() {
       return;
     }
     Object.assign(svc, {
-      name: req.body?.name ?? svc.name,
-      category: req.body?.category ?? svc.category,
-      basePrice: typeof req.body?.basePrice === 'number' ? req.body.basePrice : svc.basePrice,
-      successRate: typeof req.body?.successRate === 'number' ? req.body.successRate : svc.successRate,
-      stock: typeof req.body?.stock === 'number' ? req.body.stock : svc.stock,
+      name: typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : svc.name,
+      category: typeof req.body?.category === 'string' && req.body.category.trim() ? req.body.category.trim() : svc.category,
+      basePrice:
+        typeof req.body?.basePrice === 'number' && Number.isFinite(req.body.basePrice)
+          ? Math.max(50, req.body.basePrice)
+          : svc.basePrice,
+      successRate:
+        typeof req.body?.successRate === 'number' && Number.isFinite(req.body.successRate)
+          ? Math.min(100, Math.max(0, req.body.successRate))
+          : svc.successRate,
+      stock:
+        typeof req.body?.stock === 'number' && Number.isFinite(req.body.stock)
+          ? Math.max(0, Math.floor(req.body.stock))
+          : svc.stock,
       active: typeof req.body?.active === 'boolean' ? req.body.active : svc.active,
       sampleTemplate: req.body?.sampleTemplate ?? svc.sampleTemplate,
     });
@@ -1937,10 +1964,13 @@ async function startServer() {
       return;
     }
     Object.assign(country, {
-      name: req.body?.name ?? country.name,
-      code: req.body?.code ?? country.code,
-      dialCode: req.body?.dialCode ?? country.dialCode,
-      multiplier: typeof req.body?.multiplier === 'number' ? req.body.multiplier : country.multiplier,
+      name: typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : country.name,
+      code: typeof req.body?.code === 'string' && req.body.code.trim() ? req.body.code.trim().toUpperCase() : country.code,
+      dialCode: typeof req.body?.dialCode === 'string' && req.body.dialCode.trim() ? req.body.dialCode.trim() : country.dialCode,
+      multiplier:
+        typeof req.body?.multiplier === 'number' && Number.isFinite(req.body.multiplier)
+          ? Math.max(0.1, req.body.multiplier)
+          : country.multiplier,
       active: typeof req.body?.active === 'boolean' ? req.body.active : country.active,
     });
     store.save();
@@ -1978,12 +2008,21 @@ async function startServer() {
       return;
     }
     Object.assign(item, {
-      platform: req.body?.platform ?? item.platform,
-      category: req.body?.category ?? item.category,
-      name: req.body?.name ?? item.name,
-      ratePer1k: typeof req.body?.ratePer1k === 'number' ? req.body.ratePer1k : item.ratePer1k,
-      minQty: typeof req.body?.minQty === 'number' ? req.body.minQty : item.minQty,
-      maxQty: typeof req.body?.maxQty === 'number' ? req.body.maxQty : item.maxQty,
+      platform: typeof req.body?.platform === 'string' && req.body.platform.trim() ? req.body.platform.trim() : item.platform,
+      category: typeof req.body?.category === 'string' && req.body.category.trim() ? req.body.category.trim() : item.category,
+      name: typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : item.name,
+      ratePer1k:
+        typeof req.body?.ratePer1k === 'number' && Number.isFinite(req.body.ratePer1k)
+          ? Math.max(10, req.body.ratePer1k)
+          : item.ratePer1k,
+      minQty:
+        typeof req.body?.minQty === 'number' && Number.isFinite(req.body.minQty)
+          ? Math.max(1, Math.floor(req.body.minQty))
+          : item.minQty,
+      maxQty:
+        typeof req.body?.maxQty === 'number' && Number.isFinite(req.body.maxQty)
+          ? Math.max(1, Math.floor(req.body.maxQty))
+          : item.maxQty,
       speedLabel: req.body?.speedLabel ?? item.speedLabel,
       refillPolicy: req.body?.refillPolicy ?? item.refillPolicy,
       active: typeof req.body?.active === 'boolean' ? req.body.active : item.active,
@@ -2101,8 +2140,8 @@ async function startServer() {
     const nextStock =
       req.body?.stockKeys !== undefined && item.stockKeys.length > 0
         ? item.stockKeys.length
-        : typeof req.body?.stock === 'number'
-          ? req.body.stock
+        : typeof req.body?.stock === 'number' && Number.isFinite(req.body.stock)
+          ? Math.max(0, Math.floor(req.body.stock))
           : item.stock;
     Object.assign(item, {
       title: req.body?.title ?? item.title,
@@ -2112,7 +2151,10 @@ async function startServer() {
       description: req.body?.description ?? item.description,
       buyWarning: req.body?.buyWarning ?? item.buyWarning,
       deliveryType: req.body?.deliveryType ?? item.deliveryType,
-      price: typeof req.body?.price === 'number' ? req.body.price : item.price,
+      price:
+        typeof req.body?.price === 'number' && Number.isFinite(req.body.price)
+          ? Math.max(0, req.body.price)
+          : item.price,
       stock: nextStock,
       imageUrl: req.body?.imageUrl ?? item.imageUrl,
       logoUrl: req.body?.logoUrl ?? item.logoUrl,
@@ -2340,8 +2382,8 @@ async function startServer() {
     const to = String(req.body?.to || '').trim().toLowerCase();
     const subject = String(req.body?.subject || '').trim();
     const body = String(req.body?.body || '').trim();
-    if (!to || !subject || !body) {
-      res.status(400).json({ error: 'Recipient email, subject, and body are required' });
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to) || !subject || !body) {
+      res.status(400).json({ error: 'Valid recipient email, subject, and body are required' });
       return;
     }
     const now = new Date().toISOString();
