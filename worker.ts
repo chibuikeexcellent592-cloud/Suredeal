@@ -1,9 +1,6 @@
-interface WorkerEnv {
-  ASSETS: {
-    fetch: (input: Request | string, init?: RequestInit) => Promise<Response>;
-  };
-  API_ORIGIN?: string;
-}
+import { SureDealStoreDO, type WorkerEnv } from './worker/backend.ts';
+
+export { SureDealStoreDO };
 
 const STRIP_PROXY_HEADERS = [
   'host',
@@ -35,58 +32,59 @@ export default {
 
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) {
       const rawOrigin = (env.API_ORIGIN || '').trim().replace(/\/+$/, '');
-      if (!rawOrigin) {
+      if (rawOrigin) {
+        let parsedOrigin: URL;
+        try {
+          parsedOrigin = new URL(rawOrigin);
+        } catch {
+          return jsonError(
+            'Invalid API_ORIGIN configured on this Cloudflare Worker. Provide a full https:// origin URL.',
+            502,
+          );
+        }
+
+        if (parsedOrigin.origin !== url.origin) {
+          const targetUrl = `${parsedOrigin.origin}${url.pathname}${url.search}`;
+          const proxyHeaders = new Headers(request.headers);
+          for (const h of STRIP_PROXY_HEADERS) {
+            proxyHeaders.delete(h);
+          }
+          proxyHeaders.set('x-forwarded-host', url.host);
+          proxyHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
+
+          const init: RequestInit = {
+            method: request.method,
+            headers: proxyHeaders,
+            redirect: 'manual',
+          };
+          if (request.method !== 'GET' && request.method !== 'HEAD') {
+            init.body = request.body;
+          }
+
+          try {
+            return await fetch(targetUrl, init);
+          } catch {
+            return jsonError(
+              'Unable to reach the external backend API server configured in API_ORIGIN.',
+              502,
+            );
+          }
+        }
+      }
+
+      if (!env.STORE_DO) {
         if (url.pathname.startsWith('/api/')) {
           return jsonError(
-            'Backend API server is not configured on this Cloudflare Worker. Set API_ORIGIN in Worker Variables or VITE_API_URL at build time.',
+            'STORE_DO Durable Object binding is missing in wrangler.jsonc. Redeploy using the updated wrangler.jsonc.',
             503,
           );
         }
         return new Response('Not found', { status: 404 });
       }
 
-      let parsedOrigin: URL;
-      try {
-        parsedOrigin = new URL(rawOrigin);
-      } catch {
-        return jsonError(
-          'Invalid API_ORIGIN configured on this Cloudflare Worker. Provide a full https:// origin URL.',
-          502,
-        );
-      }
-
-      if (parsedOrigin.origin === url.origin) {
-        return jsonError(
-          'API_ORIGIN cannot point to the Cloudflare Worker itself. Set API_ORIGIN to your deployed Node.js backend URL.',
-          502,
-        );
-      }
-
-      const targetUrl = `${parsedOrigin.origin}${url.pathname}${url.search}`;
-      const proxyHeaders = new Headers(request.headers);
-      for (const h of STRIP_PROXY_HEADERS) {
-        proxyHeaders.delete(h);
-      }
-      proxyHeaders.set('x-forwarded-host', url.host);
-      proxyHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
-
-      const init: RequestInit = {
-        method: request.method,
-        headers: proxyHeaders,
-        redirect: 'manual',
-      };
-      if (request.method !== 'GET' && request.method !== 'HEAD') {
-        init.body = request.body;
-      }
-
-      try {
-        return await fetch(targetUrl, init);
-      } catch {
-        return jsonError(
-          'Unable to reach the backend API server configured in API_ORIGIN. Verify the backend server is online.',
-          502,
-        );
-      }
+      const id = env.STORE_DO.idFromName('suredeal-primary');
+      const stub = env.STORE_DO.get(id);
+      return stub.fetch(request);
     }
 
     return env.ASSETS.fetch(request);
