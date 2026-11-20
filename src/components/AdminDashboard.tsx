@@ -102,9 +102,14 @@ type AdminTab =
 interface AdminDashboardProps {
   onBackHome?: () => void;
   onOpenWorkspace?: () => void;
+  onPreviewMaintenance?: () => void;
 }
 
-export function AdminDashboard({ onBackHome, onOpenWorkspace }: AdminDashboardProps) {
+export function AdminDashboard({
+  onBackHome,
+  onOpenWorkspace,
+  onPreviewMaintenance,
+}: AdminDashboardProps) {
   const { user, theme, toggleTheme, logout, notify, refreshCatalog } = useApp();
   const [data, setData] = useState<FullAdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -3038,6 +3043,7 @@ export function AdminDashboard({ onBackHome, onOpenWorkspace }: AdminDashboardPr
               data={data}
               onRefresh={loadAdmin}
               initialRecipientUserId={notifyTargetUserId}
+              onPreviewMaintenance={onPreviewMaintenance}
             />
           )}
           </main>

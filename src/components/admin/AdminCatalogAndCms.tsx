@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Bell,
   BookOpen,
+  Check,
   Crown,
   Edit3,
   Film,
@@ -43,6 +46,7 @@ import { applyWebsitePalette, COLOR_PRESETS, DEFAULT_PALETTE } from '../../lib/t
 import type {
   BoostingService,
   CustomSection,
+  CustomSectionProduct,
   EmailLog,
   MarketplaceCategory,
   MarketplaceListing,
@@ -93,6 +97,9 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [mktSpec, setMktSpec] = useState('');
   const [mktDescription, setMktDescription] = useState('');
   const [mktBuyWarning, setMktBuyWarning] = useState(data.settings.defaultBuyWarning || '');
+  const [mktBuyWarningLevel, setMktBuyWarningLevel] = useState<'serious' | 'info'>(
+    data.settings.defaultBuyWarningLevel || 'serious',
+  );
   const [mktTemplate, setMktTemplate] = useState('KEY-{{KEY4}}-{{KEY4}}-{{RAND4}}');
   const [mktImage, setMktImage] = useState(
     '/src/assets/images/marketplace_digital_vault_1794869408342.jpg',
@@ -104,6 +111,8 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [acctPassword, setAcctPassword] = useState('');
   const [acct2fa, setAcct2fa] = useState('');
   const [newCatName, setNewCatName] = useState('');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState('');
 
   // Full Product Edit Modal state
   const [editingListing, setEditingListing] = useState<MarketplaceListing | null>(null);
@@ -114,20 +123,22 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [editAcct2fa, setEditAcct2fa] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // SMS Service form
+  // SMS Service form & edit state
   const [svcName, setSvcName] = useState('');
   const [svcCat, setSvcCat] = useState('Social');
   const [svcPrice, setSvcPrice] = useState(1200);
   const [svcStock, setSvcStock] = useState(1000);
   const [svcTemplate, setSvcTemplate] = useState('Your verification code is {{CODE}}.');
+  const [editingSms, setEditingSms] = useState<SmsService | null>(null);
 
-  // Country form
+  // Country form & edit state
   const [cntName, setCntName] = useState('');
   const [cntCode, setCntCode] = useState('US');
   const [cntDial, setCntDial] = useState('+1');
   const [cntMult, setCntMult] = useState(1.0);
+  const [editingCountry, setEditingCountry] = useState<SmsCountry | null>(null);
 
-  // Boosting form
+  // Boosting form & edit state
   const [bstPlatform, setBstPlatform] = useState('Instagram');
   const [bstCategory, setBstCategory] = useState('Followers');
   const [bstName, setBstName] = useState('');
@@ -136,15 +147,25 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [bstMax, setBstMax] = useState(50000);
   const [bstSpeed, setBstSpeed] = useState('15K / day');
   const [bstRefill, setBstRefill] = useState('30-Day Refill');
+  const [editingBoost, setEditingBoost] = useState<BoostingService | null>(null);
 
-  // Custom Sections form
+  // Custom Sections form, AI Architect & edit state
   const [secName, setSecName] = useState('');
   const [secDesc, setSecDesc] = useState('');
+  const [secBadgeTag, setSecBadgeTag] = useState('');
+  const [secDefaultWarning, setSecDefaultWarning] = useState('');
+  const [secDefaultWarningLevel, setSecDefaultWarningLevel] = useState<'serious' | 'info'>('serious');
+  const [aiSecPrompt, setAiSecPrompt] = useState('');
+  const [aiSecBusy, setAiSecBusy] = useState(false);
+  const [editingSection, setEditingSection] = useState<CustomSection | null>(null);
+  const [editingSecProduct, setEditingSecProduct] = useState<CustomSectionProduct | null>(null);
+
   const [prodSectionId, setProdSectionId] = useState(data.customSections[0]?.id || '');
   const [prodTitle, setProdTitle] = useState('');
   const [prodSpec, setProdSpec] = useState('');
   const [prodDesc, setProdDesc] = useState('');
   const [prodWarning, setProdWarning] = useState('');
+  const [prodWarningLevel, setProdWarningLevel] = useState<'serious' | 'info'>('serious');
   const [prodPrice, setProdPrice] = useState(2500);
   const [prodStock, setProdStock] = useState(20);
   const [prodTemplate, setProdTemplate] = useState('ACCESS-{{KEY4}}-{{RAND4}}');
@@ -152,6 +173,34 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const syncAll = async () => {
     await onRefresh();
     await refreshCatalog();
+  };
+
+  const handleMoveOrder = async (
+    entity:
+      | 'marketplace_listings'
+      | 'marketplace_categories'
+      | 'sms_services'
+      | 'sms_countries'
+      | 'boosting_services'
+      | 'custom_sections',
+    items: { id: string }[],
+    index: number,
+    direction: -1 | 1,
+  ) => {
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= items.length) return;
+    const ordered = items.map((item) => item.id);
+    const [moved] = ordered.splice(index, 1);
+    ordered.splice(targetIdx, 0, moved);
+    try {
+      await apiFetch('/api/admin/catalog/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ entity, orderedIds: ordered }),
+      });
+      await syncAll();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Reorder failed', 'error');
+    }
   };
 
   const handleUploadImage = async (
@@ -229,6 +278,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
           shortSpec: editingListing.shortSpec,
           description: editingListing.description,
           buyWarning: editingListing.buyWarning,
+          buyWarningLevel: editingListing.buyWarningLevel === 'info' ? 'info' : 'serious',
           deliveryType: editingListing.deliveryType,
           price: Number(editingListing.price),
           stock: finalKeys.length > 0 ? finalKeys.length : Number(editingListing.stock),
@@ -315,6 +365,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       shortSpec: mktSpec,
                       description: mktDescription,
                       buyWarning: mktBuyWarning,
+                      buyWarningLevel: mktBuyWarningLevel,
                       credentialTemplate: mktTemplate,
                       stockKeys: finalAccounts,
                       imageUrl: mktImage,
@@ -422,6 +473,35 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 placeholder="Custom Buy Page Warning (shown in alert box before checkout)"
                 className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20"
               />
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                  Buy Warning Tone
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMktBuyWarningLevel('serious')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      mktBuyWarningLevel === 'serious'
+                        ? 'bg-amber-100 text-amber-800 border-amber-400 dark:bg-amber-950/60 dark:text-amber-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Serious (Amber)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMktBuyWarningLevel('info')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      mktBuyWarningLevel === 'info'
+                        ? 'bg-blue-100 text-blue-800 border-blue-400 dark:bg-blue-950/60 dark:text-blue-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Info Tip (Blue)
+                  </button>
+                </div>
+              </div>
 
               {/* Sequential Login + Password + 2FA Account Builder */}
               <div className="rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/20 p-3.5 space-y-2.5">
@@ -602,29 +682,118 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 </button>
               </div>
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {data.marketplaceCategories.map((c) => (
-                  <div key={c.id} className="py-2 flex items-center justify-between text-xs">
-                    <span className="font-medium text-slate-800 dark:text-slate-200">{c.name}</span>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiFetch(`/api/admin/marketplace-categories/${c.id}`, {
-                            method: 'DELETE',
-                          });
-                          await syncAll();
-                        } catch (err) {
-                          notify(
-                            err instanceof Error ? err.message : 'Failed to delete category',
-                            'error',
-                          );
-                        }
-                      }}
-                      className="text-rose-500 hover:text-rose-600 cursor-pointer"
-                      aria-label={`Delete ${c.name}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                {data.marketplaceCategories.map((c, idx) => (
+                  <div key={c.id} className="py-2 flex items-center justify-between gap-2 text-xs">
+                    {editingCatId === c.id ? (
+                      <div className="flex-1 flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={editingCatName}
+                          onChange={(e) => setEditingCatName(e.target.value)}
+                          className="flex-1 px-2.5 py-1 text-xs rounded-lg border border-blue-300 dark:border-blue-700 bg-slate-50 dark:bg-slate-950"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!editingCatName.trim()) return;
+                            try {
+                              await apiFetch(`/api/admin/marketplace-categories/${c.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ name: editingCatName.trim() }),
+                              });
+                              setEditingCatId(null);
+                              notify('Category renamed!', 'success');
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Rename failed', 'error');
+                            }
+                          }}
+                          className="p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded cursor-pointer"
+                          aria-label="Save category name"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCatId(null)}
+                          className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                          aria-label="Cancel rename"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                          {c.name}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() =>
+                              handleMoveOrder(
+                                'marketplace_categories',
+                                data.marketplaceCategories,
+                                idx,
+                                -1,
+                              )
+                            }
+                            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                            aria-label={`Move ${c.name} up`}
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === data.marketplaceCategories.length - 1}
+                            onClick={() =>
+                              handleMoveOrder(
+                                'marketplace_categories',
+                                data.marketplaceCategories,
+                                idx,
+                                1,
+                              )
+                            }
+                            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                            aria-label={`Move ${c.name} down`}
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCatId(c.id);
+                              setEditingCatName(c.name);
+                            }}
+                            className="p-1 text-blue-600 hover:text-blue-700 cursor-pointer"
+                            aria-label={`Rename ${c.name}`}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/admin/marketplace-categories/${c.id}`, {
+                                  method: 'DELETE',
+                                });
+                                await syncAll();
+                              } catch (err) {
+                                notify(
+                                  err instanceof Error ? err.message : 'Failed to delete category',
+                                  'error',
+                                );
+                              }
+                            }}
+                            className="p-1 text-rose-500 hover:text-rose-600 cursor-pointer"
+                            aria-label={`Delete ${c.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -645,7 +814,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {data.marketplaceListings.map((item) => (
+              {data.marketplaceListings.map((item, idx) => (
                 <div key={item.id} className="py-4 space-y-2.5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -661,14 +830,42 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                         {item.description || item.shortSpec}
                       </p>
                       {item.buyWarning && (
-                        <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1 flex items-center gap-1 line-clamp-1">
+                        <p
+                          className={`text-[11px] mt-1 flex items-center gap-1 line-clamp-1 ${
+                            item.buyWarningLevel === 'info'
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-amber-700 dark:text-amber-400'
+                          }`}
+                        >
                           <AlertTriangle className="w-3 h-3 shrink-0" />
-                          Warning: {item.buyWarning}
+                          {item.buyWarningLevel === 'info' ? 'Notice' : 'Warning'}: {item.buyWarning}
                         </p>
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() =>
+                          handleMoveOrder('marketplace_listings', data.marketplaceListings, idx, -1)
+                        }
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                        title="Move product up"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === data.marketplaceListings.length - 1}
+                        onClick={() =>
+                          handleMoveOrder('marketplace_listings', data.marketplaceListings, idx, 1)
+                        }
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                        title="Move product down"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
                       <input
                         type="number"
                         min={0}
@@ -924,10 +1121,40 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
               />
             </div>
 
-            <div>
-              <label className="block text-[11px] font-bold uppercase text-amber-700 dark:text-amber-400 mb-1">
-                Admin Buy Page Warning Notice (Shown to user before purchase)
-              </label>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-[11px] font-bold uppercase text-amber-700 dark:text-amber-400">
+                  Admin Buy Page Warning Notice (Shown to user before purchase)
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingListing({ ...editingListing, buyWarningLevel: 'serious' })
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      (editingListing.buyWarningLevel || 'serious') === 'serious'
+                        ? 'bg-amber-100 text-amber-800 border-amber-400 dark:bg-amber-950/60 dark:text-amber-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Serious (Amber)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingListing({ ...editingListing, buyWarningLevel: 'info' })
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      editingListing.buyWarningLevel === 'info'
+                        ? 'bg-blue-100 text-blue-800 border-blue-400 dark:bg-blue-950/60 dark:text-blue-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Info Tip (Blue)
+                  </button>
+                </div>
+              </div>
               <textarea
                 rows={3}
                 value={editingListing.buyWarning || ''}
@@ -1203,7 +1430,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
               SMS Services (Edit Base Price Inline)
             </h3>
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {data.smsServices.map((svc) => (
+              {data.smsServices.map((svc, idx) => (
                 <div key={svc.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-slate-900 dark:text-white">{svc.name}</p>
@@ -1211,7 +1438,25 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       {svc.category} · {svc.successRate}% rate · {svc.stock} stock
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => handleMoveOrder('sms_services', data.smsServices, idx, -1)}
+                      className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                      title="Move up"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === data.smsServices.length - 1}
+                      onClick={() => handleMoveOrder('sms_services', data.smsServices, idx, 1)}
+                      className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                      title="Move down"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
                     <span className="text-xs text-slate-400">{symbol}</span>
                     <input
                       type="number"
@@ -1239,6 +1484,14 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       }}
                       className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setEditingSms({ ...svc })}
+                      className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      Edit
+                    </button>
                     <button
                       type="button"
                       onClick={async () => {
@@ -1351,7 +1604,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
           </form>
 
           <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 divide-y divide-slate-100 dark:divide-slate-800">
-            {data.smsCountries.map((c) => (
+            {data.smsCountries.map((c, idx) => (
               <div key={c.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-slate-900 dark:text-white">
@@ -1359,7 +1612,25 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   </p>
                   <p className="text-xs text-slate-500">ISO: {c.code}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    onClick={() => handleMoveOrder('sms_countries', data.smsCountries, idx, -1)}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                    title="Move up"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === data.smsCountries.length - 1}
+                    onClick={() => handleMoveOrder('sms_countries', data.smsCountries, idx, 1)}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                    title="Move down"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
                   <input
                     type="number"
                     step="0.05"
@@ -1387,6 +1658,14 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     }}
                     className="w-20 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setEditingCountry({ ...c })}
+                    className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    Edit
+                  </button>
                   <button
                     type="button"
                     onClick={async () => {
@@ -1533,7 +1812,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
           </form>
 
           <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 divide-y divide-slate-100 dark:divide-slate-800">
-            {data.boostingServices.map((b) => (
+            {data.boostingServices.map((b, idx) => (
               <div key={b.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
@@ -1543,7 +1822,29 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     {b.platform} · {b.speedLabel} · {b.refillPolicy}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    onClick={() =>
+                      handleMoveOrder('boosting_services', data.boostingServices, idx, -1)
+                    }
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                    title="Move up"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === data.boostingServices.length - 1}
+                    onClick={() =>
+                      handleMoveOrder('boosting_services', data.boostingServices, idx, 1)
+                    }
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                    title="Move down"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
                   <input
                     type="number"
                     min={0}
@@ -1570,6 +1871,14 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     }}
                     className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setEditingBoost({ ...b })}
+                    className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    Edit
+                  </button>
                   <button
                     type="button"
                     onClick={async () => {
@@ -1616,16 +1925,125 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
       {subTab === 'sections' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <div className="lg:col-span-5 space-y-5">
+            {/* AI Section Architect */}
+            <div className="bg-gradient-to-br from-violet-950 via-slate-900 to-blue-950 text-white border border-violet-700/50 rounded-2xl p-5 space-y-3 shadow-md">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-display text-sm font-bold flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  AI Section Architect
+                </h3>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/10 text-violet-200">
+                  Gemini Ready
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Enter a section name &amp; goal — AI writes the description, badge tag, buy warning &amp; 2 starter products automatically.
+              </p>
+              <input
+                type="text"
+                value={secName}
+                onChange={(e) => setSecName(e.target.value)}
+                placeholder="Section Name (e.g. AI Pro Tools, Gift Cards)"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-white/10 text-white placeholder:text-slate-400"
+              />
+              <input
+                type="text"
+                value={aiSecPrompt}
+                onChange={(e) => setAiSecPrompt(e.target.value)}
+                placeholder="Target audience or pricing goal (optional)"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-white/15 bg-white/10 text-white placeholder:text-slate-400"
+              />
+              <button
+                type="button"
+                disabled={aiSecBusy || !secName.trim()}
+                onClick={async () => {
+                  setAiSecBusy(true);
+                  try {
+                    const aiRes = await apiFetch<{
+                      setup: {
+                        refinedDescription: string;
+                        badgeTag: string;
+                        accentColor: string;
+                        recommendedIcon: string;
+                        defaultBuyWarning: string;
+                        defaultBuyWarningLevel: 'serious' | 'info';
+                        aiNotes: string;
+                        starterProducts: Array<{
+                          title: string;
+                          shortSpec: string;
+                          description: string;
+                          buyWarning: string;
+                          buyWarningLevel: 'serious' | 'info';
+                          price: number;
+                          stock: number;
+                          credentialTemplate: string;
+                        }>;
+                      };
+                    }>('/api/admin/sections/ai-setup', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        name: secName.trim(),
+                        description: secDesc,
+                        goal: aiSecPrompt,
+                      }),
+                    });
+                    const setup = aiRes.setup;
+                    const created = await apiFetch<{ section: CustomSection }>('/api/admin/sections', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        name: secName.trim(),
+                        description: setup.refinedDescription,
+                        badgeTag: setup.badgeTag,
+                        accentColor: setup.accentColor,
+                        icon: setup.recommendedIcon,
+                        defaultBuyWarning: setup.defaultBuyWarning,
+                        defaultBuyWarningLevel: setup.defaultBuyWarningLevel,
+                        aiNotes: setup.aiNotes,
+                        products: setup.starterProducts,
+                      }),
+                    });
+                    setSecName('');
+                    setSecDesc('');
+                    setSecBadgeTag('');
+                    setSecDefaultWarning('');
+                    setAiSecPrompt('');
+                    setProdSectionId(created.section.id);
+                    notify(
+                      `AI created "${created.section.name}" with ${created.section.products.length} starter products!`,
+                      'success',
+                    );
+                    await syncAll();
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : 'AI section setup failed', 'error');
+                  } finally {
+                    setAiSecBusy(false);
+                  }
+                }}
+                className="w-full py-2.5 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 rounded-xl cursor-pointer inline-flex items-center justify-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {aiSecBusy ? 'Architecting Section...' : 'Generate & Publish Section with AI'}
+              </button>
+            </div>
+
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
                   const res = await apiFetch<{ section: CustomSection }>('/api/admin/sections', {
                     method: 'POST',
-                    body: JSON.stringify({ name: secName, description: secDesc }),
+                    body: JSON.stringify({
+                      name: secName,
+                      description: secDesc,
+                      badgeTag: secBadgeTag,
+                      defaultBuyWarning: secDefaultWarning,
+                      defaultBuyWarningLevel: secDefaultWarningLevel,
+                    }),
                   });
                   setSecName('');
                   setSecDesc('');
+                  setSecBadgeTag('');
+                  setSecDefaultWarning('');
                   setProdSectionId(res.section.id);
                   notify('Custom navigation section created!', 'success');
                   await syncAll();
@@ -1639,14 +2057,24 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 <Layers className="w-4 h-4 text-blue-600" />
                 Create Custom Storefront Section
               </h3>
-              <input
-                type="text"
-                required
-                value={secName}
-                onChange={(e) => setSecName(e.target.value)}
-                placeholder="Section Name (e.g. Streaming Accounts)"
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-              />
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  required
+                  value={secName}
+                  onChange={(e) => setSecName(e.target.value)}
+                  placeholder="Section Name (e.g. Streaming)"
+                  className="col-span-2 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={secBadgeTag}
+                  onChange={(e) => setSecBadgeTag(e.target.value)}
+                  placeholder="Badge (NEW)"
+                  className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
               <input
                 type="text"
                 value={secDesc}
@@ -1654,6 +2082,40 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 placeholder="Short description"
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
+              <textarea
+                rows={2}
+                value={secDefaultWarning}
+                onChange={(e) => setSecDefaultWarning(e.target.value)}
+                placeholder="Default checkout notice for products in this section (optional)"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20"
+              />
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[11px] font-semibold text-slate-500">Default Notice Tone</span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSecDefaultWarningLevel('serious')}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      secDefaultWarningLevel === 'serious'
+                        ? 'bg-amber-100 text-amber-800 border-amber-400'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Serious (Amber)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSecDefaultWarningLevel('info')}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      secDefaultWarningLevel === 'info'
+                        ? 'bg-blue-100 text-blue-800 border-blue-400'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Info Tip (Blue)
+                  </button>
+                </div>
+              </div>
               <button
                 type="submit"
                 className="w-full py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
@@ -1675,6 +2137,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                         shortSpec: prodSpec,
                         description: prodDesc,
                         buyWarning: prodWarning,
+                        buyWarningLevel: prodWarningLevel,
                         price: Number(prodPrice),
                         stock: Number(prodStock),
                         credentialTemplate: prodTemplate,
@@ -1735,6 +2198,33 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   placeholder="Buy Warning Notice"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20"
                 />
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[11px] font-semibold text-slate-500">Notice Tone</span>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setProdWarningLevel('serious')}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                        prodWarningLevel === 'serious'
+                          ? 'bg-amber-100 text-amber-800 border-amber-400'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                      }`}
+                    >
+                      Serious (Amber)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProdWarningLevel('info')}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                        prodWarningLevel === 'info'
+                          ? 'bg-blue-100 text-blue-800 border-blue-400'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                      }`}
+                    >
+                      Info Tip (Blue)
+                    </button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="number"
@@ -1774,60 +2264,113 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             </h3>
             {data.customSections.length === 0 ? (
               <p className="text-xs text-slate-500 py-8 text-center">
-                No custom sections created yet. Add one on the left to extend your navigation menu.
+                No custom sections created yet. Use AI Section Architect or the form on the left.
               </p>
             ) : (
-              data.customSections.map((sec) => (
+              data.customSections.map((sec, idx) => (
                 <div
                   key={sec.id}
                   className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className="text-sm font-bold text-slate-900 dark:text-white">{sec.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white">{sec.name}</p>
+                        {sec.badgeTag && (
+                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                            {sec.badgeTag}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-slate-500">{sec.description}</p>
+                      {sec.aiNotes && (
+                        <p className="text-[11px] text-violet-600 dark:text-violet-400 mt-0.5">
+                          AI Note: {sec.aiNotes}
+                        </p>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiFetch(`/api/admin/sections/${sec.id}`, { method: 'DELETE' });
-                          await syncAll();
-                        } catch (err) {
-                          notify(err instanceof Error ? err.message : 'Failed to delete section', 'error');
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() =>
+                          handleMoveOrder('custom_sections', data.customSections, idx, -1)
                         }
-                      }}
-                      className="text-rose-500 hover:text-rose-600 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                        className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                        title="Move section up"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === data.customSections.length - 1}
+                        onClick={() =>
+                          handleMoveOrder('custom_sections', data.customSections, idx, 1)
+                        }
+                        className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                        title="Move section down"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingSection({ ...sec })}
+                        className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await apiFetch(`/api/admin/sections/${sec.id}`, { method: 'DELETE' });
+                            await syncAll();
+                          } catch (err) {
+                            notify(err instanceof Error ? err.message : 'Failed to delete section', 'error');
+                          }
+                        }}
+                        className="p-1 text-rose-500 hover:text-rose-600 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   {sec.products.length > 0 && (
                     <div className="divide-y divide-slate-100 dark:divide-slate-800 pt-2 border-t border-slate-100 dark:border-slate-800">
                       {sec.products.map((p) => (
-                        <div key={p.id} className="py-2 flex items-center justify-between text-xs">
-                          <span>
+                        <div key={p.id} className="py-2 flex items-center justify-between gap-2 text-xs">
+                          <span className="min-w-0 truncate">
                             {p.title} · <span className="font-mono">{formatNaira(p.price, symbol)}</span> ({p.stock})
                           </span>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await apiFetch(`/api/admin/section-products/${p.id}`, {
-                                  method: 'DELETE',
-                                });
-                                await syncAll();
-                              } catch (err) {
-                                notify(
-                                  err instanceof Error ? err.message : 'Failed to remove product',
-                                  'error',
-                                );
-                              }
-                            }}
-                            className="text-rose-500 cursor-pointer"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setEditingSecProduct({ ...p })}
+                              className="text-blue-600 font-semibold cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/api/admin/section-products/${p.id}`, {
+                                    method: 'DELETE',
+                                  });
+                                  await syncAll();
+                                } catch (err) {
+                                  notify(
+                                    err instanceof Error ? err.message : 'Failed to remove product',
+                                    'error',
+                                  );
+                                }
+                              }}
+                              className="text-rose-500 cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1836,6 +2379,504 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {/* INLINE EDIT MODALS FOR SMS, COUNTRIES, BOOSTING, SECTIONS & SECTION PRODUCTS */}
+      {editingSms && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setEditingSms(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await apiFetch(`/api/admin/sms-services/${editingSms.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify(editingSms),
+                });
+                setEditingSms(null);
+                notify('SMS service updated!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Update failed', 'error');
+              }
+            }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-3 shadow-2xl"
+          >
+            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+              Edit SMS Service
+            </h3>
+            <input
+              type="text"
+              required
+              value={editingSms.name}
+              onChange={(e) => setEditingSms({ ...editingSms, name: e.target.value })}
+              placeholder="Service Name"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                value={editingSms.category}
+                onChange={(e) => setEditingSms({ ...editingSms, category: e.target.value })}
+                placeholder="Category"
+                className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="number"
+                value={editingSms.basePrice}
+                onChange={(e) => setEditingSms({ ...editingSms, basePrice: Number(e.target.value) })}
+                placeholder="Price"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="number"
+                value={editingSms.stock}
+                onChange={(e) => setEditingSms({ ...editingSms, stock: Number(e.target.value) })}
+                placeholder="Stock"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <input
+              type="text"
+              value={editingSms.sampleTemplate}
+              onChange={(e) => setEditingSms({ ...editingSms, sampleTemplate: e.target.value })}
+              placeholder="OTP SMS Template"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingSms(null)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer"
+              >
+                Save Service
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingCountry && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setEditingCountry(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await apiFetch(`/api/admin/sms-countries/${editingCountry.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify(editingCountry),
+                });
+                setEditingCountry(null);
+                notify('Country updated!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Update failed', 'error');
+              }
+            }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-3 shadow-2xl"
+          >
+            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+              Edit SMS Country
+            </h3>
+            <input
+              type="text"
+              required
+              value={editingCountry.name}
+              onChange={(e) => setEditingCountry({ ...editingCountry, name: e.target.value })}
+              placeholder="Country Name"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                value={editingCountry.code}
+                onChange={(e) => setEditingCountry({ ...editingCountry, code: e.target.value })}
+                placeholder="ISO"
+                className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="text"
+                value={editingCountry.dialCode}
+                onChange={(e) => setEditingCountry({ ...editingCountry, dialCode: e.target.value })}
+                placeholder="Dial Code"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="number"
+                step="0.05"
+                value={editingCountry.multiplier}
+                onChange={(e) =>
+                  setEditingCountry({ ...editingCountry, multiplier: Number(e.target.value) })
+                }
+                placeholder="Multiplier"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingCountry(null)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer"
+              >
+                Save Country
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingBoost && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setEditingBoost(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await apiFetch(`/api/admin/boosting-services/${editingBoost.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify(editingBoost),
+                });
+                setEditingBoost(null);
+                notify('Boosting package updated!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Update failed', 'error');
+              }
+            }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-3 shadow-2xl"
+          >
+            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+              Edit Boosting Package
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={editingBoost.platform}
+                onChange={(e) => setEditingBoost({ ...editingBoost, platform: e.target.value })}
+                placeholder="Platform"
+                className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="text"
+                value={editingBoost.category}
+                onChange={(e) => setEditingBoost({ ...editingBoost, category: e.target.value })}
+                placeholder="Category"
+                className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <input
+              type="text"
+              required
+              value={editingBoost.name}
+              onChange={(e) => setEditingBoost({ ...editingBoost, name: e.target.value })}
+              placeholder="Package Name"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="number"
+                value={editingBoost.ratePer1k}
+                onChange={(e) =>
+                  setEditingBoost({ ...editingBoost, ratePer1k: Number(e.target.value) })
+                }
+                placeholder="Rate/1K"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="number"
+                value={editingBoost.minQty}
+                onChange={(e) =>
+                  setEditingBoost({ ...editingBoost, minQty: Number(e.target.value) })
+                }
+                placeholder="Min"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="number"
+                value={editingBoost.maxQty}
+                onChange={(e) =>
+                  setEditingBoost({ ...editingBoost, maxQty: Number(e.target.value) })
+                }
+                placeholder="Max"
+                className="px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={editingBoost.speedLabel}
+                onChange={(e) => setEditingBoost({ ...editingBoost, speedLabel: e.target.value })}
+                placeholder="Speed"
+                className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="text"
+                value={editingBoost.refillPolicy}
+                onChange={(e) => setEditingBoost({ ...editingBoost, refillPolicy: e.target.value })}
+                placeholder="Refill Policy"
+                className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingBoost(null)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer"
+              >
+                Save Package
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingSection && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setEditingSection(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await apiFetch(`/api/admin/sections/${editingSection.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({
+                    name: editingSection.name,
+                    description: editingSection.description,
+                    badgeTag: editingSection.badgeTag || '',
+                    defaultBuyWarning: editingSection.defaultBuyWarning || '',
+                    defaultBuyWarningLevel: editingSection.defaultBuyWarningLevel || 'serious',
+                    active: editingSection.active,
+                  }),
+                });
+                setEditingSection(null);
+                notify('Section updated!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Section update failed', 'error');
+              }
+            }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-3 shadow-2xl"
+          >
+            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+              Edit Custom Section
+            </h3>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                required
+                value={editingSection.name}
+                onChange={(e) => setEditingSection({ ...editingSection, name: e.target.value })}
+                placeholder="Section Name"
+                className="col-span-2 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="text"
+                maxLength={12}
+                value={editingSection.badgeTag || ''}
+                onChange={(e) => setEditingSection({ ...editingSection, badgeTag: e.target.value })}
+                placeholder="Badge (NEW)"
+                className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <input
+              type="text"
+              value={editingSection.description}
+              onChange={(e) =>
+                setEditingSection({ ...editingSection, description: e.target.value })
+              }
+              placeholder="Section description"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <textarea
+              rows={2}
+              value={editingSection.defaultBuyWarning || ''}
+              onChange={(e) =>
+                setEditingSection({ ...editingSection, defaultBuyWarning: e.target.value })
+              }
+              placeholder="Default Checkout Warning"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingSection(null)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer"
+              >
+                Save Section
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingSecProduct && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setEditingSecProduct(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await apiFetch(`/api/admin/section-products/${editingSecProduct.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify(editingSecProduct),
+                });
+                setEditingSecProduct(null);
+                notify('Section product updated!', 'success');
+                await syncAll();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Product update failed', 'error');
+              }
+            }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-3 shadow-2xl"
+          >
+            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+              Edit Section Product
+            </h3>
+            <input
+              type="text"
+              required
+              value={editingSecProduct.title}
+              onChange={(e) =>
+                setEditingSecProduct({ ...editingSecProduct, title: e.target.value })
+              }
+              placeholder="Title"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <input
+              type="text"
+              value={editingSecProduct.shortSpec}
+              onChange={(e) =>
+                setEditingSecProduct({ ...editingSecProduct, shortSpec: e.target.value })
+              }
+              placeholder="Short Spec"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <textarea
+              rows={2}
+              value={editingSecProduct.description}
+              onChange={(e) =>
+                setEditingSecProduct({ ...editingSecProduct, description: e.target.value })
+              }
+              placeholder="Full Description"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <textarea
+              rows={2}
+              value={editingSecProduct.buyWarning}
+              onChange={(e) =>
+                setEditingSecProduct({ ...editingSecProduct, buyWarning: e.target.value })
+              }
+              placeholder="Buy Warning"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20"
+            />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[11px] font-semibold text-slate-500">Notice Tone</span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditingSecProduct({ ...editingSecProduct, buyWarningLevel: 'serious' })
+                  }
+                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                    (editingSecProduct.buyWarningLevel || 'serious') === 'serious'
+                      ? 'bg-amber-100 text-amber-800 border-amber-400'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                  }`}
+                >
+                  Serious (Amber)
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditingSecProduct({ ...editingSecProduct, buyWarningLevel: 'info' })
+                  }
+                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                    editingSecProduct.buyWarningLevel === 'info'
+                      ? 'bg-blue-100 text-blue-800 border-blue-400'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                  }`}
+                >
+                  Info Tip (Blue)
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                value={editingSecProduct.price}
+                onChange={(e) =>
+                  setEditingSecProduct({ ...editingSecProduct, price: Number(e.target.value) })
+                }
+                placeholder="Price"
+                className="px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="number"
+                value={editingSecProduct.stock}
+                onChange={(e) =>
+                  setEditingSecProduct({ ...editingSecProduct, stock: Number(e.target.value) })
+                }
+                placeholder="Stock"
+                className="px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingSecProduct(null)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer"
+              >
+                Save Product
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
@@ -1847,11 +2888,13 @@ export function AdminCommsAndSettingsPanel({
   data,
   onRefresh,
   initialRecipientUserId,
+  onPreviewMaintenance,
 }: {
   tab: 'notifications' | 'tutorials' | 'support' | 'settings' | 'cms';
   data: AdminOverviewPayload;
   onRefresh: () => Promise<void>;
   initialRecipientUserId?: string | null;
+  onPreviewMaintenance?: () => void;
 }) {
   const { notify, refreshCatalog } = useApp();
   const symbol = data.settings.currencySymbol || '₦';
@@ -1998,10 +3041,19 @@ export function AdminCommsAndSettingsPanel({
       s.ctaSubtitle ??
       'Create your free account, open Wallet & Fund inside your dashboard to top up your Naira balance, and access every growth service right away.',
     maintenanceHeadline:
-      s.maintenanceHeadline ?? 'Scheduled system refinement in progress.',
+      s.maintenanceHeadline ?? "We're currently performing scheduled maintenance.",
     maintenanceMessage:
       s.maintenanceMessage ??
-      'We are updating our systems to deliver faster service. All Naira balances, receipts, and Vault credentials remain completely safe.',
+      "We're currently performing scheduled maintenance. Please check back shortly. All wallet balances, receipts, and Vault credentials remain completely safe.",
+    siteTagline: s.siteTagline ?? 'Trusted Digital Tools',
+    communityChannelEnabled: s.communityChannelEnabled ?? true,
+    communityChannelPlatform: s.communityChannelPlatform ?? 'whatsapp',
+    communityChannelTitle: s.communityChannelTitle ?? 'Join Our Community',
+    communityChannelSubtitle:
+      s.communityChannelSubtitle ?? 'Get restock alerts & flash deals',
+    communityChannelUrl: s.communityChannelUrl ?? '',
+    communityChannelCta: s.communityChannelCta ?? 'Join Channel',
+    defaultBuyWarningLevel: s.defaultBuyWarningLevel ?? 'serious',
   });
 
   // Global Settings + CMS state
@@ -3335,10 +4387,40 @@ export function AdminCommsAndSettingsPanel({
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
             </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold mb-1 text-amber-700 dark:text-amber-400">
-                Default Buy Page Warning (Fallback for products without a custom warning)
-              </label>
+            <div className="md:col-span-2 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  Default Buy Page Warning (Fallback for products without a custom warning)
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormSettings({ ...formSettings, defaultBuyWarningLevel: 'serious' })
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      (formSettings.defaultBuyWarningLevel || 'serious') === 'serious'
+                        ? 'bg-amber-100 text-amber-800 border-amber-400'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Serious (Amber)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormSettings({ ...formSettings, defaultBuyWarningLevel: 'info' })
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                      formSettings.defaultBuyWarningLevel === 'info'
+                        ? 'bg-blue-100 text-blue-800 border-blue-400'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-500'
+                    }`}
+                  >
+                    Info Tip (Blue)
+                  </button>
+                </div>
+              </div>
               <textarea
                 rows={2}
                 value={formSettings.defaultBuyWarning}
@@ -3483,6 +4565,18 @@ export function AdminCommsAndSettingsPanel({
               type="text"
               value={formSettings.siteName}
               onChange={(e) => setFormSettings({ ...formSettings, siteName: e.target.value })}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">
+              Header Subtitle / Brand Tagline
+            </label>
+            <input
+              type="text"
+              value={formSettings.siteTagline || ''}
+              onChange={(e) => setFormSettings({ ...formSettings, siteTagline: e.target.value })}
+              placeholder="e.g. Digital solutions for every market"
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             />
           </div>
@@ -3939,9 +5033,22 @@ export function AdminCommsAndSettingsPanel({
                       : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40'
                 }`}
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-xs font-bold text-slate-900 dark:text-white">{ctrl.title}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">{ctrl.desc}</p>
+                  {ctrl.key === 'maintenanceMode' && onPreviewMaintenance && (
+                    <button
+                      type="button"
+                      onClick={(ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        onPreviewMaintenance();
+                      }}
+                      className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 dark:bg-amber-950/70 dark:text-amber-300 cursor-pointer"
+                    >
+                      Preview Maintenance Screen
+                    </button>
+                  )}
                 </div>
                 <input
                   type="checkbox"
@@ -3954,6 +5061,100 @@ export function AdminCommsAndSettingsPanel({
               </label>
             );
           })}
+        </div>
+      </div>
+
+      {/* Community Channel Drawer Card & Default Buy Warning */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 text-emerald-600" />
+            <div>
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Sidebar Community Channel Card &amp; Checkout Warning
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Customize the WhatsApp / Telegram channel invite card at the bottom of the navigation drawer.
+              </p>
+            </div>
+          </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formSettings.communityChannelEnabled ?? true}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, communityChannelEnabled: e.target.checked })
+              }
+            />
+            {formSettings.communityChannelEnabled ?? true ? 'Card Visible' : 'Hidden'}
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Channel Platform</label>
+            <select
+              value={formSettings.communityChannelPlatform || 'whatsapp'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  communityChannelPlatform: e.target.value as 'whatsapp' | 'telegram',
+                })
+              }
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="whatsapp">WhatsApp Channel / Group</option>
+              <option value="telegram">Telegram Channel</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Card Title</label>
+            <input
+              type="text"
+              value={formSettings.communityChannelTitle || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, communityChannelTitle: e.target.value })
+              }
+              placeholder="Join Our Community"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Button Label</label>
+            <input
+              type="text"
+              value={formSettings.communityChannelCta || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, communityChannelCta: e.target.value })
+              }
+              placeholder="Join Channel"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Invite Link URL</label>
+            <input
+              type="text"
+              value={formSettings.communityChannelUrl || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, communityChannelUrl: e.target.value })
+              }
+              placeholder="https://whatsapp.com/channel/..."
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <label className="block text-xs font-semibold mb-1">Card Subtitle</label>
+            <input
+              type="text"
+              value={formSettings.communityChannelSubtitle || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, communityChannelSubtitle: e.target.value })
+              }
+              placeholder="Get instant restock alerts & flash promo codes"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
         </div>
       </div>
 

@@ -19,7 +19,10 @@ import type {
   SmsCountry,
   SmsService,
 } from '../src/types.ts';
-import { verifyMoniepointReceiptWithAiWeb } from './ai.ts';
+import {
+  generateCustomSectionSetupWithAiWeb,
+  verifyMoniepointReceiptWithAiWeb,
+} from './ai.ts';
 import {
   base64ToBytes,
   buildCredentialFromTemplateWeb,
@@ -97,6 +100,16 @@ const UPLOAD_CHUNK_BYTES = 512 * 1024;
 function toPublicUser(user: StoredUser): PublicUser {
   const { passwordHash: _ignored, ...rest } = user;
   return rest;
+}
+
+function reorderByIds<T extends { id: string }>(items: T[], orderedIds: string[]): T[] {
+  const rank = new Map<string, number>();
+  orderedIds.forEach((id, idx) => rank.set(id, idx));
+  return [...items].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id)! : Number.MAX_SAFE_INTEGER;
+    const rb = rank.has(b.id) ? rank.get(b.id)! : Number.MAX_SAFE_INTEGER;
+    return ra - rb;
+  });
 }
 
 function getCorsHeaders(request: Request, env: WorkerEnv): Record<string, string> {
@@ -485,8 +498,44 @@ export class SureDealStoreDO {
     this.scheduleNextSmsExpiryAlarm();
   }
 
+  private creditReferrerOnFirstVerifiedDeposit(depositor: StoredUser, now: string): boolean {
+    if (!depositor.referredBy || depositor.referralRewardClaimed) {
+      return false;
+    }
+    const db = this.db;
+    const inviter = db.users.find((u) => u.id === depositor.referredBy);
+    depositor.referralRewardClaimed = true;
+    const bonus = db.settings.referralBonusAmount || 0;
+    if (!inviter || bonus <= 0) {
+      return false;
+    }
+    inviter.balance += bonus;
+    db.transactions.unshift({
+      id: makeId('tx'),
+      userId: inviter.id,
+      userName: inviter.name,
+      userEmail: inviter.email,
+      type: 'referral_bonus',
+      amount: bonus,
+      status: 'completed',
+      description: `Referral bonus unlocked on ${depositor.email}'s first verified deposit`,
+      createdAt: now,
+    });
+    db.notifications.unshift({
+      id: makeId('ntf'),
+      title: 'Referral Bonus Credited',
+      message: `You earned ${db.settings.currencySymbol}${bonus.toLocaleString()} because ${depositor.name} completed their first verified deposit.`,
+      type: 'success',
+      targetUserId: inviter.id,
+      readBy: [],
+      createdAt: now,
+    });
+    return true;
+  }
+
   private async authenticate(
     request: Request,
+    options?: { allowDuringMaintenance?: boolean },
   ): Promise<{ user: StoredUser } | { errorResponse: Response }> {
     const authHeader = request.headers.get('authorization') || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -530,7 +579,7 @@ export class SureDealStoreDO {
         ),
       };
     }
-    if (db.settings.maintenanceMode && user.role !== 'admin') {
+    if (!options?.allowDuringMaintenance && db.settings.maintenanceMode && user.role !== 'admin') {
       return {
         errorResponse: jsonResponse(
           { error: 'Platform is currently in maintenance mode.' },
@@ -599,6 +648,24 @@ export class SureDealStoreDO {
           service: 'suredeal-store-api',
           runtime: 'cloudflare-workers-do',
           timestamp: new Date().toISOString(),
+        });
+      }
+
+      // --- PUBLIC MAINTENANCE STATUS ---
+      if (method === 'GET' && pathname === '/api/public/maintenance-status') {
+        const s = this.db.settings;
+        return okJson({
+          maintenanceMode: Boolean(s.maintenanceMode),
+          maintenanceHeadline: s.maintenanceHeadline || 'Scheduled Maintenance in Progress',
+          maintenanceMessage:
+            s.maintenanceMessage ||
+            'We’re currently performing scheduled maintenance. Please check back shortly.',
+          siteName: s.siteName || 'SureDeal Store',
+          siteLogoUrl: s.siteLogoUrl || '',
+          supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
+          supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
+          creatorName: s.creatorName || 'Excellent',
+          checkedAt: new Date().toISOString(),
         });
       }
 
@@ -709,6 +776,7 @@ export class SureDealStoreDO {
           status: 'active',
           referralCode: newCode,
           referredBy: inviter?.id,
+          referralRewardClaimed: false,
           createdAt: now,
           lastLoginAt: now,
         };
@@ -729,25 +797,13 @@ export class SureDealStoreDO {
           });
         }
 
-        if (inviter && db.settings.referralBonusAmount > 0) {
-          const bonus = db.settings.referralBonusAmount;
-          inviter.balance += bonus;
-          db.transactions.unshift({
-            id: makeId('tx'),
-            userId: inviter.id,
-            userName: inviter.name,
-            userEmail: inviter.email,
-            type: 'referral_bonus',
-            amount: bonus,
-            status: 'completed',
-            description: `Referral bonus for inviting ${newUser.email}`,
-            createdAt: now,
-          });
+        // Referrer reward is intentionally deferred until this user's first verified deposit.
+        if (inviter) {
           db.notifications.unshift({
             id: makeId('ntf'),
-            title: 'Referral Bonus Credited',
-            message: `You earned ${db.settings.currencySymbol}${bonus.toLocaleString()} because ${newUser.name} joined with your referral link.`,
-            type: 'success',
+            title: 'New Referral Registered',
+            message: `${newUser.name} signed up with your referral link. Your bonus unlocks once their first deposit is verified.`,
+            type: 'info',
             targetUserId: inviter.id,
             readBy: [],
             createdAt: now,
@@ -776,7 +832,9 @@ export class SureDealStoreDO {
       }
 
       // All routes below require authentication
-      const auth = await this.authenticate(request);
+      const auth = await this.authenticate(request, {
+        allowDuringMaintenance: method === 'GET' && pathname === '/api/auth/me',
+      });
       if ('errorResponse' in auth) {
         return auth.errorResponse;
       }
@@ -784,7 +842,10 @@ export class SureDealStoreDO {
       const db = this.db;
 
       if (method === 'GET' && pathname === '/api/auth/me') {
-        return okJson({ user: toPublicUser(currentUser) });
+        return okJson({
+          user: toPublicUser(currentUser),
+          maintenanceMode: Boolean(db.settings.maintenanceMode),
+        });
       }
 
       // --- USER DASHBOARD OVERVIEW & UNIFIED ORDERS ---
@@ -1132,12 +1193,27 @@ export class SureDealStoreDO {
         }
         const body = await readJsonBody(request);
         const listingId = String(body.listingId || '');
+        const rawQty = Number(body.quantity ?? 1);
+        const quantity = Number.isFinite(rawQty) ? Math.floor(rawQty) : 0;
         const promoCodeStr = String(body.promoCode || '').trim().toUpperCase();
         const listing = db.marketplaceListings.find((l) => l.id === listingId && l.active);
         if (!listing) return errJson('Marketplace listing not found', 404);
-        if (listing.stock <= 0) return errJson('This product is currently out of stock', 400);
+        if (quantity < 1) return errJson('Quantity must be at least 1', 400);
 
-        let finalPrice = listing.price;
+        const availableStock =
+          listing.stockKeys && listing.stockKeys.length > 0
+            ? listing.stockKeys.length
+            : listing.stock;
+        if (availableStock <= 0) return errJson('This product is currently out of stock', 400);
+        if (quantity > availableStock) {
+          return errJson(
+            `Only ${availableStock} unit${availableStock === 1 ? '' : 's'} available in stock`,
+            400,
+          );
+        }
+
+        const baseTotal = listing.price * quantity;
+        let finalTotal = baseTotal;
         let appliedPromo: PromoCode | undefined;
         if (promoCodeStr) {
           if (db.settings.allowPromoCodes === false) {
@@ -1148,64 +1224,80 @@ export class SureDealStoreDO {
           );
           if (!appliedPromo) return errJson('Promo code is invalid or expired', 400);
           if (appliedPromo.discountType === 'percent') {
-            finalPrice = Math.max(0, Math.round(listing.price * (1 - appliedPromo.value / 100)));
+            finalTotal = Math.max(0, Math.round(baseTotal * (1 - appliedPromo.value / 100)));
           } else {
-            finalPrice = Math.max(0, listing.price - appliedPromo.value);
+            finalTotal = Math.max(0, baseTotal - appliedPromo.value);
           }
         }
 
-        if (currentUser.balance < finalPrice) {
+        if (currentUser.balance < finalTotal) {
           return errJson(
-            `Insufficient wallet balance. Need ${db.settings.currencySymbol}${finalPrice.toLocaleString()}.`,
+            `Insufficient wallet balance. Need ${db.settings.currencySymbol}${finalTotal.toLocaleString()}.`,
             400,
           );
         }
 
         const now = new Date().toISOString();
-        currentUser.balance -= finalPrice;
+        currentUser.balance -= finalTotal;
         const hadStockKeys = Boolean(listing.stockKeys && listing.stockKeys.length > 0);
-        let deliveredCredential = '';
+        const createdVaultItems: DatabaseState['vaultItems'][number][] = [];
+        const perUnitPaid = quantity === 1 ? finalTotal : Math.round(finalTotal / quantity);
+
+        for (let i = 0; i < quantity; i++) {
+          let deliveredCredential = '';
+          if (hadStockKeys && listing.stockKeys.length > 0) {
+            deliveredCredential = listing.stockKeys.shift()!;
+          } else {
+            deliveredCredential = buildCredentialFromTemplateWeb(listing.credentialTemplate);
+          }
+          const itemPrice =
+            i === quantity - 1
+              ? Math.max(0, finalTotal - perUnitPaid * (quantity - 1))
+              : perUnitPaid;
+          createdVaultItems.push({
+            id: makeId('vlt'),
+            userId: currentUser.id,
+            sourceType: 'marketplace',
+            sourceId: listing.id,
+            title: quantity > 1 ? `${listing.title} (${i + 1}/${quantity})` : listing.title,
+            category: listing.category,
+            price: itemPrice,
+            deliveredCredential,
+            deliveryType: listing.deliveryType,
+            buyWarningShown: listing.buyWarning || db.settings.defaultBuyWarning,
+            buyWarningLevel:
+              listing.buyWarningLevel || db.settings.defaultBuyWarningLevel || 'serious',
+            createdAt: now,
+          });
+        }
+
         if (hadStockKeys) {
-          deliveredCredential = listing.stockKeys.shift()!;
           listing.stock = listing.stockKeys.length;
         } else {
-          listing.stock = Math.max(0, listing.stock - 1);
-          deliveredCredential = buildCredentialFromTemplateWeb(listing.credentialTemplate);
+          listing.stock = Math.max(0, listing.stock - quantity);
         }
-        listing.soldCount += 1;
+        listing.soldCount += quantity;
         if (appliedPromo) {
           appliedPromo.uses += 1;
         }
 
-        const vaultItem: DatabaseState['vaultItems'][number] = {
-          id: makeId('vlt'),
-          userId: currentUser.id,
-          sourceType: 'marketplace',
-          sourceId: listing.id,
-          title: listing.title,
-          category: listing.category,
-          price: finalPrice,
-          deliveredCredential,
-          deliveryType: listing.deliveryType,
-          buyWarningShown: listing.buyWarning || db.settings.defaultBuyWarning,
-          createdAt: now,
-        };
-
-        db.vaultItems.unshift(vaultItem);
+        for (let i = createdVaultItems.length - 1; i >= 0; i--) {
+          db.vaultItems.unshift(createdVaultItems[i]);
+        }
         db.transactions.unshift({
           id: makeId('tx'),
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
           type: 'purchase',
-          amount: finalPrice,
+          amount: finalTotal,
           status: 'completed',
-          description: `Marketplace Order: ${listing.title}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
+          description: `Marketplace Order: ${listing.title}${quantity > 1 ? ` × ${quantity}` : ''}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
           createdAt: now,
         });
         this.addAdminAlert(
           'Marketplace Asset Sold',
-          `${currentUser.email} purchased ${listing.title} for ${db.settings.currencySymbol}${finalPrice.toLocaleString()}`,
+          `${currentUser.email} purchased ${quantity}× ${listing.title} for ${db.settings.currencySymbol}${finalTotal.toLocaleString()}`,
           'order',
         );
         this.persistKeys(
@@ -1216,7 +1308,17 @@ export class SureDealStoreDO {
           'transactions',
           'adminAlerts',
         );
-        return okJson({ vaultItem, listing, balance: currentUser.balance }, 201);
+        return okJson(
+          {
+            vaultItem: createdVaultItems[0],
+            vaultItems: createdVaultItems,
+            quantity,
+            totalPaid: finalTotal,
+            listing,
+            balance: currentUser.balance,
+          },
+          201,
+        );
       }
 
       // --- CUSTOM SECTIONS ---
@@ -1240,44 +1342,80 @@ export class SureDealStoreDO {
         const body = await readJsonBody(request);
         const sectionId = String(body.sectionId || '');
         const productId = String(body.productId || '');
+        const rawQty = Number(body.quantity ?? 1);
+        const quantity = Number.isFinite(rawQty) ? Math.floor(rawQty) : 0;
         const section = db.customSections.find((s) => s.id === sectionId && s.active);
         const product = section?.products.find((p) => p.id === productId && p.active);
         if (!section || !product) return errJson('Product not found in section', 404);
+        if (quantity < 1) return errJson('Quantity must be at least 1', 400);
         if (product.stock <= 0) return errJson('Out of stock', 400);
-        if (currentUser.balance < product.price) return errJson('Insufficient wallet balance', 400);
+        if (quantity > product.stock) {
+          return errJson(
+            `Only ${product.stock} unit${product.stock === 1 ? '' : 's'} available in stock`,
+            400,
+          );
+        }
+        const totalPrice = product.price * quantity;
+        if (currentUser.balance < totalPrice) {
+          return errJson(
+            `Insufficient wallet balance. Need ${db.settings.currencySymbol}${totalPrice.toLocaleString()}.`,
+            400,
+          );
+        }
 
         const now = new Date().toISOString();
-        currentUser.balance -= product.price;
-        product.stock -= 1;
+        currentUser.balance -= totalPrice;
+        product.stock -= quantity;
 
-        const vaultItem: DatabaseState['vaultItems'][number] = {
-          id: makeId('vlt'),
-          userId: currentUser.id,
-          sourceType: 'section',
-          sourceId: product.id,
-          title: product.title,
-          category: section.name,
-          price: product.price,
-          deliveredCredential: buildCredentialFromTemplateWeb(product.credentialTemplate),
-          deliveryType: 'Vault Delivery',
-          buyWarningShown: product.buyWarning || db.settings.defaultBuyWarning,
-          createdAt: now,
-        };
+        const createdVaultItems: DatabaseState['vaultItems'][number][] = [];
+        for (let i = 0; i < quantity; i++) {
+          createdVaultItems.push({
+            id: makeId('vlt'),
+            userId: currentUser.id,
+            sourceType: 'section',
+            sourceId: product.id,
+            title: quantity > 1 ? `${product.title} (${i + 1}/${quantity})` : product.title,
+            category: section.name,
+            price: product.price,
+            deliveredCredential: buildCredentialFromTemplateWeb(product.credentialTemplate),
+            deliveryType: 'Vault Delivery',
+            buyWarningShown:
+              product.buyWarning || section.defaultBuyWarning || db.settings.defaultBuyWarning,
+            buyWarningLevel:
+              product.buyWarningLevel ||
+              section.defaultBuyWarningLevel ||
+              db.settings.defaultBuyWarningLevel ||
+              'serious',
+            createdAt: now,
+          });
+        }
 
-        db.vaultItems.unshift(vaultItem);
+        for (let i = createdVaultItems.length - 1; i >= 0; i--) {
+          db.vaultItems.unshift(createdVaultItems[i]);
+        }
         db.transactions.unshift({
           id: makeId('tx'),
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
           type: 'purchase',
-          amount: product.price,
+          amount: totalPrice,
           status: 'completed',
-          description: `${section.name}: ${product.title}`,
+          description: `${section.name}: ${product.title}${quantity > 1 ? ` × ${quantity}` : ''}`,
           createdAt: now,
         });
         this.persistKeys('users', 'customSections', 'vaultItems', 'transactions');
-        return okJson({ vaultItem, product, balance: currentUser.balance }, 201);
+        return okJson(
+          {
+            vaultItem: createdVaultItems[0],
+            vaultItems: createdVaultItems,
+            quantity,
+            totalPaid: totalPrice,
+            product,
+            balance: currentUser.balance,
+          },
+          201,
+        );
       }
 
       // --- WALLET & DEPOSIT ---
@@ -1345,8 +1483,10 @@ export class SureDealStoreDO {
         const status = autoVerified ? 'verified' : autoRejected ? 'rejected' : 'pending';
         const now = new Date().toISOString();
 
+        let referralPayout = false;
         if (autoVerified) {
           currentUser.balance += amount;
+          referralPayout = this.creditReferrerOnFirstVerifiedDeposit(currentUser, now);
         }
 
         // Persist receipt binary cleanly in uploads table so transaction rows remain fast & compact
@@ -1386,7 +1526,11 @@ export class SureDealStoreDO {
           `${currentUser.email} submitted ${db.settings.currencySymbol}${amount.toLocaleString()} (${aiAudit.verdict} · ${aiAudit.confidence}%)`,
           'deposit',
         );
-        this.persistKeys('users', 'transactions', 'adminAlerts');
+        if (referralPayout) {
+          this.persistKeys('users', 'transactions', 'notifications', 'adminAlerts');
+        } else {
+          this.persistKeys('users', 'transactions', 'adminAlerts');
+        }
         return okJson(
           {
             transaction,
@@ -1539,16 +1683,36 @@ export class SureDealStoreDO {
       }
 
       if (method === 'GET' && pathname === '/api/user/referral') {
+        const verifiedDepositorIds = new Set(
+          db.transactions
+            .filter((t) => t.type === 'deposit' && t.status === 'verified')
+            .map((t) => t.userId),
+        );
         const invited = db.users
           .filter((u) => u.referredBy === currentUser.id)
-          .map((u) => ({ id: u.id, name: u.name, email: u.email, createdAt: u.createdAt }));
+          .map((u) => {
+            const deposited = verifiedDepositorIds.has(u.id);
+            const rewarded = Boolean(u.referralRewardClaimed);
+            return {
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              createdAt: u.createdAt,
+              deposited,
+              rewarded,
+            };
+          });
         const totalEarned = db.transactions
           .filter((t) => t.userId === currentUser.id && t.type === 'referral_bonus')
           .reduce((sum, t) => sum + t.amount, 0);
+        const rewardedCount = invited.filter((i) => i.rewarded).length;
+        const pendingCount = invited.length - rewardedCount;
         return okJson({
           referralCode: currentUser.referralCode,
           bonusPerReferral: db.settings.referralBonusAmount,
           invited,
+          rewardedCount,
+          pendingCount,
           totalEarned,
         });
       }
@@ -1898,9 +2062,11 @@ export class SureDealStoreDO {
           const adminNote = String(body.adminNote || '').trim();
           const user = db.users.find((u) => u.id === tx.userId);
 
+          const now = new Date().toISOString();
           if (decision === 'approve') {
             if (tx.status !== 'verified' && user) {
               user.balance += tx.amount;
+              this.creditReferrerOnFirstVerifiedDeposit(user, now);
             }
             tx.status = 'verified';
             tx.adminNote = adminNote || 'Verified by Our Team';
@@ -1912,7 +2078,7 @@ export class SureDealStoreDO {
                 type: 'success',
                 targetUserId: user.id,
                 readBy: [],
-                createdAt: new Date().toISOString(),
+                createdAt: now,
               });
             }
           } else if (decision === 'reject' || decision === 'reverse') {
@@ -1929,7 +2095,7 @@ export class SureDealStoreDO {
                 type: 'warning',
                 targetUserId: user.id,
                 readBy: [],
-                createdAt: new Date().toISOString(),
+                createdAt: now,
               });
             }
           } else {
@@ -1961,6 +2127,7 @@ export class SureDealStoreDO {
             const targetUser = db.users.find((u) => u.id === tx.userId);
             if (targetUser) {
               targetUser.balance += tx.amount;
+              this.creditReferrerOnFirstVerifiedDeposit(targetUser, now);
               db.notifications.unshift({
                 id: makeId('ntf'),
                 title: 'Deposit Approved',
@@ -2467,11 +2634,63 @@ export class SureDealStoreDO {
           return okJson({ category: cat }, 201);
         }
 
-        const mktCatDelMatch = pathname.match(/^\/api\/admin\/marketplace-categories\/([^/]+)$/);
-        if (method === 'DELETE' && mktCatDelMatch) {
-          const id = decodeURIComponent(mktCatDelMatch[1]);
+        const mktCatMatch = pathname.match(/^\/api\/admin\/marketplace-categories\/([^/]+)$/);
+        if (method === 'PATCH' && mktCatMatch) {
+          const id = decodeURIComponent(mktCatMatch[1]);
+          const cat = db.marketplaceCategories.find((c) => c.id === id);
+          if (!cat) return errJson('Category not found', 404);
+          const body = await readJsonBody(request);
+          const prevName = cat.name;
+          const nextName =
+            typeof body.name === 'string' && body.name.trim() ? body.name.trim() : cat.name;
+          cat.name = nextName;
+          if (typeof body.description === 'string') cat.description = body.description.trim();
+          if (prevName !== nextName) {
+            for (const l of db.marketplaceListings) {
+              if (l.category === prevName) l.category = nextName;
+            }
+            this.persistKeys('marketplaceCategories', 'marketplaceListings');
+          } else {
+            this.persistKeys('marketplaceCategories');
+          }
+          return okJson({ category: cat });
+        }
+
+        if (method === 'DELETE' && mktCatMatch) {
+          const id = decodeURIComponent(mktCatMatch[1]);
           db.marketplaceCategories = db.marketplaceCategories.filter((c) => c.id !== id);
           this.persistKeys('marketplaceCategories');
+          return okJson({ ok: true });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/catalog/reorder') {
+          const body = await readJsonBody(request);
+          const kind = String(body.kind || '');
+          const orderedIds = Array.isArray(body.orderedIds) ? body.orderedIds.map(String) : [];
+          if (orderedIds.length === 0) return errJson('orderedIds array is required', 400);
+          if (kind === 'marketplace') {
+            db.marketplaceListings = reorderByIds(db.marketplaceListings, orderedIds);
+            this.persistKeys('marketplaceListings');
+          } else if (kind === 'categories') {
+            db.marketplaceCategories = reorderByIds(db.marketplaceCategories, orderedIds);
+            this.persistKeys('marketplaceCategories');
+          } else if (kind === 'smsServices') {
+            db.smsServices = reorderByIds(db.smsServices, orderedIds);
+            this.persistKeys('smsServices');
+          } else if (kind === 'smsCountries') {
+            db.smsCountries = reorderByIds(db.smsCountries, orderedIds);
+            this.persistKeys('smsCountries');
+          } else if (kind === 'boosting') {
+            db.boostingServices = reorderByIds(db.boostingServices, orderedIds);
+            this.persistKeys('boostingServices');
+          } else if (kind === 'sections') {
+            db.customSections = reorderByIds(db.customSections, orderedIds);
+            this.persistKeys('customSections');
+          } else {
+            return errJson('Unsupported reorder kind', 400);
+          }
+          this.logAudit(currentUser.email, 'REORDER_CATALOG', kind, `Reordered ${orderedIds.length} items`);
+          this.persistKeys('auditLogs');
           return okJson({ ok: true });
         }
 
@@ -2503,6 +2722,7 @@ export class SureDealStoreDO {
             shortSpec: String(body.shortSpec || 'Instant digital delivery').trim(),
             description: String(body.description || '').trim(),
             buyWarning: String(body.buyWarning || db.settings.defaultBuyWarning).trim(),
+            buyWarningLevel: body.buyWarningLevel === 'info' ? 'info' : 'serious',
             features: features.length
               ? features
               : ['Instant Vault Key Delivery', 'Verified Quality'],
@@ -2567,6 +2787,10 @@ export class SureDealStoreDO {
             shortSpec: typeof body.shortSpec === 'string' ? body.shortSpec : item.shortSpec,
             description: typeof body.description === 'string' ? body.description : item.description,
             buyWarning: typeof body.buyWarning === 'string' ? body.buyWarning : item.buyWarning,
+            buyWarningLevel:
+              body.buyWarningLevel === 'info' || body.buyWarningLevel === 'serious'
+                ? body.buyWarningLevel
+                : item.buyWarningLevel,
             deliveryType:
               typeof body.deliveryType === 'string' ? body.deliveryType : item.deliveryType,
             price:
@@ -2610,15 +2834,62 @@ export class SureDealStoreDO {
         }
 
         // --- SECTIONS ---
+        if (method === 'POST' && pathname === '/api/admin/sections/ai-setup') {
+          const body = await readJsonBody(request);
+          const name = String(body.name || '').trim();
+          if (!name) return errJson('Section name is required for AI setup', 400);
+          const setup = await generateCustomSectionSetupWithAiWeb({
+            name,
+            description: String(body.description || ''),
+            goal: String(body.goal || ''),
+            geminiApiKey: this.env.GEMINI_API_KEY,
+          });
+          return okJson({ setup });
+        }
+
         if (method === 'POST' && pathname === '/api/admin/sections') {
           const body = await readJsonBody(request);
+          const secId = makeId('sec');
+          const starterRaw = Array.isArray(body.products) ? body.products : [];
           const section: CustomSection = {
-            id: makeId('sec'),
+            id: secId,
             name: String(body.name || 'Special Deals').trim(),
             icon: String(body.icon || 'layers').trim(),
             description: String(body.description || '').trim(),
+            badgeTag:
+              typeof body.badgeTag === 'string' ? body.badgeTag.trim().slice(0, 12) : undefined,
+            accentColor:
+              typeof body.accentColor === 'string' ? body.accentColor.trim() : undefined,
+            defaultBuyWarning:
+              typeof body.defaultBuyWarning === 'string'
+                ? body.defaultBuyWarning.trim()
+                : undefined,
+            defaultBuyWarningLevel:
+              body.defaultBuyWarningLevel === 'info'
+                ? 'info'
+                : body.defaultBuyWarningLevel === 'serious'
+                  ? 'serious'
+                  : undefined,
+            aiNotes: typeof body.aiNotes === 'string' ? body.aiNotes.trim() : undefined,
             active: body.active !== false,
-            products: [],
+            products: starterRaw.map((p: Partial<CustomSectionProduct>) => ({
+              id: makeId('sprod'),
+              sectionId: secId,
+              title: String(p.title || 'Section Product').trim(),
+              shortSpec: String(p.shortSpec || 'Instant access').trim(),
+              description: String(p.description || '').trim(),
+              buyWarning: String(p.buyWarning || db.settings.defaultBuyWarning).trim(),
+              buyWarningLevel: p.buyWarningLevel === 'info' ? 'info' : 'serious',
+              price: Math.max(50, Number(p.price || 1500)),
+              stock: Math.max(0, Number(p.stock || 20)),
+              imageUrl:
+                String(p.imageUrl || '').trim() ||
+                '/src/assets/images/marketplace_digital_vault_1794869408342.jpg',
+              logoUrl: String(p.logoUrl || '').trim(),
+              bounceLogo: Boolean(p.bounceLogo),
+              credentialTemplate: String(p.credentialTemplate || 'ACCESS-{{KEY4}}-{{RAND4}}'),
+              active: p.active !== false,
+            })),
           };
           db.customSections.push(section);
           this.persistKeys('customSections');
@@ -2631,9 +2902,20 @@ export class SureDealStoreDO {
           const section = db.customSections.find((s) => s.id === id);
           if (!section) return errJson('Section not found', 404);
           const body = await readJsonBody(request);
-          if (typeof body.name === 'string') section.name = body.name;
-          if (typeof body.icon === 'string') section.icon = body.icon;
-          if (typeof body.description === 'string') section.description = body.description;
+          if (typeof body.name === 'string' && body.name.trim()) section.name = body.name.trim();
+          if (typeof body.icon === 'string' && body.icon.trim()) section.icon = body.icon.trim();
+          if (typeof body.description === 'string') section.description = body.description.trim();
+          if (typeof body.badgeTag === 'string') {
+            section.badgeTag = body.badgeTag.trim().slice(0, 12);
+          }
+          if (typeof body.accentColor === 'string') section.accentColor = body.accentColor.trim();
+          if (typeof body.defaultBuyWarning === 'string') {
+            section.defaultBuyWarning = body.defaultBuyWarning.trim();
+          }
+          if (body.defaultBuyWarningLevel === 'info' || body.defaultBuyWarningLevel === 'serious') {
+            section.defaultBuyWarningLevel = body.defaultBuyWarningLevel;
+          }
+          if (typeof body.aiNotes === 'string') section.aiNotes = body.aiNotes.trim();
           if (typeof body.active === 'boolean') section.active = body.active;
           this.persistKeys('customSections');
           return okJson({ section });
@@ -2657,7 +2939,13 @@ export class SureDealStoreDO {
             title: String(body.title || 'Section Product').trim(),
             shortSpec: String(body.shortSpec || 'Instant access').trim(),
             description: String(body.description || '').trim(),
-            buyWarning: String(body.buyWarning || db.settings.defaultBuyWarning).trim(),
+            buyWarning: String(
+              body.buyWarning || section.defaultBuyWarning || db.settings.defaultBuyWarning,
+            ).trim(),
+            buyWarningLevel:
+              body.buyWarningLevel === 'info' || body.buyWarningLevel === 'serious'
+                ? body.buyWarningLevel
+                : section.defaultBuyWarningLevel || 'serious',
             price: Math.max(50, Number(body.price || 1500)),
             stock: Math.max(0, Number(body.stock || 25)),
             imageUrl:
@@ -2675,9 +2963,64 @@ export class SureDealStoreDO {
           return okJson({ product }, 201);
         }
 
-        const secProdDelMatch = pathname.match(/^\/api\/admin\/section-products\/([^/]+)$/);
-        if (method === 'DELETE' && secProdDelMatch) {
-          const id = decodeURIComponent(secProdDelMatch[1]);
+        const secProdMatch = pathname.match(/^\/api\/admin\/section-products\/([^/]+)$/);
+        if (method === 'PATCH' && secProdMatch) {
+          const id = decodeURIComponent(secProdMatch[1]);
+          let targetProduct: CustomSectionProduct | undefined;
+          for (const s of db.customSections) {
+            const found = s.products.find((p) => p.id === id);
+            if (found) {
+              targetProduct = found;
+              break;
+            }
+          }
+          if (!targetProduct) return errJson('Section product not found', 404);
+          const body = await readJsonBody(request);
+          Object.assign(targetProduct, {
+            title:
+              typeof body.title === 'string' && body.title.trim()
+                ? body.title.trim()
+                : targetProduct.title,
+            shortSpec:
+              typeof body.shortSpec === 'string'
+                ? body.shortSpec.trim()
+                : targetProduct.shortSpec,
+            description:
+              typeof body.description === 'string'
+                ? body.description.trim()
+                : targetProduct.description,
+            buyWarning:
+              typeof body.buyWarning === 'string'
+                ? body.buyWarning.trim()
+                : targetProduct.buyWarning,
+            buyWarningLevel:
+              body.buyWarningLevel === 'info' || body.buyWarningLevel === 'serious'
+                ? body.buyWarningLevel
+                : targetProduct.buyWarningLevel,
+            price:
+              typeof body.price === 'number' && Number.isFinite(body.price)
+                ? Math.max(0, body.price)
+                : targetProduct.price,
+            stock:
+              typeof body.stock === 'number' && Number.isFinite(body.stock)
+                ? Math.max(0, Math.floor(body.stock))
+                : targetProduct.stock,
+            imageUrl: typeof body.imageUrl === 'string' ? body.imageUrl : targetProduct.imageUrl,
+            logoUrl: typeof body.logoUrl === 'string' ? body.logoUrl : targetProduct.logoUrl,
+            bounceLogo:
+              typeof body.bounceLogo === 'boolean' ? body.bounceLogo : targetProduct.bounceLogo,
+            credentialTemplate:
+              typeof body.credentialTemplate === 'string'
+                ? body.credentialTemplate
+                : targetProduct.credentialTemplate,
+            active: typeof body.active === 'boolean' ? body.active : targetProduct.active,
+          });
+          this.persistKeys('customSections');
+          return okJson({ product: targetProduct });
+        }
+
+        if (method === 'DELETE' && secProdMatch) {
+          const id = decodeURIComponent(secProdMatch[1]);
           db.customSections.forEach((s) => {
             s.products = s.products.filter((p) => p.id !== id);
           });
@@ -2868,6 +3211,9 @@ export class SureDealStoreDO {
           if (typeof body.siteName === 'string' && body.siteName.trim()) {
             s.siteName = body.siteName.trim();
           }
+          if (typeof body.siteTagline === 'string') {
+            s.siteTagline = body.siteTagline.trim();
+          }
           if (typeof body.siteLogoUrl === 'string') s.siteLogoUrl = body.siteLogoUrl.trim();
           if (typeof body.currencyCode === 'string' && body.currencyCode.trim()) {
             s.currencyCode = body.currencyCode.trim().toUpperCase();
@@ -2906,6 +3252,27 @@ export class SureDealStoreDO {
           if (typeof body.supportWhatsapp === 'string') s.supportWhatsapp = body.supportWhatsapp.trim();
           if (typeof body.showFloatingWhatsapp === 'boolean') {
             s.showFloatingWhatsapp = body.showFloatingWhatsapp;
+          }
+          if (typeof body.communityChannelEnabled === 'boolean') {
+            s.communityChannelEnabled = body.communityChannelEnabled;
+          }
+          if (
+            body.communityChannelPlatform === 'whatsapp' ||
+            body.communityChannelPlatform === 'telegram'
+          ) {
+            s.communityChannelPlatform = body.communityChannelPlatform;
+          }
+          if (typeof body.communityChannelTitle === 'string') {
+            s.communityChannelTitle = body.communityChannelTitle.trim();
+          }
+          if (typeof body.communityChannelSubtitle === 'string') {
+            s.communityChannelSubtitle = body.communityChannelSubtitle.trim();
+          }
+          if (typeof body.communityChannelUrl === 'string') {
+            s.communityChannelUrl = body.communityChannelUrl.trim();
+          }
+          if (typeof body.communityChannelCta === 'string') {
+            s.communityChannelCta = body.communityChannelCta.trim();
           }
           if (typeof body.creatorName === 'string') s.creatorName = body.creatorName.trim();
           if (typeof body.creatorUrl === 'string') s.creatorUrl = body.creatorUrl.trim();
@@ -2965,6 +3332,9 @@ export class SureDealStoreDO {
           }
           if (typeof body.defaultBuyWarning === 'string') {
             s.defaultBuyWarning = body.defaultBuyWarning.trim();
+          }
+          if (body.defaultBuyWarningLevel === 'info' || body.defaultBuyWarningLevel === 'serious') {
+            s.defaultBuyWarningLevel = body.defaultBuyWarningLevel;
           }
           if (typeof body.heroKicker === 'string') s.heroKicker = body.heroKicker.trim();
           if (typeof body.heroHeadline === 'string' && body.heroHeadline.trim()) {

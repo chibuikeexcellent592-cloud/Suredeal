@@ -110,7 +110,7 @@ export async function verifyMoniepointReceiptWithAiWeb(params: {
   }).format(now);
 
   try {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent?key=${encodeURIComponent(apiKey)}`;
     const prompt = `You are a strict forensic Nigerian bank transfer auditor for SureDeal Store.
 Inspect EVERY detail visible on this receipt image and compare it rigorously against expected values and current Nigeria time.
 
@@ -142,6 +142,7 @@ Respond strictly in JSON.`;
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'User-Agent': 'aistudio-build',
       },
       body: JSON.stringify({
         contents: [
@@ -407,3 +408,211 @@ Respond strictly in JSON.`;
     };
   }
 }
+
+export interface CustomSectionStarterProduct {
+  title: string;
+  shortSpec: string;
+  description: string;
+  buyWarning: string;
+  buyWarningLevel: 'serious' | 'info';
+  price: number;
+  stock: number;
+  credentialTemplate: string;
+}
+
+export interface CustomSectionSetupResult {
+  refinedDescription: string;
+  badgeTag: string;
+  accentColor: string;
+  recommendedIcon: string;
+  defaultBuyWarning: string;
+  defaultBuyWarningLevel: 'serious' | 'info';
+  aiNotes: string;
+  starterProducts: CustomSectionStarterProduct[];
+  source: 'gemini' | 'fallback';
+}
+
+function buildFallbackSectionSetup(params: {
+  name: string;
+  description?: string;
+}): CustomSectionSetupResult {
+  const cleanName = params.name.trim() || 'Digital Suite';
+  const cleanDesc =
+    (params.description || '').trim() ||
+    `Verified ${cleanName} products with instant automated Vault delivery.`;
+  const lower = `${cleanName} ${cleanDesc}`.toLowerCase();
+  const isSerious =
+    /account|proxy|vpn|bank|kyc|login|2fa|stripe|paypal|fb|facebook|tiktok/.test(lower);
+  const accentColor = /vpn|proxy|security|cloud/.test(lower)
+    ? '#0EA5E9'
+    : /stream|music|video|youtube|netflix/.test(lower)
+      ? '#E11D48'
+      : /ai|bot|gpt|claude|tool/.test(lower)
+        ? '#7C3AED'
+        : '#2563EB';
+  const recommendedIcon = /ai|bot|gpt/.test(lower)
+    ? 'Sparkles'
+    : /stream|video|music/.test(lower)
+      ? 'Play'
+      : /vpn|proxy/.test(lower)
+        ? 'Shield'
+        : 'Layers';
+
+  return {
+    refinedDescription: cleanDesc,
+    badgeTag: 'NEW',
+    accentColor,
+    recommendedIcon,
+    defaultBuyWarning: isSerious
+      ? `Important Notice: Ensure you follow the recommended IP/VPN setup before logging into ${cleanName} credentials. Vault deliveries cannot be refunded after reveal.`
+      : `Delivery Info: Your ${cleanName} access details are delivered immediately to your Vault after checkout confirmation.`,
+    defaultBuyWarningLevel: isSerious ? 'serious' : 'info',
+    aiNotes: 'Configured with SureDeal Section Architect template.',
+    starterProducts: [
+      {
+        title: `${cleanName} — Starter Access`,
+        shortSpec: 'Instant Vault Delivery · Verified Quality',
+        description: `Ready-to-use ${cleanName} starter package delivered directly inside your SureDeal Vault immediately after purchase.`,
+        buyWarning: isSerious
+          ? 'Use clean residential IP and review login instructions before first sign-in.'
+          : 'Credentials appear automatically in your Vault once payment succeeds.',
+        buyWarningLevel: isSerious ? 'serious' : 'info',
+        price: 3500,
+        stock: 20,
+        credentialTemplate: 'ACCESS-{{KEY4}}-{{RAND4}}',
+      },
+      {
+        title: `${cleanName} — Pro Bundle`,
+        shortSpec: 'Priority Fulfillment · 30-Day Replacement Cover',
+        description: `Higher-capacity ${cleanName} package built for teams, creators, and heavy daily operations.`,
+        buyWarning: isSerious
+          ? 'Save your 2FA backup key immediately after opening the Vault card.'
+          : 'Includes priority replacement coverage for valid issues reported within 24h.',
+        buyWarningLevel: isSerious ? 'serious' : 'info',
+        price: 7500,
+        stock: 15,
+        credentialTemplate: 'PRO-{{KEY4}}-{{KEY4}}',
+      },
+    ],
+    source: 'fallback',
+  };
+}
+
+export async function generateCustomSectionSetupWithAiWeb(params: {
+  name: string;
+  description?: string;
+  goal?: string;
+  geminiApiKey?: string;
+}): Promise<CustomSectionSetupResult> {
+  const fallback = buildFallbackSectionSetup(params);
+  const apiKey = (params.geminiApiKey || '').trim();
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.length < 10) {
+    return fallback;
+  }
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const prompt = `You are an e-commerce merchandiser for SureDeal Store (a Nigerian digital products platform priced in Naira ₦).
+An admin is creating a custom storefront navigation section:
+- Section Name: ${params.name}
+- Admin Short Description: ${params.description || '(none provided)'}
+- Merchandising Goal / Notes: ${params.goal || 'Fast setup with clean copy and realistic starter SKUs'}
+
+Return JSON with refinedDescription, badgeTag (max 6 chars uppercase), accentColor (#RRGGBB), recommendedIcon (Layers|Sparkles|Shield|Play|KeyRound|Globe), defaultBuyWarning, defaultBuyWarningLevel (serious|info), aiNotes, and starterProducts (2 items with title, shortSpec, description, buyWarning, buyWarningLevel, price, stock, credentialTemplate).`;
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'aistudio-build',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              refinedDescription: { type: 'STRING' },
+              badgeTag: { type: 'STRING' },
+              accentColor: { type: 'STRING' },
+              recommendedIcon: { type: 'STRING' },
+              defaultBuyWarning: { type: 'STRING' },
+              defaultBuyWarningLevel: { type: 'STRING' },
+              aiNotes: { type: 'STRING' },
+              starterProducts: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    title: { type: 'STRING' },
+                    shortSpec: { type: 'STRING' },
+                    description: { type: 'STRING' },
+                    buyWarning: { type: 'STRING' },
+                    buyWarningLevel: { type: 'STRING' },
+                    price: { type: 'NUMBER' },
+                    stock: { type: 'NUMBER' },
+                    credentialTemplate: { type: 'STRING' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Gemini HTTP ${resp.status}`);
+    }
+
+    const payload = (await resp.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const parsed = JSON.parse(rawText.trim()) as Partial<CustomSectionSetupResult>;
+
+    const starterProducts =
+      Array.isArray(parsed.starterProducts) && parsed.starterProducts.length > 0
+        ? parsed.starterProducts.slice(0, 4).map((p, i) => ({
+            title: String(p.title || `${params.name} Item #${i + 1}`).slice(0, 80),
+            shortSpec: String(p.shortSpec || 'Instant Vault Delivery').slice(0, 90),
+            description: String(p.description || fallback.refinedDescription).slice(0, 350),
+            buyWarning: String(p.buyWarning || fallback.defaultBuyWarning).slice(0, 300),
+            buyWarningLevel: (p.buyWarningLevel === 'info' ? 'info' : 'serious') as
+              | 'serious'
+              | 'info',
+            price: Number.isFinite(Number(p.price)) && Number(p.price) > 0 ? Number(p.price) : 3500,
+            stock: Number.isFinite(Number(p.stock)) && Number(p.stock) >= 0 ? Number(p.stock) : 20,
+            credentialTemplate: String(p.credentialTemplate || 'ACCESS-{{KEY4}}-{{RAND4}}').slice(
+              0,
+              140,
+            ),
+          }))
+        : fallback.starterProducts;
+
+    return {
+      refinedDescription: String(parsed.refinedDescription || fallback.refinedDescription).slice(
+        0,
+        180,
+      ),
+      badgeTag: String(parsed.badgeTag || 'NEW').toUpperCase().slice(0, 8),
+      accentColor: /^#[0-9a-fA-F]{6}$/.test(String(parsed.accentColor || ''))
+        ? String(parsed.accentColor).toUpperCase()
+        : fallback.accentColor,
+      recommendedIcon: String(parsed.recommendedIcon || fallback.recommendedIcon),
+      defaultBuyWarning: String(parsed.defaultBuyWarning || fallback.defaultBuyWarning).slice(
+        0,
+        320,
+      ),
+      defaultBuyWarningLevel: parsed.defaultBuyWarningLevel === 'info' ? 'info' : 'serious',
+      aiNotes: String(parsed.aiNotes || 'Generated by AI Section Architect.'),
+      starterProducts,
+      source: 'gemini',
+    };
+  } catch (err) {
+    console.error('Worker AI section architect error:', err);
+    return fallback;
+  }
+}
+

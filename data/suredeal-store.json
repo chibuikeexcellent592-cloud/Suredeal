@@ -1,6 +1,7 @@
 {
   "settings": {
     "siteName": "SureDeal Store",
+    "siteTagline": "Digital solutions for every market",
     "siteLogoUrl": "",
     "currencyCode": "NGN",
     "currencySymbol": "₦",
@@ -17,6 +18,12 @@
     "supportEmail": "chibuikeexcellent592@gmail.com",
     "supportWhatsapp": "+2347031537390",
     "showFloatingWhatsapp": true,
+    "communityChannelEnabled": true,
+    "communityChannelPlatform": "whatsapp",
+    "communityChannelTitle": "Join WhatsApp",
+    "communityChannelSubtitle": "Get latest updates & drops",
+    "communityChannelUrl": "https://wa.me/2347031537390",
+    "communityChannelCta": "Join",
     "creatorName": "Excellent",
     "creatorUrl": "",
     "allowNewSignups": true,
@@ -38,6 +45,7 @@
     "bankAccountNumber": "7031537390",
     "bankAccountName": "UCHECHI BLESSING OJI",
     "defaultBuyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
+    "defaultBuyWarningLevel": "serious",
     "heroKicker": "Africa's all-in-one marketplace for digital growth",
     "heroHeadline": "All-in-One Digital Tools & Growth Services in Africa",
     "heroSecondaryHeadline": "SMS Verification, Social Boosting, VPN, Proxy & Verified Accounts — Fast, Secure & Affordable.",
@@ -142,7 +150,7 @@
       "status": "active",
       "referralCode": "SUREADMIN",
       "createdAt": "2026-11-16T22:59:02.292Z",
-      "lastLoginAt": "2026-11-19T14:51:31.074Z"
+      "lastLoginAt": "2026-11-20T16:09:52.354Z"
     }
   ],
   "pendingSignups": [],

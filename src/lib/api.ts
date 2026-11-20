@@ -1,3 +1,5 @@
+import type { MaintenanceStatusResponse } from '../types';
+
 const TOKEN_KEY = 'suredeal_auth_token';
 const API_BASE_URL = String(
   import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '',
@@ -83,7 +85,11 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    if (res.status === 503 && typeof window !== 'undefined') {
+    if (
+      res.status === 503 &&
+      typeof window !== 'undefined' &&
+      !url.includes('/api/public/maintenance-status')
+    ) {
       window.dispatchEvent(new CustomEvent('suredeal:maintenance'));
     }
     const errMsg =
@@ -100,6 +106,10 @@ export async function apiFetch<T>(
   }
 
   return data as T;
+}
+
+export async function fetchMaintenanceStatus(): Promise<MaintenanceStatusResponse> {
+  return apiFetch<MaintenanceStatusResponse>('/api/public/maintenance-status');
 }
 
 export function formatNaira(amount: number, symbol = '₦'): string {

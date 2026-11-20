@@ -3,6 +3,7 @@ import { AdminPage } from './components/AdminPage';
 import { AuthView } from './components/AuthView';
 import { FloatingWhatsAppButton } from './components/FloatingWhatsAppButton';
 import { LandingPage } from './components/LandingPage';
+import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { ToastContainer } from './components/ToastContainer';
 import { WorkspaceLayout } from './components/WorkspaceLayout';
 import { AppProvider, useApp } from './context/AppContext';
@@ -35,10 +36,10 @@ class AppErrorBoundary extends Component<
             </p>
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={() => this.setState({ hasError: false, message: '' })}
               className="px-5 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer"
             >
-              Reload Page
+              Try Again
             </button>
           </div>
         </div>
@@ -52,6 +53,7 @@ function AppRouter() {
   const { user, authLoading, catalog } = useApp();
   const [view, setView] = useState<'landing' | 'auth' | 'workspace' | 'admin'>('landing');
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [previewMaintenance, setPreviewMaintenance] = useState(false);
 
   useEffect(() => {
     if (catalog?.settings?.siteName) {
@@ -66,17 +68,25 @@ function AppRouter() {
     if (!authLoading && user && view === 'auth') {
       if (isMaintenanceLocked) {
         setView('landing');
+      } else if (user.role === 'admin' && catalog?.settings?.maintenanceMode) {
+        setView('admin');
       } else {
         setView('workspace');
       }
     }
-  }, [authLoading, user, view, isMaintenanceLocked]);
+  }, [authLoading, user, view, isMaintenanceLocked, catalog?.settings?.maintenanceMode]);
 
   useEffect(() => {
     if (view === 'admin' && user && user.role !== 'admin') {
       setView('workspace');
     }
   }, [view, user]);
+
+  useEffect(() => {
+    if (user?.role !== 'admin' && previewMaintenance) {
+      setPreviewMaintenance(false);
+    }
+  }, [user?.role, previewMaintenance]);
 
   if (authLoading) {
     return (
@@ -86,33 +96,34 @@ function AppRouter() {
     );
   }
 
+  const showMaintenanceScreen =
+    (isMaintenanceLocked || (user?.role === 'admin' && previewMaintenance)) && view !== 'auth';
+
   return (
     <>
-      {isMaintenanceLocked ? (
-        view === 'auth' ? (
-          <AuthView
-            initialMode="login"
-            onBack={() => setView('landing')}
-            onSuccess={(loggedUser) =>
-              setView(loggedUser.role === 'admin' ? 'admin' : 'landing')
-            }
-          />
-        ) : (
-          <LandingPage
-            onNavigateAuth={(mode) => {
-              setAuthMode(mode);
-              setView('auth');
-            }}
-            onEnterWorkspace={() => {
-              setAuthMode('login');
-              setView('auth');
-            }}
-          />
-        )
+      {showMaintenanceScreen ? (
+        <MaintenanceScreen
+          isPreview={user?.role === 'admin' && previewMaintenance}
+          onExitPreview={() => setPreviewMaintenance(false)}
+          onAdminSignIn={() => {
+            setPreviewMaintenance(false);
+            setAuthMode('login');
+            setView('auth');
+          }}
+        />
+      ) : isMaintenanceLocked ? (
+        <AuthView
+          initialMode="login"
+          onBack={() => setView('landing')}
+          onSuccess={(loggedUser) =>
+            setView(loggedUser.role === 'admin' ? 'admin' : 'landing')
+          }
+        />
       ) : view === 'admin' && user?.role === 'admin' ? (
         <AdminPage
           onBackHome={() => setView('landing')}
           onOpenWorkspace={() => setView('workspace')}
+          onPreviewMaintenance={() => setPreviewMaintenance(true)}
         />
       ) : view === 'workspace' && user ? (
         <WorkspaceLayout
@@ -123,7 +134,9 @@ function AppRouter() {
         <AuthView
           initialMode={authMode}
           onBack={() => setView('landing')}
-          onSuccess={() => setView('workspace')}
+          onSuccess={(loggedUser) =>
+            setView(loggedUser.role === 'admin' ? 'admin' : 'workspace')
+          }
         />
       ) : (
         <LandingPage
@@ -140,9 +153,10 @@ function AppRouter() {
             }
           }}
           onOpenAdmin={user?.role === 'admin' ? () => setView('admin') : undefined}
+          onPreviewMaintenance={() => setPreviewMaintenance(true)}
         />
       )}
-      {view !== 'admin' && !isMaintenanceLocked && <FloatingWhatsAppButton />}
+      {view !== 'admin' && !showMaintenanceScreen && <FloatingWhatsAppButton />}
       <ToastContainer />
     </>
   );

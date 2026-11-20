@@ -453,3 +453,190 @@ Respond strictly in JSON matching the schema.`,
     };
   }
 }
+
+export interface CustomSectionStarterProduct {
+  title: string;
+  shortSpec: string;
+  description: string;
+  buyWarning: string;
+  buyWarningLevel: 'serious' | 'info';
+  price: number;
+  stock: number;
+  credentialTemplate: string;
+}
+
+export interface CustomSectionSetupResult {
+  refinedDescription: string;
+  badgeTag: string;
+  accentColor: string;
+  recommendedIcon: string;
+  defaultBuyWarning: string;
+  defaultBuyWarningLevel: 'serious' | 'info';
+  aiNotes: string;
+  starterProducts: CustomSectionStarterProduct[];
+  source: 'gemini' | 'fallback';
+}
+
+function buildFallbackSectionSetup(params: {
+  name: string;
+  description?: string;
+  currencySymbol?: string;
+}): CustomSectionSetupResult {
+  const cleanName = params.name.trim() || 'Digital Suite';
+  const cleanDesc =
+    (params.description || '').trim() ||
+    `Verified ${cleanName} products with instant automated Vault delivery.`;
+  const lower = `${cleanName} ${cleanDesc}`.toLowerCase();
+  const isSerious =
+    /account|proxy|vpn|bank|kyc|login|2fa|stripe|paypal|fb|facebook|tiktok/.test(lower);
+  const accentColor = /vpn|proxy|security|cloud/.test(lower)
+    ? '#0EA5E9'
+    : /stream|music|video|youtube|netflix/.test(lower)
+      ? '#E11D48'
+      : /ai|bot|gpt|claude|tool/.test(lower)
+        ? '#7C3AED'
+        : '#2563EB';
+  const recommendedIcon = /ai|bot|gpt/.test(lower)
+    ? 'Sparkles'
+    : /stream|video|music/.test(lower)
+      ? 'Play'
+      : /vpn|proxy/.test(lower)
+        ? 'Shield'
+        : 'Layers';
+
+  return {
+    refinedDescription: cleanDesc,
+    badgeTag: 'NEW',
+    accentColor,
+    recommendedIcon,
+    defaultBuyWarning: isSerious
+      ? `Important Notice: Ensure you follow the recommended IP/VPN setup before logging into ${cleanName} credentials. Vault deliveries cannot be refunded after reveal.`
+      : `Delivery Info: Your ${cleanName} access details are delivered immediately to your Vault after checkout confirmation.`,
+    defaultBuyWarningLevel: isSerious ? 'serious' : 'info',
+    aiNotes: 'Configured with SureDeal Section Architect template.',
+    starterProducts: [
+      {
+        title: `${cleanName} — Starter Access`,
+        shortSpec: 'Instant Vault Delivery · Verified Quality',
+        description: `Ready-to-use ${cleanName} starter package delivered directly inside your SureDeal Vault immediately after purchase.`,
+        buyWarning: isSerious
+          ? 'Use clean residential IP and review login instructions before first sign-in.'
+          : 'Credentials appear automatically in your Vault once payment succeeds.',
+        buyWarningLevel: isSerious ? 'serious' : 'info',
+        price: 3500,
+        stock: 20,
+        credentialTemplate: 'ACCESS-{{KEY4}}-{{RAND4}}',
+      },
+      {
+        title: `${cleanName} — Pro Bundle`,
+        shortSpec: 'Priority Fulfillment · 30-Day Replacement Cover',
+        description: `Higher-capacity ${cleanName} package built for teams, creators, and heavy daily operations.`,
+        buyWarning: isSerious
+          ? 'Save your 2FA backup key immediately after opening the Vault card.'
+          : 'Includes priority replacement coverage for valid issues reported within 24h.',
+        buyWarningLevel: isSerious ? 'serious' : 'info',
+        price: 7500,
+        stock: 15,
+        credentialTemplate: 'PRO-{{KEY4}}-{{KEY4}}',
+      },
+    ],
+    source: 'fallback',
+  };
+}
+
+export async function generateCustomSectionSetupWithAi(params: {
+  name: string;
+  description?: string;
+  goal?: string;
+  currencySymbol?: string;
+}): Promise<CustomSectionSetupResult> {
+  const fallback = buildFallbackSectionSetup(params);
+  const ai = getAiClient();
+  if (!ai) {
+    return fallback;
+  }
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: `You are an e-commerce merchandiser for SureDeal Store (a Nigerian digital products platform priced in Naira ₦).
+An admin is creating a custom storefront navigation section:
+- Section Name: ${params.name}
+- Admin Short Description: ${params.description || '(none provided)'}
+- Merchandising Goal / Notes: ${params.goal || 'Fast setup with clean copy and realistic starter SKUs'}
+
+Generate:
+1. refinedDescription: crisp 1-sentence storefront subtitle (max 140 chars).
+2. badgeTag: short 1-word uppercase pill label like NEW, HOT, PRO, or VIP (max 6 chars).
+3. accentColor: hex color (#RRGGBB) fitting this niche cleanly.
+4. recommendedIcon: one of Layers, Sparkles, Shield, Play, KeyRound, Globe.
+5. defaultBuyWarning: helpful buyer notice shown before checkout.
+6. defaultBuyWarningLevel: "serious" (for login/account/proxy risk notices needing amber caution) or "info" (for general activation/delivery instructions in blue).
+7. aiNotes: brief 1-sentence admin merchandising tip.
+8. starterProducts: 2 realistic starter products with title, shortSpec, description, buyWarning, buyWarningLevel ("serious" or "info"), price (number in NGN between 1500 and 35000), stock (number 10-50), credentialTemplate (e.g. "Login: user{{RAND4}}@mail.com | Password: Pass{{KEY4}}! | 2FA: {{KEY4}}").`,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            refinedDescription: { type: Type.STRING },
+            badgeTag: { type: Type.STRING },
+            accentColor: { type: Type.STRING },
+            recommendedIcon: { type: Type.STRING },
+            defaultBuyWarning: { type: Type.STRING },
+            defaultBuyWarningLevel: { type: Type.STRING },
+            aiNotes: { type: Type.STRING },
+            starterProducts: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  shortSpec: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  buyWarning: { type: Type.STRING },
+                  buyWarningLevel: { type: Type.STRING },
+                  price: { type: Type.NUMBER },
+                  stock: { type: Type.NUMBER },
+                  credentialTemplate: { type: Type.STRING },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const parsed = JSON.parse((response.text ?? '{}').trim()) as Partial<CustomSectionSetupResult>;
+    const starterProducts = Array.isArray(parsed.starterProducts) && parsed.starterProducts.length > 0
+      ? parsed.starterProducts.slice(0, 4).map((p, i) => ({
+          title: String(p.title || `${params.name} Item #${i + 1}`).slice(0, 80),
+          shortSpec: String(p.shortSpec || 'Instant Vault Delivery').slice(0, 90),
+          description: String(p.description || fallback.refinedDescription).slice(0, 350),
+          buyWarning: String(p.buyWarning || fallback.defaultBuyWarning).slice(0, 300),
+          buyWarningLevel: (p.buyWarningLevel === 'info' ? 'info' : 'serious') as 'serious' | 'info',
+          price: Number.isFinite(Number(p.price)) && Number(p.price) > 0 ? Number(p.price) : 3500,
+          stock: Number.isFinite(Number(p.stock)) && Number(p.stock) >= 0 ? Number(p.stock) : 20,
+          credentialTemplate: String(p.credentialTemplate || 'ACCESS-{{KEY4}}-{{RAND4}}').slice(0, 140),
+        }))
+      : fallback.starterProducts;
+
+    return {
+      refinedDescription: String(parsed.refinedDescription || fallback.refinedDescription).slice(0, 180),
+      badgeTag: String(parsed.badgeTag || 'NEW').toUpperCase().slice(0, 8),
+      accentColor: /^#[0-9a-fA-F]{6}$/.test(String(parsed.accentColor || ''))
+        ? String(parsed.accentColor).toUpperCase()
+        : fallback.accentColor,
+      recommendedIcon: String(parsed.recommendedIcon || fallback.recommendedIcon),
+      defaultBuyWarning: String(parsed.defaultBuyWarning || fallback.defaultBuyWarning).slice(0, 320),
+      defaultBuyWarningLevel: parsed.defaultBuyWarningLevel === 'info' ? 'info' : 'serious',
+      aiNotes: String(parsed.aiNotes || 'Generated by AI Section Architect.'),
+      starterProducts,
+      source: 'gemini',
+    };
+  } catch (err) {
+    console.error('AI section architect error:', err);
+    return fallback;
+  }
+}
+

@@ -24,6 +24,7 @@ export function createInitialDatabaseState(
   return {
     settings: {
       siteName: 'SureDeal Store',
+      siteTagline: 'Digital solutions for every market',
       siteLogoUrl: '',
       currencyCode: 'NGN',
       currencySymbol: '₦',
@@ -41,6 +42,12 @@ export function createInitialDatabaseState(
       supportEmail: 'chibuikeexcellent592@gmail.com',
       supportWhatsapp: '+2347031537390',
       showFloatingWhatsapp: true,
+      communityChannelEnabled: true,
+      communityChannelPlatform: 'whatsapp',
+      communityChannelTitle: 'Join WhatsApp',
+      communityChannelSubtitle: 'Get latest updates & drops',
+      communityChannelUrl: 'https://wa.me/2347031537390',
+      communityChannelCta: 'Join',
       creatorName: 'Excellent',
       creatorUrl: '',
       allowNewSignups: true,
@@ -63,6 +70,7 @@ export function createInitialDatabaseState(
       bankAccountName: 'UCHECHI BLESSING OJI',
       defaultBuyWarning:
         'Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.',
+      defaultBuyWarningLevel: 'serious',
       heroKicker: "Africa's all-in-one marketplace for digital growth",
       heroHeadline: 'All-in-One Digital Tools & Growth Services in Africa',
       heroSecondaryHeadline:
@@ -138,9 +146,9 @@ export function createInitialDatabaseState(
       ctaTitle: 'Ready to start scaling faster?',
       ctaSubtitle:
         'Create your free account, open Wallet & Fund inside your dashboard to top up your Naira balance, and access every growth service right away.',
-      maintenanceHeadline: 'Scheduled system refinement in progress.',
+      maintenanceHeadline: 'Scheduled Maintenance in Progress',
       maintenanceMessage:
-        'We are updating our systems to deliver faster service. All Naira balances, receipts, and Vault credentials remain completely safe.',
+        'We’re currently performing scheduled maintenance. Please check back shortly.',
       footerTagline:
         'Premium digital tools marketplace — virtual SMS verification numbers, social media boosting, proxies, VPNs, and verified accounts with instant delivery and secure wallet payments.',
       smtpHost: '',

@@ -1,6 +1,7 @@
 {
   "settings": {
     "siteName": "SureDeal Store",
+    "siteTagline": "Digital solutions for every market",
     "siteLogoUrl": "",
     "currencyCode": "NGN",
     "currencySymbol": "₦",
@@ -17,6 +18,12 @@
     "supportEmail": "chibuikeexcellent592@gmail.com",
     "supportWhatsapp": "+2347031537390",
     "showFloatingWhatsapp": true,
+    "communityChannelEnabled": true,
+    "communityChannelPlatform": "whatsapp",
+    "communityChannelTitle": "Join WhatsApp",
+    "communityChannelSubtitle": "Get latest updates & drops",
+    "communityChannelUrl": "https://wa.me/2347031537390",
+    "communityChannelCta": "Join",
     "creatorName": "Excellent",
     "creatorUrl": "",
     "allowNewSignups": true,
@@ -38,6 +45,7 @@
     "bankAccountNumber": "7031537390",
     "bankAccountName": "UCHECHI BLESSING OJI",
     "defaultBuyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
+    "defaultBuyWarningLevel": "serious",
     "heroKicker": "Africa's all-in-one marketplace for digital growth",
     "heroHeadline": "All-in-One Digital Tools & Growth Services in Africa",
     "heroSecondaryHeadline": "SMS Verification, Social Boosting, VPN, Proxy & Verified Accounts — Fast, Secure & Affordable.",
@@ -142,7 +150,7 @@
       "status": "active",
       "referralCode": "SUREADMIN",
       "createdAt": "2026-11-16T22:59:02.292Z",
-      "lastLoginAt": "2026-11-19T15:23:31.610Z"
+      "lastLoginAt": "2026-11-20T16:09:52.354Z"
     }
   ],
   "pendingSignups": [],
@@ -226,14 +234,6 @@
       "dialCode": "+27",
       "multiplier": 0.9,
       "active": true
-    },
-    {
-      "id": "cnt_9032ea87be98",
-      "name": "Testland",
-      "code": "TL",
-      "dialCode": "+999",
-      "multiplier": 1,
-      "active": true
     }
   ],
   "smsServices": [
@@ -316,16 +316,6 @@
       "stock": 1440,
       "active": true,
       "sampleTemplate": "Your X confirmation code is {{CODE}}."
-    },
-    {
-      "id": "svc_09e7ea2cce5c",
-      "name": "Audit SMS",
-      "category": "Test",
-      "basePrice": 600,
-      "successRate": 98.5,
-      "stock": 8,
-      "active": true,
-      "sampleTemplate": "Your verification code is {{CODE}}."
     }
   ],
   "smsPool": [],
@@ -402,18 +392,6 @@
       "speedLabel": "Instant · 100K/day",
       "refillPolicy": "Lifetime Guarantee",
       "active": true
-    },
-    {
-      "id": "bst_57fc053cb885",
-      "platform": "Instagram",
-      "category": "Likes",
-      "name": "Audit Boost",
-      "ratePer1k": 1000,
-      "minQty": 100,
-      "maxQty": 5000,
-      "speedLabel": "10K / day",
-      "refillPolicy": "30-Day Refill",
-      "active": true
     }
   ],
   "boostingOrders": [],
@@ -437,39 +415,9 @@
       "id": "cat_bots",
       "name": "Automation Bots",
       "description": "Growth & workflow automation tools"
-    },
-    {
-      "id": "cat_bea33ff25963",
-      "name": "AuditCat",
-      "description": ""
     }
   ],
   "marketplaceListings": [
-    {
-      "id": "mkt_985b2bccbf65",
-      "title": "Audit Account",
-      "category": "AuditCat",
-      "popularTag": "Proxy",
-      "shortSpec": "Instant digital delivery",
-      "description": "",
-      "buyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
-      "features": [
-        "Instant Vault Key Delivery",
-        "Verified Quality"
-      ],
-      "price": 1000,
-      "stock": 1,
-      "deliveryType": "Login, Password & 2FA",
-      "imageUrl": "/src/assets/images/marketplace_digital_vault_1794869408342.jpg",
-      "logoUrl": "",
-      "bounceLogo": false,
-      "credentialTemplate": "LICENSE-{{KEY4}}-{{KEY4}}-{{RAND4}}",
-      "stockKeys": [
-        "Login: audit2 | Password: pw2 | 2FA: none"
-      ],
-      "soldCount": 1,
-      "active": true
-    },
     {
       "id": "mkt_cliproxy_30",
       "title": "30IPS CLIPROXY",
@@ -622,54 +570,9 @@
     }
   ],
   "vaultItems": [],
-  "customSections": [
-    {
-      "id": "sec_7eb909404e43",
-      "name": "Audit Deals",
-      "icon": "layers",
-      "description": "Test section",
-      "active": true,
-      "products": [
-        {
-          "id": "sprod_597b5f2c0646",
-          "sectionId": "sec_7eb909404e43",
-          "title": "Audit Deal Item",
-          "shortSpec": "Instant access",
-          "description": "",
-          "buyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
-          "price": 500,
-          "stock": 4,
-          "imageUrl": "/src/assets/images/marketplace_digital_vault_1794869408342.jpg",
-          "logoUrl": "",
-          "bounceLogo": false,
-          "credentialTemplate": "KEY-{{KEY4}}-{{KEY4}}-{{RAND4}}",
-          "active": true
-        }
-      ]
-    }
-  ],
+  "customSections": [],
   "transactions": [],
   "notifications": [
-    {
-      "id": "ntf_7f620aa009e9",
-      "title": "Creator Wallet Bonus",
-      "message": "You received a ₦50 wallet bonus drop!",
-      "type": "success",
-      "targetUserId": "all",
-      "readBy": [],
-      "createdAt": "2026-11-19T15:23:31.836Z"
-    },
-    {
-      "id": "ntf_7fd07fb4b61b",
-      "title": "Audit Alert",
-      "message": "Check notification flow",
-      "type": "info",
-      "targetUserId": "all",
-      "readBy": [
-        "usr_ce2d58f91eba"
-      ],
-      "createdAt": "2026-11-19T15:23:31.794Z"
-    },
     {
       "id": "ntf_welcome",
       "title": "Welcome to SureDeal Store",
@@ -680,24 +583,7 @@
       "createdAt": "2026-11-16T22:59:02.292Z"
     }
   ],
-  "emailLogs": [
-    {
-      "id": "mail_2a7998611713",
-      "to": "audit_user_1795101810874@example.com",
-      "subject": "Audit Direct Mail",
-      "body": "Delivered to inbox",
-      "sentBy": "chibuikeexcellent592@gmail.com",
-      "createdAt": "2026-11-19T15:23:31.811Z"
-    },
-    {
-      "id": "eml_72a83f7da742",
-      "to": "chibuikeexcellent592@gmail.com",
-      "subject": "New Boosting Purchase #bsto_618d1984bb5d — Instagram Audit Boost",
-      "body": "User: Audit User Updated (audit_user_1795101810874@example.com)\nPlatform: Instagram\nPackage: Audit Boost\nTarget Link: https://instagram.com/suredeal_test\nQuantity: 500\nAmount Paid: ₦500\nTime: 2026-11-19T15:23:31.749Z",
-      "sentBy": "audit_user_1795101810874@example.com",
-      "createdAt": "2026-11-19T15:23:31.749Z"
-    }
-  ],
+  "emailLogs": [],
   "tutorials": [
     {
       "id": "tut_moniepoint",
@@ -731,64 +617,7 @@
     }
   ],
   "tickets": [],
-  "adminAlerts": [
-    {
-      "id": "alrt_7214ac802abe",
-      "title": "New Support Ticket",
-      "detail": "audit_user_1795101810874@example.com: Audit Ticket",
-      "category": "ticket",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:31.820Z"
-    },
-    {
-      "id": "alrt_a359fb9fd537",
-      "title": "Marketplace Asset Sold",
-      "detail": "audit_user_1795101810874@example.com purchased Audit Account for ₦900",
-      "category": "order",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:31.768Z"
-    },
-    {
-      "id": "alrt_f9bd7603ba51",
-      "title": "Refill Requested",
-      "detail": "audit_user_1795101810874@example.com requested refill for bsto_618d1984bb5d",
-      "category": "order",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:31.762Z"
-    },
-    {
-      "id": "alrt_2cec357707a1",
-      "title": "New Boosting Order",
-      "detail": "Audit User Updated (audit_user_1795101810874@example.com) · Instagram Audit Boost · Qty: 500 · Link: https://instagram.com/suredeal_test · ₦500",
-      "category": "order",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:31.750Z"
-    },
-    {
-      "id": "alrt_093fd7816a28",
-      "title": "New SMS Number Rented",
-      "detail": "audit_user_1795101810874@example.com rented Audit SMS (Testland) · Awaiting number",
-      "category": "order",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:31.738Z"
-    },
-    {
-      "id": "alrt_3ad61e5fca53",
-      "title": "New SMS Number Rented",
-      "detail": "audit_user_1795101810874@example.com rented Audit SMS (Testland) · Awaiting number",
-      "category": "order",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:31.713Z"
-    },
-    {
-      "id": "alrt_ae439160afef",
-      "title": "New User Registered",
-      "detail": "Audit User (audit_user_1795101810874@example.com) created an account.",
-      "category": "user",
-      "read": false,
-      "createdAt": "2026-11-19T15:23:30.961Z"
-    }
-  ],
+  "adminAlerts": [],
   "adminPhoneAlerts": [],
   "promoCodes": [
     {
@@ -796,156 +625,11 @@
       "code": "SURE10",
       "discountType": "percent",
       "value": 10,
-      "uses": 1,
+      "uses": 0,
       "maxUses": 100,
       "active": true,
       "createdAt": "2026-11-17T02:09:02.960Z"
     }
   ],
-  "auditLogs": [
-    {
-      "id": "aud_f7894e3d3943",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "DELETE_USER_PERMANENT",
-      "target": "audit_user_1795101810874@example.com",
-      "detail": "Permanently deleted user & all records",
-      "createdAt": "2026-11-19T15:23:31.912Z"
-    },
-    {
-      "id": "aud_d5eafac56571",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-19T15:23:31.907Z"
-    },
-    {
-      "id": "aud_b192341c762e",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "CLEAR_TRANSACTIONS",
-      "target": "all",
-      "detail": "Cleared 8 transaction record(s) from Overwatch (user history preserved)",
-      "createdAt": "2026-11-19T15:23:31.890Z"
-    },
-    {
-      "id": "aud_3b42c59b3c32",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "CLEAR_ORDERS",
-      "target": "all",
-      "detail": "Cleared orders from Overwatch (all); user order history preserved",
-      "createdAt": "2026-11-19T15:23:31.886Z"
-    },
-    {
-      "id": "aud_ed83853ae38b",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "VIDEO_UPLOAD",
-      "target": "audit.mp4",
-      "detail": "Uploaded landing video /uploads/landing_1795101811864_2b958c3d.mp4",
-      "createdAt": "2026-11-19T15:23:31.865Z"
-    },
-    {
-      "id": "aud_92895894b21f",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-19T15:23:31.858Z"
-    },
-    {
-      "id": "aud_a7cea45802fd",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-19T15:23:31.850Z"
-    },
-    {
-      "id": "aud_9d61d71f9fc7",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-19T15:23:31.842Z"
-    },
-    {
-      "id": "aud_63613cf23a41",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "CREATOR_AIRDROP",
-      "target": "1 active accounts",
-      "detail": "Credited ₦50 each (Creator Wallet Bonus)",
-      "createdAt": "2026-11-19T15:23:31.836Z"
-    },
-    {
-      "id": "aud_1213750369a9",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "BULK_BOOSTING_STATUS",
-      "target": "pending -> completed",
-      "detail": "Updated 1 boosting orders",
-      "createdAt": "2026-11-19T15:23:31.757Z"
-    },
-    {
-      "id": "aud_fde19be65d6d",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "DELIVER_SMS_OTP",
-      "target": "sms_cd6ab5e733d2",
-      "detail": "Delivered OTP 849201 to audit_user_1795101810874@example.com (+15550001111)",
-      "createdAt": "2026-11-19T15:23:31.732Z"
-    },
-    {
-      "id": "aud_e18110b1cbcd",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "ASSIGN_SMS_NUMBER",
-      "target": "sms_cd6ab5e733d2",
-      "detail": "Assigned +15550001111 to audit_user_1795101810874@example.com (Audit SMS)",
-      "createdAt": "2026-11-19T15:23:31.726Z"
-    },
-    {
-      "id": "aud_f31f068a6e16",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "BALANCE_CREDIT",
-      "target": "audit_user_1795101810874@example.com",
-      "detail": "E2E Test Credit (25000)",
-      "createdAt": "2026-11-19T15:23:31.707Z"
-    },
-    {
-      "id": "aud_b67801a05d60",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_LISTING",
-      "target": "Audit Account",
-      "detail": "Price: 1000, Stock: 2",
-      "createdAt": "2026-11-19T15:23:31.702Z"
-    },
-    {
-      "id": "aud_c9c0a9f11815",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_LISTING",
-      "target": "Audit Account",
-      "detail": "Price: 0, Stock: 0",
-      "createdAt": "2026-11-19T15:23:31.695Z"
-    },
-    {
-      "id": "aud_2b2eaa5933cf",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "CREATE_LISTING",
-      "target": "Audit Account",
-      "detail": "Price: 1000, Accounts: 2",
-      "createdAt": "2026-11-19T15:23:31.689Z"
-    },
-    {
-      "id": "aud_dbd311517244",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-19T15:23:31.621Z"
-    },
-    {
-      "id": "aud_8d2cb6fca75e",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-19T15:23:31.474Z"
-    }
-  ]
+  "auditLogs": []
 }

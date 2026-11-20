@@ -5,7 +5,10 @@ import http from 'node:http';
 import path from 'node:path';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { verifyMoniepointReceiptWithAi } from './server/ai.ts';
+import {
+  generateCustomSectionSetupWithAi,
+  verifyMoniepointReceiptWithAi,
+} from './server/ai.ts';
 import { sendTransactionalEmail } from './server/mailer.ts';
 import { dispatchAdminPhoneAlert } from './server/notify.ts';
 import {
@@ -75,22 +78,22 @@ interface AuthedRequest extends Request {
   currentUser?: StoredUser;
 }
 
-function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): void {
+function resolveAuthedUser(req: AuthedRequest, res: Response): StoredUser | null {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   if (!token) {
     res.status(401).json({ error: 'Authentication required' });
-    return;
+    return null;
   }
   const payload = verifyToken(token);
   if (!payload) {
     res.status(401).json({ error: 'Session expired or invalid. Please sign in again.' });
-    return;
+    return null;
   }
   const user = store.db.users.find((u) => u.id === payload.userId);
   if (!user) {
     res.status(401).json({ error: 'Account not found' });
-    return;
+    return null;
   }
   if ((user.role === 'admin' || user.email.toLowerCase() === 'chibuikeexcellent592@gmail.com') && user.status !== 'active') {
     user.status = 'active';
@@ -98,14 +101,64 @@ function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): voi
   }
   if (user.status === 'suspended') {
     res.status(403).json({ error: 'Your account has been suspended. Contact support.' });
-    return;
+    return null;
   }
+  return user;
+}
+
+function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): void {
+  const user = resolveAuthedUser(req, res);
+  if (!user) return;
   if (store.db.settings.maintenanceMode && user.role !== 'admin') {
     res.status(503).json({ error: 'Platform is currently in maintenance mode.' });
     return;
   }
   req.currentUser = user;
   next();
+}
+
+function creditReferrerOnFirstVerifiedDeposit(depositor: StoredUser, now: string): boolean {
+  if (!depositor.referredBy || depositor.referralRewardClaimed) {
+    return false;
+  }
+  const inviter = store.db.users.find((u) => u.id === depositor.referredBy);
+  depositor.referralRewardClaimed = true;
+  const bonus = store.db.settings.referralBonusAmount || 0;
+  if (!inviter || bonus <= 0) {
+    return false;
+  }
+  inviter.balance += bonus;
+  store.db.transactions.unshift({
+    id: makeId('tx'),
+    userId: inviter.id,
+    userName: inviter.name,
+    userEmail: inviter.email,
+    type: 'referral_bonus',
+    amount: bonus,
+    status: 'completed',
+    description: `Referral bonus unlocked on ${depositor.email}'s first verified deposit`,
+    createdAt: now,
+  });
+  store.db.notifications.unshift({
+    id: makeId('ntf'),
+    title: 'Referral Bonus Credited',
+    message: `You earned ${store.db.settings.currencySymbol}${bonus.toLocaleString()} because ${depositor.name} completed their first verified deposit.`,
+    type: 'success',
+    targetUserId: inviter.id,
+    readBy: [],
+    createdAt: now,
+  });
+  return true;
+}
+
+function reorderByIds<T extends { id: string }>(items: T[], orderedIds: string[]): T[] {
+  const rank = new Map<string, number>();
+  orderedIds.forEach((id, idx) => rank.set(id, idx));
+  return [...items].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id)! : Number.MAX_SAFE_INTEGER;
+    const rb = rank.has(b.id) ? rank.get(b.id)! : Number.MAX_SAFE_INTEGER;
+    return ra - rb;
+  });
 }
 
 function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction): void {
@@ -162,6 +215,24 @@ async function startServer() {
       ok: true,
       service: 'suredeal-store-api',
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  // --- PUBLIC MAINTENANCE STATUS ---
+  app.get('/api/public/maintenance-status', (_req, res) => {
+    const s = store.db.settings;
+    res.json({
+      maintenanceMode: Boolean(s.maintenanceMode),
+      maintenanceHeadline: s.maintenanceHeadline || 'Scheduled Maintenance in Progress',
+      maintenanceMessage:
+        s.maintenanceMessage ||
+        'We’re currently performing scheduled maintenance. Please check back shortly.',
+      siteName: s.siteName || 'SureDeal Store',
+      siteLogoUrl: s.siteLogoUrl || '',
+      supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
+      supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
+      creatorName: s.creatorName || 'Excellent',
+      checkedAt: new Date().toISOString(),
     });
   });
 
@@ -277,6 +348,7 @@ async function startServer() {
       status: 'active',
       referralCode: newCode,
       referredBy: inviter?.id,
+      referralRewardClaimed: false,
       createdAt: now,
       lastLoginAt: now,
     };
@@ -297,25 +369,13 @@ async function startServer() {
       });
     }
 
-    if (inviter && store.db.settings.referralBonusAmount > 0) {
-      const bonus = store.db.settings.referralBonusAmount;
-      inviter.balance += bonus;
-      store.db.transactions.unshift({
-        id: makeId('tx'),
-        userId: inviter.id,
-        userName: inviter.name,
-        userEmail: inviter.email,
-        type: 'referral_bonus',
-        amount: bonus,
-        status: 'completed',
-        description: `Referral bonus for inviting ${newUser.email}`,
-        createdAt: now,
-      });
+    // Referrer reward is intentionally deferred until this user's first verified deposit.
+    if (inviter) {
       store.db.notifications.unshift({
         id: makeId('ntf'),
-        title: 'Referral Bonus Credited',
-        message: `You earned ${store.db.settings.currencySymbol}${bonus.toLocaleString()} because ${newUser.name} joined with your referral link.`,
-        type: 'success',
+        title: 'New Referral Registered',
+        message: `${newUser.name} signed up with your referral link. Your bonus unlocks once their first deposit is verified.`,
+        type: 'info',
         targetUserId: inviter.id,
         readBy: [],
         createdAt: now,
@@ -348,8 +408,13 @@ async function startServer() {
     res.status(201).json({ token, user: toPublicUser(newUser) });
   });
 
-  app.get('/api/auth/me', requireAuth, (req: AuthedRequest, res) => {
-    res.json({ user: toPublicUser(req.currentUser!) });
+  app.get('/api/auth/me', (req: AuthedRequest, res) => {
+    const user = resolveAuthedUser(req, res);
+    if (!user) return;
+    res.json({
+      user: toPublicUser(user),
+      maintenanceMode: Boolean(store.db.settings.maintenanceMode),
+    });
   });
 
   // --- USER DASHBOARD OVERVIEW & UNIFIED ORDERS ---
@@ -766,18 +831,33 @@ async function startServer() {
     }
     const user = req.currentUser!;
     const listingId = String(req.body?.listingId || '');
+    const rawQty = Number(req.body?.quantity ?? 1);
+    const quantity = Number.isFinite(rawQty) ? Math.floor(rawQty) : 0;
     const promoCodeStr = String(req.body?.promoCode || '').trim().toUpperCase();
     const listing = store.db.marketplaceListings.find((l) => l.id === listingId && l.active);
     if (!listing) {
       res.status(404).json({ error: 'Marketplace listing not found' });
       return;
     }
-    if (listing.stock <= 0) {
+    if (quantity < 1) {
+      res.status(400).json({ error: 'Quantity must be at least 1' });
+      return;
+    }
+    const availableStock =
+      listing.stockKeys && listing.stockKeys.length > 0 ? listing.stockKeys.length : listing.stock;
+    if (availableStock <= 0) {
       res.status(400).json({ error: 'This product is currently out of stock' });
       return;
     }
+    if (quantity > availableStock) {
+      res.status(400).json({
+        error: `Only ${availableStock} unit${availableStock === 1 ? '' : 's'} available in stock`,
+      });
+      return;
+    }
 
-    let finalPrice = listing.price;
+    const baseTotal = listing.price * quantity;
+    let finalTotal = baseTotal;
     let appliedPromo: PromoCode | undefined;
     if (promoCodeStr) {
       if (store.db.settings.allowPromoCodes === false) {
@@ -792,74 +872,95 @@ async function startServer() {
         return;
       }
       if (appliedPromo.discountType === 'percent') {
-        finalPrice = Math.max(0, Math.round(listing.price * (1 - appliedPromo.value / 100)));
+        finalTotal = Math.max(0, Math.round(baseTotal * (1 - appliedPromo.value / 100)));
       } else {
-        finalPrice = Math.max(0, listing.price - appliedPromo.value);
+        finalTotal = Math.max(0, baseTotal - appliedPromo.value);
       }
     }
 
-    if (user.balance < finalPrice) {
+    if (user.balance < finalTotal) {
       res.status(400).json({
-        error: `Insufficient wallet balance. Need ${store.db.settings.currencySymbol}${finalPrice.toLocaleString()}.`,
+        error: `Insufficient wallet balance. Need ${store.db.settings.currencySymbol}${finalTotal.toLocaleString()}.`,
       });
       return;
     }
 
     const now = new Date().toISOString();
-    user.balance -= finalPrice;
+    user.balance -= finalTotal;
     const hadStockKeys = Boolean(listing.stockKeys && listing.stockKeys.length > 0);
-    let deliveredCredential = '';
+    const createdVaultItems: (typeof store.db.vaultItems)[number][] = [];
+    const perUnitPaid = quantity === 1 ? finalTotal : Math.round(finalTotal / quantity);
+
+    for (let i = 0; i < quantity; i++) {
+      let deliveredCredential = '';
+      if (hadStockKeys && listing.stockKeys.length > 0) {
+        deliveredCredential = listing.stockKeys.shift()!;
+      } else {
+        deliveredCredential = buildCredentialFromTemplate(listing.credentialTemplate);
+      }
+      const itemPrice =
+        i === quantity - 1 ? Math.max(0, finalTotal - perUnitPaid * (quantity - 1)) : perUnitPaid;
+      createdVaultItems.push({
+        id: makeId('vlt'),
+        userId: user.id,
+        sourceType: 'marketplace',
+        sourceId: listing.id,
+        title: quantity > 1 ? `${listing.title} (${i + 1}/${quantity})` : listing.title,
+        category: listing.category,
+        price: itemPrice,
+        deliveredCredential,
+        deliveryType: listing.deliveryType,
+        buyWarningShown: listing.buyWarning || store.db.settings.defaultBuyWarning,
+        buyWarningLevel:
+          listing.buyWarningLevel || store.db.settings.defaultBuyWarningLevel || 'serious',
+        createdAt: now,
+      });
+    }
+
     if (hadStockKeys) {
-      deliveredCredential = listing.stockKeys.shift()!;
       listing.stock = listing.stockKeys.length;
     } else {
-      listing.stock = Math.max(0, listing.stock - 1);
-      deliveredCredential = buildCredentialFromTemplate(listing.credentialTemplate);
+      listing.stock = Math.max(0, listing.stock - quantity);
     }
-    listing.soldCount += 1;
+    listing.soldCount += quantity;
     if (appliedPromo) {
       appliedPromo.uses += 1;
     }
 
-    const vaultItem: (typeof store.db.vaultItems)[number] = {
-      id: makeId('vlt'),
-      userId: user.id,
-      sourceType: 'marketplace',
-      sourceId: listing.id,
-      title: listing.title,
-      category: listing.category,
-      price: finalPrice,
-      deliveredCredential,
-      deliveryType: listing.deliveryType,
-      buyWarningShown: listing.buyWarning || store.db.settings.defaultBuyWarning,
-      createdAt: now,
-    };
-
-    store.db.vaultItems.unshift(vaultItem);
+    for (let i = createdVaultItems.length - 1; i >= 0; i--) {
+      store.db.vaultItems.unshift(createdVaultItems[i]);
+    }
     store.db.transactions.unshift({
       id: makeId('tx'),
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
       type: 'purchase',
-      amount: finalPrice,
+      amount: finalTotal,
       status: 'completed',
-      description: `Marketplace Order: ${listing.title}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
+      description: `Marketplace Order: ${listing.title}${quantity > 1 ? ` × ${quantity}` : ''}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
       createdAt: now,
     });
     store.addAdminAlert(
       'Marketplace Asset Sold',
-      `${user.email} purchased ${listing.title} for ${store.db.settings.currencySymbol}${finalPrice.toLocaleString()}`,
+      `${user.email} purchased ${quantity}× ${listing.title} for ${store.db.settings.currencySymbol}${finalTotal.toLocaleString()}`,
       'order',
     );
     store.save();
 
     void dispatchAdminPhoneAlert({
       eventType: 'new_order',
-      message: `[${store.db.settings.siteName}] New Marketplace Order: ${user.email} bought ${listing.title} for ${store.db.settings.currencySymbol}${finalPrice.toLocaleString()}`,
+      message: `[${store.db.settings.siteName}] New Marketplace Order: ${user.email} bought ${quantity}× ${listing.title} for ${store.db.settings.currencySymbol}${finalTotal.toLocaleString()}`,
     });
 
-    res.status(201).json({ vaultItem, listing, balance: user.balance });
+    res.status(201).json({
+      vaultItem: createdVaultItems[0],
+      vaultItems: createdVaultItems,
+      quantity,
+      totalPaid: finalTotal,
+      listing,
+      balance: user.balance,
+    });
   });
 
   // --- CUSTOM STOREFRONT SECTIONS ---
@@ -885,6 +986,8 @@ async function startServer() {
     const user = req.currentUser!;
     const sectionId = String(req.body?.sectionId || '');
     const productId = String(req.body?.productId || '');
+    const rawQty = Number(req.body?.quantity ?? 1);
+    const quantity = Number.isFinite(rawQty) ? Math.floor(rawQty) : 0;
 
     const section = store.db.customSections.find((s) => s.id === sectionId && s.active);
     const product = section?.products.find((p) => p.id === productId && p.active);
@@ -892,53 +995,84 @@ async function startServer() {
       res.status(404).json({ error: 'Product not found in section' });
       return;
     }
+    if (quantity < 1) {
+      res.status(400).json({ error: 'Quantity must be at least 1' });
+      return;
+    }
     if (product.stock <= 0) {
       res.status(400).json({ error: 'Out of stock' });
       return;
     }
-    if (user.balance < product.price) {
-      res.status(400).json({ error: 'Insufficient wallet balance' });
+    if (quantity > product.stock) {
+      res.status(400).json({
+        error: `Only ${product.stock} unit${product.stock === 1 ? '' : 's'} available in stock`,
+      });
+      return;
+    }
+    const totalPrice = product.price * quantity;
+    if (user.balance < totalPrice) {
+      res.status(400).json({
+        error: `Insufficient wallet balance. Need ${store.db.settings.currencySymbol}${totalPrice.toLocaleString()}.`,
+      });
       return;
     }
 
     const now = new Date().toISOString();
-    user.balance -= product.price;
-    product.stock -= 1;
+    user.balance -= totalPrice;
+    product.stock -= quantity;
 
-    const vaultItem: (typeof store.db.vaultItems)[number] = {
-      id: makeId('vlt'),
-      userId: user.id,
-      sourceType: 'section',
-      sourceId: product.id,
-      title: product.title,
-      category: section.name,
-      price: product.price,
-      deliveredCredential: buildCredentialFromTemplate(product.credentialTemplate),
-      deliveryType: 'Vault Delivery',
-      buyWarningShown: product.buyWarning || store.db.settings.defaultBuyWarning,
-      createdAt: now,
-    };
+    const createdVaultItems: (typeof store.db.vaultItems)[number][] = [];
+    for (let i = 0; i < quantity; i++) {
+      createdVaultItems.push({
+        id: makeId('vlt'),
+        userId: user.id,
+        sourceType: 'section',
+        sourceId: product.id,
+        title: quantity > 1 ? `${product.title} (${i + 1}/${quantity})` : product.title,
+        category: section.name,
+        price: product.price,
+        deliveredCredential: buildCredentialFromTemplate(product.credentialTemplate),
+        deliveryType: 'Vault Delivery',
+        buyWarningShown:
+          product.buyWarning || section.defaultBuyWarning || store.db.settings.defaultBuyWarning,
+        buyWarningLevel:
+          product.buyWarningLevel ||
+          section.defaultBuyWarningLevel ||
+          store.db.settings.defaultBuyWarningLevel ||
+          'serious',
+        createdAt: now,
+      });
+    }
 
-    store.db.vaultItems.unshift(vaultItem);
+    for (let i = createdVaultItems.length - 1; i >= 0; i--) {
+      store.db.vaultItems.unshift(createdVaultItems[i]);
+    }
     store.db.transactions.unshift({
       id: makeId('tx'),
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
       type: 'purchase',
-      amount: product.price,
+      amount: totalPrice,
       status: 'completed',
-      description: `${section.name}: ${product.title}`,
+      description: `${section.name}: ${product.title}${quantity > 1 ? ` × ${quantity}` : ''}`,
       createdAt: now,
     });
     store.save();
 
     void dispatchAdminPhoneAlert({
       eventType: 'new_order',
-      message: `[${store.db.settings.siteName}] New Section Order: ${user.email} bought ${product.title} (${section.name}) for ${store.db.settings.currencySymbol}${product.price.toLocaleString()}`,
+      message: `[${store.db.settings.siteName}] New Section Order: ${user.email} bought ${quantity}× ${product.title} (${section.name}) for ${store.db.settings.currencySymbol}${totalPrice.toLocaleString()}`,
     });
 
-    res.status(201).json({ vaultItem, product, balance: user.balance });
+    res.status(201).json({
+      vaultItem: createdVaultItems[0],
+      vaultItems: createdVaultItems,
+      quantity,
+      totalPaid: totalPrice,
+      product,
+      balance: user.balance,
+    });
   });
 
   // --- WALLET & MONIEPOINT RECEIPT FUNDING ---
@@ -1010,6 +1144,7 @@ async function startServer() {
 
     if (autoVerified) {
       user.balance += amount;
+      creditReferrerOnFirstVerifiedDeposit(user, now);
     }
 
     const transaction: (typeof db.transactions)[number] = {
@@ -1212,16 +1347,36 @@ async function startServer() {
 
   app.get('/api/user/referral', requireAuth, (req: AuthedRequest, res) => {
     const user = req.currentUser!;
+    const verifiedDepositorIds = new Set(
+      store.db.transactions
+        .filter((t) => t.type === 'deposit' && t.status === 'verified')
+        .map((t) => t.userId),
+    );
     const invited = store.db.users
       .filter((u) => u.referredBy === user.id)
-      .map((u) => ({ id: u.id, name: u.name, email: u.email, createdAt: u.createdAt }));
+      .map((u) => {
+        const deposited = verifiedDepositorIds.has(u.id);
+        const rewarded = Boolean(u.referralRewardClaimed);
+        return {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          createdAt: u.createdAt,
+          deposited,
+          rewarded,
+        };
+      });
     const totalEarned = store.db.transactions
       .filter((t) => t.userId === user.id && t.type === 'referral_bonus')
       .reduce((sum, t) => sum + t.amount, 0);
+    const rewardedCount = invited.filter((i) => i.rewarded).length;
+    const pendingCount = invited.length - rewardedCount;
     res.json({
       referralCode: user.referralCode,
       bonusPerReferral: store.db.settings.referralBonusAmount,
       invited,
+      rewardedCount,
+      pendingCount,
       totalEarned,
     });
   });
@@ -1496,9 +1651,11 @@ async function startServer() {
     const adminNote = String(req.body?.adminNote || '').trim();
     const user = store.db.users.find((u) => u.id === tx.userId);
 
+    const now = new Date().toISOString();
     if (decision === 'approve') {
       if (tx.status !== 'verified' && user) {
         user.balance += tx.amount;
+        creditReferrerOnFirstVerifiedDeposit(user, now);
       }
       tx.status = 'verified';
       tx.adminNote = adminNote || 'Verified by Our Team';
@@ -1510,7 +1667,7 @@ async function startServer() {
           type: 'success',
           targetUserId: user.id,
           readBy: [],
-          createdAt: new Date().toISOString(),
+          createdAt: now,
         });
       }
     } else if (decision === 'reject' || decision === 'reverse') {
@@ -1527,7 +1684,7 @@ async function startServer() {
           type: 'warning',
           targetUserId: user.id,
           readBy: [],
-          createdAt: new Date().toISOString(),
+          createdAt: now,
         });
       }
     } else {
@@ -1555,6 +1712,7 @@ async function startServer() {
       const targetUser = store.db.users.find((u) => u.id === tx.userId);
       if (targetUser) {
         targetUser.balance += tx.amount;
+        creditReferrerOnFirstVerifiedDeposit(targetUser, now);
         store.db.notifications.unshift({
           id: makeId('ntf'),
           title: 'Deposit Approved',
@@ -2053,10 +2211,62 @@ async function startServer() {
     res.status(201).json({ category: cat });
   });
 
+  app.patch('/api/admin/marketplace-categories/:id', requireAuth, requireAdmin, (req, res) => {
+    const cat = store.db.marketplaceCategories.find((c) => c.id === req.params.id);
+    if (!cat) {
+      res.status(404).json({ error: 'Category not found' });
+      return;
+    }
+    const prevName = cat.name;
+    const nextName =
+      typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : cat.name;
+    cat.name = nextName;
+    if (typeof req.body?.description === 'string') {
+      cat.description = req.body.description.trim();
+    }
+    if (prevName !== nextName) {
+      for (const l of store.db.marketplaceListings) {
+        if (l.category === prevName) l.category = nextName;
+      }
+    }
+    store.save();
+    res.json({ category: cat });
+  });
+
   app.delete('/api/admin/marketplace-categories/:id', requireAuth, requireAdmin, (req, res) => {
     store.db.marketplaceCategories = store.db.marketplaceCategories.filter(
       (c) => c.id !== req.params.id,
     );
+    store.save();
+    res.json({ ok: true });
+  });
+
+  app.post('/api/admin/catalog/reorder', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const kind = String(req.body?.kind || '');
+    const orderedIds = Array.isArray(req.body?.orderedIds)
+      ? req.body.orderedIds.map(String)
+      : [];
+    if (orderedIds.length === 0) {
+      res.status(400).json({ error: 'orderedIds array is required' });
+      return;
+    }
+    if (kind === 'marketplace') {
+      store.db.marketplaceListings = reorderByIds(store.db.marketplaceListings, orderedIds);
+    } else if (kind === 'categories') {
+      store.db.marketplaceCategories = reorderByIds(store.db.marketplaceCategories, orderedIds);
+    } else if (kind === 'smsServices') {
+      store.db.smsServices = reorderByIds(store.db.smsServices, orderedIds);
+    } else if (kind === 'smsCountries') {
+      store.db.smsCountries = reorderByIds(store.db.smsCountries, orderedIds);
+    } else if (kind === 'boosting') {
+      store.db.boostingServices = reorderByIds(store.db.boostingServices, orderedIds);
+    } else if (kind === 'sections') {
+      store.db.customSections = reorderByIds(store.db.customSections, orderedIds);
+    } else {
+      res.status(400).json({ error: 'Unsupported reorder kind' });
+      return;
+    }
+    store.logAudit(req.currentUser!.email, 'REORDER_CATALOG', kind, `Reordered ${orderedIds.length} items`);
     store.save();
     res.json({ ok: true });
   });
@@ -2088,6 +2298,7 @@ async function startServer() {
       shortSpec: String(req.body?.shortSpec || 'Instant digital delivery').trim(),
       description: String(req.body?.description || '').trim(),
       buyWarning: String(req.body?.buyWarning || store.db.settings.defaultBuyWarning).trim(),
+      buyWarningLevel: req.body?.buyWarningLevel === 'info' ? 'info' : 'serious',
       features: features.length ? features : ['Instant Vault Key Delivery', 'Verified Quality'],
       price: Math.max(100, Number(req.body?.price || 2500)),
       stock: computedStock,
@@ -2150,6 +2361,10 @@ async function startServer() {
       shortSpec: req.body?.shortSpec ?? item.shortSpec,
       description: req.body?.description ?? item.description,
       buyWarning: req.body?.buyWarning ?? item.buyWarning,
+      buyWarningLevel:
+        req.body?.buyWarningLevel === 'info' || req.body?.buyWarningLevel === 'serious'
+          ? req.body.buyWarningLevel
+          : item.buyWarningLevel,
       deliveryType: req.body?.deliveryType ?? item.deliveryType,
       price:
         typeof req.body?.price === 'number' && Number.isFinite(req.body.price)
@@ -2180,14 +2395,55 @@ async function startServer() {
   });
 
   // --- ADMIN CUSTOM SECTIONS & PRODUCTS ---
+  app.post('/api/admin/sections/ai-setup', requireAuth, requireAdmin, async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    if (!name) {
+      res.status(400).json({ error: 'Section name is required for AI setup' });
+      return;
+    }
+    const setup = await generateCustomSectionSetupWithAi({
+      name,
+      description: String(req.body?.description || ''),
+      goal: String(req.body?.goal || ''),
+      currencySymbol: store.db.settings.currencySymbol,
+    });
+    res.json({ setup });
+  });
+
   app.post('/api/admin/sections', requireAuth, requireAdmin, (req, res) => {
+    const starterProductsRaw = Array.isArray(req.body?.products) ? req.body.products : [];
+    const secId = makeId('sec');
     const section: CustomSection = {
-      id: makeId('sec'),
+      id: secId,
       name: String(req.body?.name || 'Special Deals').trim(),
       icon: String(req.body?.icon || 'layers').trim(),
       description: String(req.body?.description || '').trim(),
+      badgeTag: typeof req.body?.badgeTag === 'string' ? req.body.badgeTag.trim().slice(0, 12) : undefined,
+      accentColor: typeof req.body?.accentColor === 'string' ? req.body.accentColor.trim() : undefined,
+      defaultBuyWarning:
+        typeof req.body?.defaultBuyWarning === 'string' ? req.body.defaultBuyWarning.trim() : undefined,
+      defaultBuyWarningLevel:
+        req.body?.defaultBuyWarningLevel === 'info' ? 'info' : req.body?.defaultBuyWarningLevel === 'serious' ? 'serious' : undefined,
+      aiNotes: typeof req.body?.aiNotes === 'string' ? req.body.aiNotes.trim() : undefined,
       active: req.body?.active !== false,
-      products: [],
+      products: starterProductsRaw.map((p: Partial<CustomSectionProduct>) => ({
+        id: makeId('sprod'),
+        sectionId: secId,
+        title: String(p.title || 'Section Product').trim(),
+        shortSpec: String(p.shortSpec || 'Instant access').trim(),
+        description: String(p.description || '').trim(),
+        buyWarning: String(p.buyWarning || store.db.settings.defaultBuyWarning).trim(),
+        buyWarningLevel: p.buyWarningLevel === 'info' ? 'info' : 'serious',
+        price: Math.max(50, Number(p.price || 1500)),
+        stock: Math.max(0, Number(p.stock || 20)),
+        imageUrl:
+          String(p.imageUrl || '').trim() ||
+          '/src/assets/images/marketplace_digital_vault_1794869408342.jpg',
+        logoUrl: String(p.logoUrl || '').trim(),
+        bounceLogo: Boolean(p.bounceLogo),
+        credentialTemplate: String(p.credentialTemplate || 'ACCESS-{{KEY4}}-{{RAND4}}'),
+        active: p.active !== false,
+      })),
     };
     store.db.customSections.push(section);
     store.save();
@@ -2200,9 +2456,21 @@ async function startServer() {
       res.status(404).json({ error: 'Section not found' });
       return;
     }
-    section.name = req.body?.name ?? section.name;
-    section.icon = req.body?.icon ?? section.icon;
-    section.description = req.body?.description ?? section.description;
+    if (typeof req.body?.name === 'string' && req.body.name.trim()) section.name = req.body.name.trim();
+    if (typeof req.body?.icon === 'string' && req.body.icon.trim()) section.icon = req.body.icon.trim();
+    if (typeof req.body?.description === 'string') section.description = req.body.description.trim();
+    if (typeof req.body?.badgeTag === 'string') section.badgeTag = req.body.badgeTag.trim().slice(0, 12);
+    if (typeof req.body?.accentColor === 'string') section.accentColor = req.body.accentColor.trim();
+    if (typeof req.body?.defaultBuyWarning === 'string') {
+      section.defaultBuyWarning = req.body.defaultBuyWarning.trim();
+    }
+    if (
+      req.body?.defaultBuyWarningLevel === 'info' ||
+      req.body?.defaultBuyWarningLevel === 'serious'
+    ) {
+      section.defaultBuyWarningLevel = req.body.defaultBuyWarningLevel;
+    }
+    if (typeof req.body?.aiNotes === 'string') section.aiNotes = req.body.aiNotes.trim();
     if (typeof req.body?.active === 'boolean') section.active = req.body.active;
     store.save();
     res.json({ section });
@@ -2227,7 +2495,13 @@ async function startServer() {
       title: String(req.body?.title || 'Section Product').trim(),
       shortSpec: String(req.body?.shortSpec || 'Instant access').trim(),
       description: String(req.body?.description || '').trim(),
-      buyWarning: String(req.body?.buyWarning || store.db.settings.defaultBuyWarning).trim(),
+      buyWarning: String(
+        req.body?.buyWarning || section.defaultBuyWarning || store.db.settings.defaultBuyWarning,
+      ).trim(),
+      buyWarningLevel:
+        req.body?.buyWarningLevel === 'info' || req.body?.buyWarningLevel === 'serious'
+          ? req.body.buyWarningLevel
+          : section.defaultBuyWarningLevel || 'serious',
       price: Math.max(50, Number(req.body?.price || 1500)),
       stock: Math.max(0, Number(req.body?.stock || 25)),
       imageUrl:
@@ -2243,6 +2517,60 @@ async function startServer() {
     section.products.push(product);
     store.save();
     res.status(201).json({ product });
+  });
+
+  app.patch('/api/admin/section-products/:id', requireAuth, requireAdmin, (req, res) => {
+    let targetProduct: CustomSectionProduct | undefined;
+    for (const s of store.db.customSections) {
+      const found = s.products.find((p) => p.id === req.params.id);
+      if (found) {
+        targetProduct = found;
+        break;
+      }
+    }
+    if (!targetProduct) {
+      res.status(404).json({ error: 'Section product not found' });
+      return;
+    }
+    Object.assign(targetProduct, {
+      title:
+        typeof req.body?.title === 'string' && req.body.title.trim()
+          ? req.body.title.trim()
+          : targetProduct.title,
+      shortSpec:
+        typeof req.body?.shortSpec === 'string' ? req.body.shortSpec.trim() : targetProduct.shortSpec,
+      description:
+        typeof req.body?.description === 'string'
+          ? req.body.description.trim()
+          : targetProduct.description,
+      buyWarning:
+        typeof req.body?.buyWarning === 'string'
+          ? req.body.buyWarning.trim()
+          : targetProduct.buyWarning,
+      buyWarningLevel:
+        req.body?.buyWarningLevel === 'info' || req.body?.buyWarningLevel === 'serious'
+          ? req.body.buyWarningLevel
+          : targetProduct.buyWarningLevel,
+      price:
+        typeof req.body?.price === 'number' && Number.isFinite(req.body.price)
+          ? Math.max(0, req.body.price)
+          : targetProduct.price,
+      stock:
+        typeof req.body?.stock === 'number' && Number.isFinite(req.body.stock)
+          ? Math.max(0, Math.floor(req.body.stock))
+          : targetProduct.stock,
+      imageUrl: typeof req.body?.imageUrl === 'string' ? req.body.imageUrl : targetProduct.imageUrl,
+      logoUrl: typeof req.body?.logoUrl === 'string' ? req.body.logoUrl : targetProduct.logoUrl,
+      bounceLogo:
+        typeof req.body?.bounceLogo === 'boolean' ? req.body.bounceLogo : targetProduct.bounceLogo,
+      credentialTemplate:
+        typeof req.body?.credentialTemplate === 'string'
+          ? req.body.credentialTemplate
+          : targetProduct.credentialTemplate,
+      active: typeof req.body?.active === 'boolean' ? req.body.active : targetProduct.active,
+    });
+    store.save();
+    res.json({ product: targetProduct });
   });
 
   app.delete('/api/admin/section-products/:id', requireAuth, requireAdmin, (req, res) => {
@@ -2473,6 +2801,9 @@ async function startServer() {
     if (typeof body.siteName === 'string' && body.siteName.trim()) {
       s.siteName = body.siteName.trim();
     }
+    if (typeof body.siteTagline === 'string') {
+      s.siteTagline = body.siteTagline.trim();
+    }
     if (typeof body.siteLogoUrl === 'string') s.siteLogoUrl = body.siteLogoUrl.trim();
     if (typeof body.currencyCode === 'string' && body.currencyCode.trim()) {
       s.currencyCode = body.currencyCode.trim().toUpperCase();
@@ -2511,6 +2842,27 @@ async function startServer() {
     if (typeof body.supportWhatsapp === 'string') s.supportWhatsapp = body.supportWhatsapp.trim();
     if (typeof body.showFloatingWhatsapp === 'boolean') {
       s.showFloatingWhatsapp = body.showFloatingWhatsapp;
+    }
+    if (typeof body.communityChannelEnabled === 'boolean') {
+      s.communityChannelEnabled = body.communityChannelEnabled;
+    }
+    if (
+      body.communityChannelPlatform === 'whatsapp' ||
+      body.communityChannelPlatform === 'telegram'
+    ) {
+      s.communityChannelPlatform = body.communityChannelPlatform;
+    }
+    if (typeof body.communityChannelTitle === 'string') {
+      s.communityChannelTitle = body.communityChannelTitle.trim();
+    }
+    if (typeof body.communityChannelSubtitle === 'string') {
+      s.communityChannelSubtitle = body.communityChannelSubtitle.trim();
+    }
+    if (typeof body.communityChannelUrl === 'string') {
+      s.communityChannelUrl = body.communityChannelUrl.trim();
+    }
+    if (typeof body.communityChannelCta === 'string') {
+      s.communityChannelCta = body.communityChannelCta.trim();
     }
     if (typeof body.creatorName === 'string') s.creatorName = body.creatorName.trim();
     if (typeof body.creatorUrl === 'string') s.creatorUrl = body.creatorUrl.trim();
@@ -2561,6 +2913,9 @@ async function startServer() {
     }
     if (typeof body.defaultBuyWarning === 'string') {
       s.defaultBuyWarning = body.defaultBuyWarning.trim();
+    }
+    if (body.defaultBuyWarningLevel === 'info' || body.defaultBuyWarningLevel === 'serious') {
+      s.defaultBuyWarningLevel = body.defaultBuyWarningLevel;
     }
     if (typeof body.heroKicker === 'string') s.heroKicker = body.heroKicker.trim();
     if (typeof body.heroHeadline === 'string' && body.heroHeadline.trim()) {

@@ -15,7 +15,11 @@ interface WalletResponse {
   transactions: WalletTransaction[];
 }
 
-export function WalletPanel() {
+interface WalletPanelProps {
+  onViewHistory?: () => void;
+}
+
+export function WalletPanel({ onViewHistory }: WalletPanelProps) {
   const { user, catalog, updateLocalBalance, refreshUser, notify } = useApp();
   const symbol = catalog?.settings?.currencySymbol || '₦';
 
@@ -302,9 +306,20 @@ export function WalletPanel() {
         {/* Transaction Ledger */}
         <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-            <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-              Wallet Ledger
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Recent Wallet Activity
+              </h2>
+              {onViewHistory && (
+                <button
+                  type="button"
+                  onClick={onViewHistory}
+                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                >
+                  View Full History →
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
               {[
                 { id: 'all', label: 'All' },

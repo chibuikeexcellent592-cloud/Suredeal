@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowRight,
   ArrowUp,
@@ -27,6 +27,7 @@ interface LandingPageProps {
   onNavigateAuth: (mode: 'login' | 'signup') => void;
   onEnterWorkspace: () => void;
   onOpenAdmin?: () => void;
+  onPreviewMaintenance?: () => void;
 }
 
 const LEGACY_KICKER = 'Social Boosting · SMS Verification · Digital Vault';
@@ -39,13 +40,11 @@ export function LandingPage({
   onNavigateAuth,
   onEnterWorkspace,
   onOpenAdmin,
+  onPreviewMaintenance,
 }: LandingPageProps) {
   const { user, catalog, theme, toggleTheme } = useApp();
   const [rateTab, setRateTab] = useState<'sms' | 'boosting' | 'marketplace'>('boosting');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [previewMaintenance, setPreviewMaintenance] = useState(false);
-  const maintenanceTapCountRef = useRef(0);
-  const maintenanceTapTimerRef = useRef<number | null>(null);
 
   const settings = catalog?.settings;
   const siteName = settings?.siteName || 'SureDeal Store';
@@ -59,123 +58,6 @@ export function LandingPage({
   const smsServices = catalog?.smsServices || [];
   const boostingServices = catalog?.boostingServices || [];
   const listings = catalog?.marketplaceListings || [];
-
-  const handleMaintenanceScreenTap = () => {
-    maintenanceTapCountRef.current += 1;
-    if (maintenanceTapTimerRef.current) {
-      window.clearTimeout(maintenanceTapTimerRef.current);
-    }
-    if (maintenanceTapCountRef.current >= 10) {
-      maintenanceTapCountRef.current = 0;
-      onNavigateAuth('login');
-      return;
-    }
-    maintenanceTapTimerRef.current = window.setTimeout(() => {
-      maintenanceTapCountRef.current = 0;
-    }, 4500);
-  };
-
-  // Maintenance Mode screen (10 taps anywhere or Team Access opens Admin login)
-  if (settings?.maintenanceMode && (user?.role !== 'admin' || previewMaintenance)) {
-    return (
-      <div
-        onClick={handleMaintenanceScreenTap}
-        className="min-h-screen flex flex-col justify-between px-6 py-12 bg-white dark:bg-[#090D16] text-slate-900 dark:text-slate-100 select-none touch-manipulation"
-      >
-        {user?.role === 'admin' && previewMaintenance && (
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-xl w-full mx-auto mb-4 px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold flex flex-wrap items-center justify-between gap-2 shadow-sm"
-          >
-            <span>Previewing public Maintenance Screen (as normal users see it)</span>
-            <button
-              type="button"
-              onClick={() => setPreviewMaintenance(false)}
-              className="px-3 py-1 rounded-lg bg-slate-950 text-white hover:bg-slate-800 cursor-pointer"
-            >
-              Exit Preview
-            </button>
-          </div>
-        )}
-
-        <div className="max-w-xl w-full mx-auto pt-4 flex items-center justify-between">
-          <span className="font-display text-base font-bold tracking-tight uppercase">
-            {siteName}
-          </span>
-          <span className="text-xs text-slate-400 font-mono">MAINTENANCE</span>
-        </div>
-
-        <main className="max-w-xl w-full mx-auto my-auto py-16 space-y-6">
-          <BrandLogo
-            logoUrl={settings?.siteLogoUrl}
-            siteName={siteName}
-            size="lg"
-            shape="rounded"
-          />
-          <h1
-            className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight"
-            style={{ textWrap: 'balance' }}
-          >
-            {settings?.maintenanceHeadline || 'Scheduled system refinement in progress.'}
-          </h1>
-          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 leading-relaxed max-w-md">
-            {settings?.maintenanceMessage ||
-              `We are updating ${siteName} to deliver faster service. All Naira (${symbol}) balances, receipts, and Vault credentials remain completely safe.`}
-          </p>
-
-          {/* Green WhatsApp Support Line in the middle */}
-          <div className="pt-2">
-            <a
-              href={whatsappHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="w-full sm:w-auto inline-flex items-center justify-between gap-4 px-5 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-lg shadow-emerald-600/20 transition-colors"
-            >
-              <span className="flex items-center gap-3">
-                <MessageCircle className="w-5 h-5 shrink-0" />
-                <span>
-                  <span className="block font-bold leading-tight">Support Line · WhatsApp</span>
-                  <span className="block text-xs text-emerald-100 font-mono mt-0.5">
-                    {whatsappDisplay}
-                  </span>
-                </span>
-              </span>
-              <ArrowRight className="w-4 h-4 shrink-0" />
-            </a>
-          </div>
-
-          <p className="text-xs text-slate-500 pt-1">
-            Email support:{' '}
-            <a
-              href={`mailto:${contactEmail}`}
-              onClick={(e) => e.stopPropagation()}
-              className="underline hover:text-slate-800 dark:hover:text-slate-200"
-            >
-              {contactEmail}
-            </a>
-          </p>
-        </main>
-
-        <footer className="max-w-xl w-full mx-auto pb-4 border-t border-slate-100 dark:border-slate-800 pt-5 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-2">
-          <span>&copy; {new Date().getFullYear()} {creatorName}. All rights reserved.</span>
-          <div className="flex items-center gap-3">
-            <span>Back online shortly</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onNavigateAuth('login');
-              }}
-              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline cursor-pointer"
-            >
-              Team Access
-            </button>
-          </div>
-        </footer>
-      </div>
-    );
-  }
 
   const rawVideoUrl = settings?.landingVideoUrl || '';
   const isUploadedVideo =
@@ -390,13 +272,15 @@ export function LandingPage({
           <span>
             Maintenance Lockdown is ACTIVE — public visitors &amp; regular users see the maintenance page.
           </span>
-          <button
-            type="button"
-            onClick={() => setPreviewMaintenance(true)}
-            className="px-3 py-1 rounded-full bg-slate-950 text-white hover:bg-slate-800 cursor-pointer"
-          >
-            Preview Maintenance Screen
-          </button>
+          {onPreviewMaintenance && (
+            <button
+              type="button"
+              onClick={onPreviewMaintenance}
+              className="px-3 py-1 rounded-full bg-slate-950 text-white hover:bg-slate-800 cursor-pointer"
+            >
+              Preview Maintenance Screen
+            </button>
+          )}
           {onOpenAdmin && (
             <button
               type="button"

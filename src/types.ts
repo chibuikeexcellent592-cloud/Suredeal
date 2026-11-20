@@ -23,6 +23,7 @@ export interface LandingWorkflowStep {
 
 export interface PlatformSettings {
   siteName: string;
+  siteTagline?: string;
   siteLogoUrl: string;
   currencyCode: string;
   currencySymbol: string;
@@ -39,6 +40,12 @@ export interface PlatformSettings {
   supportEmail: string;
   supportWhatsapp?: string;
   showFloatingWhatsapp?: boolean;
+  communityChannelEnabled?: boolean;
+  communityChannelPlatform?: 'whatsapp' | 'telegram';
+  communityChannelTitle?: string;
+  communityChannelSubtitle?: string;
+  communityChannelUrl?: string;
+  communityChannelCta?: string;
   creatorName?: string;
   creatorUrl?: string;
   allowNewSignups?: boolean;
@@ -60,6 +67,7 @@ export interface PlatformSettings {
   bankAccountNumber: string;
   bankAccountName: string;
   defaultBuyWarning: string;
+  defaultBuyWarningLevel?: 'serious' | 'info';
   heroKicker: string;
   heroHeadline: string;
   heroSecondaryHeadline?: string;
@@ -92,6 +100,18 @@ export interface PlatformSettings {
   resendApiKey?: string;
 }
 
+export interface MaintenanceStatusResponse {
+  maintenanceMode: boolean;
+  maintenanceHeadline: string;
+  maintenanceMessage: string;
+  siteName: string;
+  siteLogoUrl: string;
+  supportWhatsapp: string;
+  supportEmail: string;
+  creatorName: string;
+  checkedAt: string;
+}
+
 export interface PublicUser {
   id: string;
   name: string;
@@ -101,6 +121,7 @@ export interface PublicUser {
   status: UserStatus;
   referralCode: string;
   referredBy?: string;
+  referralRewardClaimed?: boolean;
   emailVerified?: boolean;
   createdAt: string;
   lastLoginAt?: string;
@@ -200,6 +221,7 @@ export interface MarketplaceListing {
   shortSpec: string;
   description: string;
   buyWarning: string;
+  buyWarningLevel?: 'serious' | 'info';
   features: string[];
   price: number;
   stock: number;
@@ -224,6 +246,7 @@ export interface VaultItem {
   deliveredCredential: string;
   deliveryType: string;
   buyWarningShown?: string;
+  buyWarningLevel?: 'serious' | 'info';
   createdAt: string;
   adminCleared?: boolean;
 }
@@ -235,6 +258,7 @@ export interface CustomSectionProduct {
   shortSpec: string;
   description: string;
   buyWarning: string;
+  buyWarningLevel?: 'serious' | 'info';
   price: number;
   stock: number;
   imageUrl: string;
@@ -249,6 +273,11 @@ export interface CustomSection {
   name: string;
   icon: string;
   description: string;
+  badgeTag?: string;
+  accentColor?: string;
+  defaultBuyWarning?: string;
+  defaultBuyWarningLevel?: 'serious' | 'info';
+  aiNotes?: string;
   active: boolean;
   products: CustomSectionProduct[];
 }

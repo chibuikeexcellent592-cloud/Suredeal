@@ -5,9 +5,12 @@ import {
   Check,
   ChevronRight,
   Copy,
+  Info,
   KeyRound,
   LayoutGrid,
   Lock,
+  Minus,
+  Plus,
   Search,
   ShieldCheck,
   ShoppingBag,
@@ -46,9 +49,10 @@ function ProductCoverBanner({
         src={imageUrl || ''}
         alt={title}
         fallbackTitle={title}
+        smartFit
         className="w-full h-full object-cover"
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/35 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/15 via-transparent to-transparent pointer-events-none" />
     </div>
   );
 }
@@ -161,6 +165,7 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
 
   // Checkout / Buy Modal State
   const [checkoutItem, setCheckoutItem] = useState<MarketplaceListing | null>(null);
+  const [quantity, setQuantity] = useState(1);
   const [promoCode, setPromoCode] = useState('');
   const [buyingId, setBuyingId] = useState<string | null>(null);
 
@@ -189,6 +194,7 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
 
   useEffect(() => {
     if (!checkoutItem) return;
+    setQuantity(1);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setCheckoutItem(null);
     };
@@ -243,25 +249,34 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
   }, [filteredListings]);
 
   const handleConfirmPurchase = async (listing: MarketplaceListing) => {
+    const safeQty = Math.max(1, Math.min(listing.stock || 1, Math.floor(quantity || 1)));
     setBuyingId(listing.id);
     try {
       const res = await apiFetch<{
         vaultItem: VaultItem;
+        vaultItems?: VaultItem[];
+        quantity?: number;
         listing: MarketplaceListing;
         balance: number;
       }>('/api/marketplace/purchase', {
         method: 'POST',
         body: JSON.stringify({
           listingId: listing.id,
+          quantity: safeQty,
           promoCode: promoCode.trim() || undefined,
         }),
       });
-      setVault((prev) => [res.vaultItem, ...prev]);
+      const added = res.vaultItems && res.vaultItems.length > 0 ? res.vaultItems : [res.vaultItem];
+      setVault((prev) => [...added, ...prev]);
       setListings((prev) => prev.map((l) => (l.id === listing.id ? res.listing : l)));
       updateLocalBalance(res.balance);
       setCheckoutItem(null);
+      setQuantity(1);
       setPromoCode('');
-      notify(`${listing.title} delivered to Orders & Vault!`, 'success');
+      notify(
+        `${safeQty > 1 ? `${safeQty}× ` : ''}${listing.title} delivered to Orders & Vault!`,
+        'success',
+      );
       if (onOpenOrders) {
         onOpenOrders();
       } else {
@@ -284,6 +299,8 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
     checkoutItem?.buyWarning ||
     defaultBuyWarning ||
     'Verify proxy format and platform rules before deployment. Credentials are delivered once.';
+  const activeWarningLevel =
+    checkoutItem?.buyWarningLevel || catalog?.settings?.defaultBuyWarningLevel || 'serious';
 
   const marketplacePaused = catalog?.settings?.enableMarketplace === false;
 
@@ -709,15 +726,114 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
               )}
 
               {/* Admin-Authored Buy Page Warning Box */}
-              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-1.5">
-                <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <span>Important Buyer Warning</span>
+              <div
+                className={`p-4 rounded-2xl border space-y-1.5 ${
+                  activeWarningLevel === 'info'
+                    ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-300 dark:border-sky-800'
+                    : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
+                }`}
+              >
+                <div
+                  className={`flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider ${
+                    activeWarningLevel === 'info'
+                      ? 'text-sky-800 dark:text-sky-300'
+                      : 'text-amber-800 dark:text-amber-300'
+                  }`}
+                >
+                  {activeWarningLevel === 'info' ? (
+                    <Info className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  )}
+                  <span>
+                    {activeWarningLevel === 'info' ? 'Buyer Guide & Info' : 'Important Buyer Warning'}
+                  </span>
                 </div>
-                <p className="text-xs text-amber-900 dark:text-amber-100 leading-relaxed whitespace-pre-line">
+                <p
+                  className={`text-xs leading-relaxed whitespace-pre-line ${
+                    activeWarningLevel === 'info'
+                      ? 'text-sky-900 dark:text-sky-100'
+                      : 'text-amber-900 dark:text-amber-100'
+                  }`}
+                >
                   {activeBuyWarning}
                 </p>
               </div>
+
+              {/* Quantity Selector */}
+              {checkoutItem.stock > 0 && (
+                <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 space-y-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        Select Quantity
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {formatNaira(checkoutItem.price, symbol)} each · {checkoutItem.stock} in stock
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={quantity <= 1}
+                        onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                        className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={checkoutItem.stock}
+                        value={quantity}
+                        onChange={(e) => {
+                          const parsed = Math.floor(Number(e.target.value));
+                          if (!Number.isFinite(parsed) || parsed < 1) {
+                            setQuantity(1);
+                          } else {
+                            setQuantity(Math.min(checkoutItem.stock, parsed));
+                          }
+                        }}
+                        className="w-14 h-8 text-center text-xs font-mono font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        aria-label="Purchase quantity"
+                      />
+                      <button
+                        type="button"
+                        disabled={quantity >= checkoutItem.stock}
+                        onClick={() =>
+                          setQuantity((q) => Math.min(checkoutItem.stock, q + 1))
+                        }
+                        className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                        aria-label="Increase quantity"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {checkoutItem.stock > 1 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[1, 2, 5, 10]
+                        .filter((n) => n <= checkoutItem.stock)
+                        .map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setQuantity(preset)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                              quantity === preset
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                            }`}
+                          >
+                            {preset}x
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Promo Code Input */}
               <div className="flex items-center gap-2">
@@ -736,17 +852,21 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
               <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                    Total Payable
+                    Total Payable {quantity > 1 ? `(${quantity} units)` : ''}
                   </p>
                   <p className="font-display text-2xl font-extrabold text-blue-600 dark:text-blue-400 tabular-nums">
-                    {formatNaira(checkoutItem.price, symbol)}
+                    {formatNaira(checkoutItem.price * Math.max(1, quantity), symbol)}
                   </p>
                 </div>
 
                 <button
                   type="button"
                   disabled={
-                    buyingId === checkoutItem.id || checkoutItem.stock <= 0 || marketplacePaused
+                    buyingId === checkoutItem.id ||
+                    checkoutItem.stock <= 0 ||
+                    quantity < 1 ||
+                    quantity > checkoutItem.stock ||
+                    marketplacePaused
                   }
                   onClick={() => handleConfirmPurchase(checkoutItem)}
                   className="inline-flex items-center gap-2 px-5 py-3 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 disabled:opacity-50 rounded-xl shadow-md cursor-pointer"
@@ -758,7 +878,9 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
                       ? 'Out of Stock'
                       : buyingId === checkoutItem.id
                         ? 'Delivering...'
-                        : 'Confirm & Buy Now'}
+                        : quantity > 1
+                          ? `Buy ${quantity} Units`
+                          : 'Confirm & Buy Now'}
                 </button>
               </div>
             </div>
@@ -777,6 +899,7 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
   const [loading, setLoading] = useState(true);
   const [buyingId, setBuyingId] = useState<string | null>(null);
   const [selectedProd, setSelectedProd] = useState<CustomSectionProduct | null>(null);
+  const [secQty, setSecQty] = useState(1);
 
   useEffect(() => {
     setLoading(true);
@@ -788,6 +911,7 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
 
   useEffect(() => {
     if (!selectedProd) return;
+    setSecQty(1);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setSelectedProd(null);
     };
@@ -796,13 +920,14 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
   }, [selectedProd]);
 
   const handleBuy = async (prod: CustomSectionProduct) => {
+    const safeQty = Math.max(1, Math.min(prod.stock || 1, Math.floor(secQty || 1)));
     setBuyingId(prod.id);
     try {
       const res = await apiFetch<{ product: CustomSectionProduct; balance: number }>(
         '/api/sections/purchase',
         {
           method: 'POST',
-          body: JSON.stringify({ sectionId, productId: prod.id }),
+          body: JSON.stringify({ sectionId, productId: prod.id, quantity: safeQty }),
         },
       );
       updateLocalBalance(res.balance);
@@ -815,7 +940,11 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
           : prev,
       );
       setSelectedProd(null);
-      notify(`${prod.title} delivered! Check your Orders section.`, 'success');
+      setSecQty(1);
+      notify(
+        `${safeQty > 1 ? `${safeQty}× ` : ''}${prod.title} delivered! Check your Orders section.`,
+        'success',
+      );
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Purchase failed', 'error');
     } finally {
@@ -898,11 +1027,11 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
 
       {selectedProd && (
         <div
-          className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
           onClick={() => setSelectedProd(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative">
@@ -936,26 +1065,122 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
             <p className="text-sm text-slate-600 dark:text-slate-300">
               {selectedProd.description || selectedProd.shortSpec}
             </p>
-            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-1">
-              <p className="text-xs font-extrabold uppercase text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-amber-600" />
-                Important Buyer Warning
-              </p>
-              <p className="text-xs text-amber-900 dark:text-amber-100">
-                {selectedProd.buyWarning || defaultBuyWarning}
-              </p>
-            </div>
+            {(() => {
+              const warningLevel =
+                selectedProd.buyWarningLevel ||
+                section.defaultBuyWarningLevel ||
+                catalog?.settings?.defaultBuyWarningLevel ||
+                'serious';
+              const warningText =
+                selectedProd.buyWarning || section.defaultBuyWarning || defaultBuyWarning;
+              if (!warningText) return null;
+              return (
+                <div
+                  className={`p-4 rounded-2xl border space-y-1 ${
+                    warningLevel === 'info'
+                      ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-300 dark:border-sky-800'
+                      : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
+                  }`}
+                >
+                  <p
+                    className={`text-xs font-extrabold uppercase flex items-center gap-1.5 ${
+                      warningLevel === 'info'
+                        ? 'text-sky-800 dark:text-sky-300'
+                        : 'text-amber-800 dark:text-amber-300'
+                    }`}
+                  >
+                    {warningLevel === 'info' ? (
+                      <Info className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    )}
+                    {warningLevel === 'info' ? 'Buyer Guide & Info' : 'Important Buyer Warning'}
+                  </p>
+                  <p
+                    className={`text-xs whitespace-pre-line ${
+                      warningLevel === 'info'
+                        ? 'text-sky-900 dark:text-sky-100'
+                        : 'text-amber-900 dark:text-amber-100'
+                    }`}
+                  >
+                    {warningText}
+                  </p>
+                </div>
+              );
+            })()}
+            {selectedProd.stock > 0 && (
+              <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                    Quantity
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {formatNaira(selectedProd.price, symbol)} each · {selectedProd.stock} in stock
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={secQty <= 1}
+                    onClick={() => setSecQty((q) => Math.max(1, q - 1))}
+                    className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                    aria-label="Decrease quantity"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={selectedProd.stock}
+                    value={secQty}
+                    onChange={(e) => {
+                      const parsed = Math.floor(Number(e.target.value));
+                      if (!Number.isFinite(parsed) || parsed < 1) {
+                        setSecQty(1);
+                      } else {
+                        setSecQty(Math.min(selectedProd.stock, parsed));
+                      }
+                    }}
+                    className="w-14 h-8 text-center text-xs font-mono font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                    aria-label="Purchase quantity"
+                  />
+                  <button
+                    type="button"
+                    disabled={secQty >= selectedProd.stock}
+                    onClick={() => setSecQty((q) => Math.min(selectedProd.stock, q + 1))}
+                    className="w-8 h-8 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                    aria-label="Increase quantity"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <span className="font-display text-xl font-extrabold text-blue-600 dark:text-blue-400 tabular-nums">
-                {formatNaira(selectedProd.price, symbol)}
-              </span>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Total {secQty > 1 ? `(${secQty} units)` : ''}
+                </p>
+                <span className="font-display text-xl font-extrabold text-blue-600 dark:text-blue-400 tabular-nums">
+                  {formatNaira(selectedProd.price * Math.max(1, secQty), symbol)}
+                </span>
+              </div>
               <button
                 type="button"
-                disabled={buyingId === selectedProd.id || selectedProd.stock <= 0}
+                disabled={
+                  buyingId === selectedProd.id ||
+                  selectedProd.stock <= 0 ||
+                  secQty < 1 ||
+                  secQty > selectedProd.stock
+                }
                 onClick={() => handleBuy(selectedProd)}
-                className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
+                className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl cursor-pointer"
               >
-                {buyingId === selectedProd.id ? 'Delivering...' : 'Confirm & Buy Now'}
+                {buyingId === selectedProd.id
+                  ? 'Delivering...'
+                  : secQty > 1
+                    ? `Buy ${secQty} Units`
+                    : 'Confirm & Buy Now'}
               </button>
             </div>
             </div>

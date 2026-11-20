@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  Info,
   KeyRound,
   PackageCheck,
   Phone,
@@ -375,8 +376,18 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
                       )}
 
                       {item.buyWarningShown && (
-                        <div className="p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-                          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div
+                          className={`p-3 rounded-xl border flex items-start gap-2 text-xs ${
+                            item.buyWarningLevel === 'info'
+                              ? 'bg-sky-50/80 dark:bg-sky-950/30 border-sky-200 dark:border-sky-900/60 text-sky-900 dark:text-sky-200'
+                              : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200'
+                          }`}
+                        >
+                          {item.buyWarningLevel === 'info' ? (
+                            <Info className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          )}
                           <span>{item.buyWarningShown}</span>
                         </div>
                       )}

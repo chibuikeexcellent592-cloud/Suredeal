@@ -385,7 +385,7 @@ export function SupportPanel() {
   );
 }
 
-export function SettingsPanel() {
+export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void }) {
   const { user, catalog, refreshUser, notify } = useApp();
   const symbol = catalog?.settings?.currencySymbol || '₦';
   const [name, setName] = useState(user?.name || '');
@@ -450,13 +450,25 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          Account Settings &amp; Referrals
-        </h1>
-        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Manage your profile, security credentials, and referral earnings.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+            Account Settings
+          </h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+            Manage your profile details and account password.
+          </p>
+        </div>
+        {onOpenReferral && (
+          <button
+            type="button"
+            onClick={onOpenReferral}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 rounded-xl cursor-pointer"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Refer &amp; Earn Hub →
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

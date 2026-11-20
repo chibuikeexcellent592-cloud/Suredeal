@@ -7,14 +7,23 @@ interface SafeImageProps {
   alt: string;
   className?: string;
   fallbackTitle?: string;
+  smartFit?: boolean;
 }
 
-export function SafeImage({ src, alt, className = '', fallbackTitle }: SafeImageProps) {
+export function SafeImage({
+  src,
+  alt,
+  className = '',
+  fallbackTitle,
+  smartFit = false,
+}: SafeImageProps) {
   const resolvedSrc = resolveApiUrl(src);
   const [failed, setFailed] = useState(false);
+  const [isSquareLike, setIsSquareLike] = useState(false);
 
   useEffect(() => {
     setFailed(false);
+    setIsSquareLike(false);
   }, [resolvedSrc]);
 
   if (!resolvedSrc || failed) {
@@ -32,13 +41,26 @@ export function SafeImage({ src, alt, className = '', fallbackTitle }: SafeImage
     );
   }
 
+  const resolvedClassName =
+    smartFit && isSquareLike
+      ? 'w-full h-full object-contain p-3 bg-slate-50 dark:bg-slate-800/80'
+      : className;
+
   return (
     <img
       src={resolvedSrc}
       alt={alt}
       referrerPolicy="no-referrer"
+      onLoad={(e) => {
+        if (!smartFit) return;
+        const { naturalWidth, naturalHeight } = e.currentTarget;
+        if (naturalWidth > 0 && naturalHeight > 0) {
+          const ratio = naturalWidth / naturalHeight;
+          setIsSquareLike(Math.abs(ratio - 1) <= 0.25);
+        }
+      }}
       onError={() => setFailed(true)}
-      className={className}
+      className={resolvedClassName}
     />
   );
 }

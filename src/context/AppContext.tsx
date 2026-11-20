@@ -32,6 +32,12 @@ interface AppContextValue {
   logout: () => void;
   refreshUser: () => Promise<void>;
   refreshCatalog: () => Promise<void>;
+  checkMaintenanceStatus: () => Promise<{
+    maintenanceMode: boolean;
+    maintenanceHeadline?: string;
+    maintenanceMessage?: string;
+    error?: string;
+  }>;
   updateLocalBalance: (nextBalance: number) => void;
 }
 
@@ -92,6 +98,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const prevMaintenanceRef = useRef<boolean | undefined>(undefined);
+  const lastMaintenanceSyncRef = useRef<number>(0);
 
   const refreshCatalog = useCallback(async () => {
     try {
@@ -115,7 +122,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      const res = await apiFetch<{ user: PublicUser }>('/api/auth/me');
+      const res = await apiFetch<{ user: PublicUser; maintenanceMode?: boolean }>('/api/auth/me');
       if (res && typeof res === 'object' && res.user) {
         setUser(res.user);
       } else {
@@ -126,13 +133,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         setStoredToken('');
         setUser(null);
-      } else if (err instanceof ApiError && err.status === 503) {
-        void refreshCatalog();
       }
+      // On 503 or network hiccup, avoid triggering another loop; periodic sync/Check Again handles it
     } finally {
       setAuthLoading(false);
     }
-  }, [refreshCatalog]);
+  }, []);
+
+  const checkMaintenanceStatus = useCallback(async () => {
+    try {
+      const status = await apiFetch<{
+        maintenanceMode: boolean;
+        maintenanceHeadline: string;
+        maintenanceMessage: string;
+        siteName?: string;
+        supportEmail?: string;
+        supportWhatsapp?: string;
+      }>('/api/public/maintenance-status');
+
+      setCatalog((prev) =>
+        prev
+          ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                maintenanceMode: Boolean(status.maintenanceMode),
+                maintenanceHeadline:
+                  status.maintenanceHeadline ?? prev.settings.maintenanceHeadline,
+                maintenanceMessage: status.maintenanceMessage ?? prev.settings.maintenanceMessage,
+              },
+            }
+          : prev,
+      );
+
+      if (!status.maintenanceMode) {
+        await Promise.all([refreshCatalog(), refreshUser()]);
+      }
+
+      return {
+        maintenanceMode: Boolean(status.maintenanceMode),
+        maintenanceHeadline: status.maintenanceHeadline,
+        maintenanceMessage: status.maintenanceMessage,
+      };
+    } catch (err) {
+      return {
+        maintenanceMode: true,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Unable to reach server right now. Please try again in a moment.',
+      };
+    }
+  }, [refreshCatalog, refreshUser]);
 
   useEffect(() => {
     void refreshCatalog();
@@ -140,7 +192,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const intervalId = window.setInterval(() => {
       void refreshCatalog();
-    }, 15_000);
+    }, 20_000);
 
     const onFocus = () => {
       void refreshCatalog();
@@ -151,7 +203,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     const onMaintenanceEvent = () => {
-      void refreshCatalog();
+      const now = Date.now();
+      if (now - lastMaintenanceSyncRef.current < 3000) return;
+      lastMaintenanceSyncRef.current = now;
+      void checkMaintenanceStatus();
     };
 
     window.addEventListener('focus', onFocus);
@@ -164,15 +219,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('suredeal:maintenance', onMaintenanceEvent);
     };
-  }, [refreshCatalog, refreshUser]);
+  }, [refreshCatalog, refreshUser, checkMaintenanceStatus]);
 
   useEffect(() => {
     const isMaint = catalog?.settings?.maintenanceMode;
-    if (prevMaintenanceRef.current === true && isMaint === false && getStoredToken() && !user) {
+    if (prevMaintenanceRef.current === true && isMaint === false && getStoredToken()) {
       void refreshUser();
     }
     prevMaintenanceRef.current = isMaint;
-  }, [catalog?.settings?.maintenanceMode, user, refreshUser]);
+  }, [catalog?.settings?.maintenanceMode, refreshUser]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiFetch<{ token: string; user: PublicUser }>('/api/auth/login', {
@@ -224,6 +279,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         logout,
         refreshUser,
         refreshCatalog,
+        checkMaintenanceStatus,
         updateLocalBalance,
       }}
     >

@@ -35,6 +35,14 @@ export const COLOR_PRESETS: ColorPreset[] = [
     surfaceBgDark: '#07130F',
   },
   {
+    id: 'royal-purple',
+    name: 'Royal Purple',
+    brandColor: '#6D28D9',
+    accentColor: '#8B5CF6',
+    surfaceBgLight: '#F8F7FF',
+    surfaceBgDark: '#0D0A1A',
+  },
+  {
     id: 'indigo',
     name: 'Indigo Violet',
     brandColor: '#4F46E5',
