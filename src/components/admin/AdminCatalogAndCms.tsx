@@ -6,6 +6,8 @@ import {
   Bell,
   BookOpen,
   Check,
+  ChevronsUp,
+  Copy,
   Crown,
   Edit3,
   Film,
@@ -107,6 +109,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [mktLogo, setMktLogo] = useState('');
   const [mktBounce, setMktBounce] = useState(true);
   const [mktAccounts, setMktAccounts] = useState<string[]>([]);
+  const [mktBulkText, setMktBulkText] = useState('');
   const [acctLogin, setAcctLogin] = useState('');
   const [acctPassword, setAcctPassword] = useState('');
   const [acct2fa, setAcct2fa] = useState('');
@@ -118,10 +121,29 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [editingListing, setEditingListing] = useState<MarketplaceListing | null>(null);
   const [editFeaturesText, setEditFeaturesText] = useState('');
   const [editStockKeys, setEditStockKeys] = useState<string[]>([]);
+  const [editBulkText, setEditBulkText] = useState('');
   const [editAcctLogin, setEditAcctLogin] = useState('');
   const [editAcctPassword, setEditAcctPassword] = useState('');
   const [editAcct2fa, setEditAcct2fa] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Search, status filter & bulk multi-select console state
+  const [mktSearch, setMktSearch] = useState('');
+  const [mktStatusFilter, setMktStatusFilter] = useState<'all' | 'active' | 'paused'>('all');
+  const [selectedMktIds, setSelectedMktIds] = useState<string[]>([]);
+
+  const [smsSearch, setSmsSearch] = useState('');
+  const [smsStatusFilter, setSmsStatusFilter] = useState<'all' | 'active' | 'paused'>('all');
+  const [selectedSmsIds, setSelectedSmsIds] = useState<string[]>([]);
+
+  const [cntSearch, setCntSearch] = useState('');
+
+  const [boostSearch, setBoostSearch] = useState('');
+  const [boostStatusFilter, setBoostStatusFilter] = useState<'all' | 'active' | 'paused'>('all');
+  const [selectedBoostIds, setSelectedBoostIds] = useState<string[]>([]);
+
+  const [bulkPercent, setBulkPercent] = useState(10);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // SMS Service form & edit state
   const [svcName, setSvcName] = useState('');
@@ -169,6 +191,17 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [prodPrice, setProdPrice] = useState(2500);
   const [prodStock, setProdStock] = useState(20);
   const [prodTemplate, setProdTemplate] = useState('ACCESS-{{KEY4}}-{{RAND4}}');
+  const [prodImageUrl, setProdImageUrl] = useState('');
+  const [prodLogoUrl, setProdLogoUrl] = useState('');
+
+  type ReorderEntity =
+    | 'marketplace_listings'
+    | 'marketplace_categories'
+    | 'sms_services'
+    | 'sms_countries'
+    | 'boosting_services'
+    | 'custom_sections'
+    | 'section_products';
 
   const syncAll = async () => {
     await onRefresh();
@@ -176,16 +209,11 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   };
 
   const handleMoveOrder = async (
-    entity:
-      | 'marketplace_listings'
-      | 'marketplace_categories'
-      | 'sms_services'
-      | 'sms_countries'
-      | 'boosting_services'
-      | 'custom_sections',
+    entity: ReorderEntity,
     items: { id: string }[],
     index: number,
     direction: -1 | 1,
+    sectionId?: string,
   ) => {
     const targetIdx = index + direction;
     if (targetIdx < 0 || targetIdx >= items.length) return;
@@ -195,12 +223,91 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
     try {
       await apiFetch('/api/admin/catalog/reorder', {
         method: 'POST',
-        body: JSON.stringify({ entity, orderedIds: ordered }),
+        body: JSON.stringify({ entity, kind: entity, orderedIds: ordered, sectionId }),
       });
       await syncAll();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Reorder failed', 'error');
     }
+  };
+
+  const handleMoveToTop = async (
+    entity: ReorderEntity,
+    items: { id: string }[],
+    index: number,
+    sectionId?: string,
+  ) => {
+    if (index <= 0 || index >= items.length) return;
+    const ordered = items.map((item) => item.id);
+    const [moved] = ordered.splice(index, 1);
+    ordered.unshift(moved);
+    try {
+      await apiFetch('/api/admin/catalog/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ entity, kind: entity, orderedIds: ordered, sectionId }),
+      });
+      notify('Moved item to #1 position!', 'success');
+      await syncAll();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Move to top failed', 'error');
+    }
+  };
+
+  const handleDuplicateItem = async (
+    target: 'marketplace' | 'smsServices' | 'boosting' | 'sectionProduct',
+    id: string,
+  ) => {
+    try {
+      await apiFetch('/api/admin/catalog/duplicate', {
+        method: 'POST',
+        body: JSON.stringify({ target, id }),
+      });
+      notify('Item duplicated! Customize or reorder the copy anytime.', 'success');
+      await syncAll();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Duplicate failed', 'error');
+    }
+  };
+
+  const runBulkAction = async (
+    target: 'marketplace' | 'smsServices' | 'boosting',
+    ids: string[],
+    action: 'delete' | 'activate' | 'pause' | 'price_percent',
+    clearSelection: () => void,
+    percentValue?: number,
+  ) => {
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await apiFetch<{ updated?: number }>('/api/admin/catalog/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ target, ids, action, percent: percentValue }),
+      });
+      clearSelection();
+      notify(`Bulk ${action.replace('_', ' ')} applied (${res.updated ?? ids.length} item(s))`, 'success');
+      await syncAll();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk action failed', 'error');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const parseBulkLinesToAccounts = (rawText: string) => {
+    return rawText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        if (line.includes('|') || line.includes(':')) {
+          const sep = line.includes('|') ? '|' : ':';
+          const parts = line.split(sep).map((p) => p.trim());
+          if (parts.length >= 2 && parts[0] && parts[1]) {
+            return formatAccountCredential(parts[0], parts[1], parts.slice(2).join(' ') || '');
+          }
+        }
+        return line;
+      });
   };
 
   const handleUploadImage = async (
@@ -221,6 +328,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
     setEditingListing({ ...item });
     setEditFeaturesText((item.features || []).join('\n'));
     setEditStockKeys([...(item.stockKeys || [])]);
+    setEditBulkText('');
     setEditAcctLogin('');
     setEditAcctPassword('');
     setEditAcct2fa('');
@@ -591,6 +699,39 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     })}
                   </div>
                 )}
+
+                <details className="pt-1 text-[11px]">
+                  <summary className="cursor-pointer font-bold text-blue-700 dark:text-blue-300 hover:underline">
+                    Bulk Import Accounts / Keys (1 per line)
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      rows={3}
+                      value={mktBulkText}
+                      onChange={(e) => setMktBulkText(e.target.value)}
+                      placeholder={'user1@mail.com|Pass123|2FAKEY\nuser2@mail.com|Pass456\nLICENSE-KEY-001'}
+                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const imported = parseBulkLinesToAccounts(mktBulkText);
+                        if (imported.length === 0) {
+                          notify('Paste at least 1 line to import.', 'error');
+                          return;
+                        }
+                        const next = [...mktAccounts, ...imported];
+                        setMktAccounts(next);
+                        setMktStock(next.length);
+                        setMktBulkText('');
+                        notify(`Imported ${imported.length} item(s) to stock queue!`, 'success');
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl cursor-pointer"
+                    >
+                      Import Lines into Stock
+                    </button>
+                  </div>
+                </details>
               </div>
 
               <details className="text-[11px] text-slate-500">
@@ -725,9 +866,26 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     ) : (
                       <>
                         <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                          <span className="font-mono text-[10px] text-slate-400 mr-1.5">#{idx + 1}</span>
                           {c.name}
                         </span>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex flex-wrap items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() =>
+                              handleMoveToTop(
+                                'marketplace_categories',
+                                data.marketplaceCategories,
+                                idx,
+                              )
+                            }
+                            className="p-1 text-slate-400 hover:text-blue-600 disabled:opacity-30 cursor-pointer"
+                            title="Move to #1"
+                            aria-label={`Move ${c.name} to top`}
+                          >
+                            <ChevronsUp className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             type="button"
                             disabled={idx === 0}
@@ -800,189 +958,355 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             </div>
           </div>
 
-          <div className="xl:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="xl:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-                  All Marketplace Products
+                  All Marketplace Products ({data.marketplaceListings.length})
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  Click &ldquo;Full Edit&rdquo; on any item to customize descriptions, buy-page
-                  warnings, stock keys, and logos.
+                  Reorder (#1 Top / Up / Down), inline edit price &amp; stock, duplicate, bulk update, or Full Edit.
                 </p>
               </div>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {data.marketplaceListings.map((item, idx) => (
-                <div key={item.id} className="py-4 space-y-2.5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold text-slate-900 dark:text-white">
-                          {item.title}
-                        </p>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                          {item.category}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-                        {item.description || item.shortSpec}
-                      </p>
-                      {item.buyWarning && (
-                        <p
-                          className={`text-[11px] mt-1 flex items-center gap-1 line-clamp-1 ${
-                            item.buyWarningLevel === 'info'
-                              ? 'text-blue-600 dark:text-blue-400'
-                              : 'text-amber-700 dark:text-amber-400'
-                          }`}
-                        >
-                          <AlertTriangle className="w-3 h-3 shrink-0" />
-                          {item.buyWarningLevel === 'info' ? 'Notice' : 'Warning'}: {item.buyWarning}
-                        </p>
-                      )}
-                    </div>
+            {/* Search & Status Filter */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={mktSearch}
+                  onChange={(e) => setMktSearch(e.target.value)}
+                  placeholder="Search product, category, or tag..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                {(['all', 'active', 'paused'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setMktStatusFilter(st)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize cursor-pointer ${
+                      mktStatusFilter === st
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        disabled={idx === 0}
-                        onClick={() =>
-                          handleMoveOrder('marketplace_listings', data.marketplaceListings, idx, -1)
-                        }
-                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                        title="Move product up"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={idx === data.marketplaceListings.length - 1}
-                        onClick={() =>
-                          handleMoveOrder('marketplace_listings', data.marketplaceListings, idx, 1)
-                        }
-                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                        title="Move product down"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                      <input
-                        type="number"
-                        min={0}
-                        defaultValue={item.price}
-                        onBlur={async (e) => {
-                          const val = Number(e.target.value);
-                          if (!Number.isFinite(val) || val < 0) {
-                            e.target.value = String(item.price);
-                            return;
-                          }
-                          if (val !== item.price) {
-                            try {
-                              await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                                method: 'PATCH',
-                                body: JSON.stringify({ price: val }),
-                              });
-                              notify(`Updated ${item.title} price`, 'success');
-                              await syncAll();
-                            } catch (err) {
-                              e.target.value = String(item.price);
-                              notify(
-                                err instanceof Error ? err.message : 'Failed to update price',
-                                'error',
-                              );
-                            }
-                          }
-                        }}
-                        className="w-24 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                        title="Price"
-                      />
-                      <input
-                        type="number"
-                        min={0}
-                        defaultValue={item.stock}
-                        onBlur={async (e) => {
-                          const val = Number(e.target.value);
-                          if (!Number.isFinite(val) || val < 0) {
-                            e.target.value = String(item.stock);
-                            return;
-                          }
-                          if (val !== item.stock) {
-                            try {
-                              await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                                method: 'PATCH',
-                                body: JSON.stringify({ stock: val }),
-                              });
-                              notify(`Updated ${item.title} stock`, 'success');
-                              await syncAll();
-                            } catch (err) {
-                              e.target.value = String(item.stock);
-                              notify(
-                                err instanceof Error ? err.message : 'Failed to update stock',
-                                'error',
-                              );
-                            }
-                          }
-                        }}
-                        className="w-16 px-2 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                        title="Stock"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(item)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
-                      >
-                        <Edit3 className="w-3 h-3" />
-                        Full Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ active: !item.active }),
-                            });
-                            await syncAll();
-                          } catch (err) {
-                            notify(
-                              err instanceof Error ? err.message : 'Failed to toggle listing',
-                              'error',
-                            );
-                          }
-                        }}
-                        className={`px-2.5 py-1.5 text-[11px] font-semibold rounded-lg cursor-pointer ${
-                          item.active
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : 'bg-slate-100 text-slate-500'
-                        }`}
-                      >
-                        {item.active ? 'Active' : 'Hidden'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
-                              method: 'DELETE',
-                            });
-                            notify('Listing deleted', 'info');
-                            await syncAll();
-                          } catch (err) {
-                            notify(
-                              err instanceof Error ? err.message : 'Failed to delete listing',
-                              'error',
-                            );
-                          }
-                        }}
-                        className="text-rose-500 hover:text-rose-600 p-1.5 cursor-pointer"
-                        aria-label="Delete listing"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
+            {/* Sticky Bulk Action Bar */}
+            {selectedMktIds.length > 0 && (
+              <div className="sticky top-14 z-10 p-3 rounded-xl bg-slate-900 text-white dark:bg-blue-950 border border-slate-700 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+                <div className="flex items-center gap-2 text-xs font-bold">
+                  <span>{selectedMktIds.length} selected</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMktIds([])}
+                    className="text-[11px] underline text-slate-300 cursor-pointer"
+                  >
+                    Clear
+                  </button>
                 </div>
-              ))}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('marketplace', selectedMktIds, 'activate', () => setSelectedMktIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer"
+                  >
+                    Activate
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('marketplace', selectedMktIds, 'pause', () => setSelectedMktIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-500 rounded-lg cursor-pointer"
+                  >
+                    Pause
+                  </button>
+                  <div className="flex items-center gap-1 bg-white/10 rounded-lg px-1.5 py-0.5">
+                    <input
+                      type="number"
+                      value={bulkPercent}
+                      onChange={(e) => setBulkPercent(Number(e.target.value))}
+                      className="w-12 px-1 py-0.5 text-[11px] font-mono bg-transparent text-white border border-white/20 rounded"
+                    />
+                    <button
+                      type="button"
+                      disabled={bulkBusy}
+                      onClick={() =>
+                        runBulkAction(
+                          'marketplace',
+                          selectedMktIds,
+                          'price_percent',
+                          () => setSelectedMktIds([]),
+                          bulkPercent,
+                        )
+                      }
+                      className="px-2 py-0.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-500 rounded cursor-pointer"
+                    >
+                      % Price
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('marketplace', selectedMktIds, 'delete', () => setSelectedMktIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 rounded-lg cursor-pointer"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {data.marketplaceListings
+                .filter((item) => {
+                  if (mktStatusFilter === 'active' && !item.active) return false;
+                  if (mktStatusFilter === 'paused' && item.active) return false;
+                  const q = mktSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    item.title.toLowerCase().includes(q) ||
+                    item.category.toLowerCase().includes(q) ||
+                    (item.popularTag || '').toLowerCase().includes(q)
+                  );
+                })
+                .map((item) => {
+                  const fullIdx = data.marketplaceListings.findIndex((x) => x.id === item.id);
+                  const isChecked = selectedMktIds.includes(item.id);
+                  return (
+                    <div key={item.id} className="py-4 space-y-3">
+                      {/* Zone 1: Checkbox + Rank Badge + Info */}
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) =>
+                            setSelectedMktIds((prev) =>
+                              e.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id),
+                            )
+                          }
+                          className="mt-1 w-4 h-4 accent-blue-600 rounded cursor-pointer shrink-0"
+                          aria-label={`Select ${item.title}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-800 text-white">
+                              #{fullIdx + 1}
+                            </span>
+                            <p className="text-sm font-bold text-slate-900 dark:text-white break-words">
+                              {item.title}
+                            </p>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              {item.category}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                            {item.description || item.shortSpec}
+                          </p>
+                          {item.buyWarning && (
+                            <p
+                              className={`text-[11px] mt-1 flex items-center gap-1 line-clamp-1 ${
+                                item.buyWarningLevel === 'info'
+                                  ? 'text-blue-600 dark:text-blue-400'
+                                  : 'text-amber-700 dark:text-amber-400'
+                              }`}
+                            >
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                              {item.buyWarningLevel === 'info' ? 'Notice' : 'Warning'}: {item.buyWarning}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Zone 2: Full-Width Wrapped Creator Tool Bar (Zero Cut Tools on Mobile Safari) */}
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100/80 dark:border-slate-800/70">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">Price</span>
+                          <input
+                            type="number"
+                            min={0}
+                            defaultValue={item.price}
+                            key={`mkt-price-${item.id}-${item.price}`}
+                            onBlur={async (e) => {
+                              const val = Number(e.target.value);
+                              if (!Number.isFinite(val) || val < 0) {
+                                e.target.value = String(item.price);
+                                return;
+                              }
+                              if (val !== item.price) {
+                                try {
+                                  await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ price: val }),
+                                  });
+                                  notify(`Updated ${item.title} price`, 'success');
+                                  await syncAll();
+                                } catch (err) {
+                                  e.target.value = String(item.price);
+                                  notify(
+                                    err instanceof Error ? err.message : 'Failed to update price',
+                                    'error',
+                                  );
+                                }
+                              }
+                            }}
+                            className="w-24 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                            title="Price"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">Stock</span>
+                          <input
+                            type="number"
+                            min={0}
+                            defaultValue={item.stock}
+                            key={`mkt-stock-${item.id}-${item.stock}`}
+                            onBlur={async (e) => {
+                              const val = Number(e.target.value);
+                              if (!Number.isFinite(val) || val < 0) {
+                                e.target.value = String(item.stock);
+                                return;
+                              }
+                              if (val !== item.stock) {
+                                try {
+                                  await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ stock: val }),
+                                  });
+                                  notify(`Updated ${item.title} stock`, 'success');
+                                  await syncAll();
+                                } catch (err) {
+                                  e.target.value = String(item.stock);
+                                  notify(
+                                    err instanceof Error ? err.message : 'Failed to update stock',
+                                    'error',
+                                  );
+                                }
+                              }
+                            }}
+                            className="w-16 px-2 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                            title="Stock"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={fullIdx === 0}
+                            onClick={() =>
+                              handleMoveToTop('marketplace_listings', data.marketplaceListings, fullIdx)
+                            }
+                            className="inline-flex items-center gap-0.5 px-2 py-1.5 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-500 hover:text-blue-600 disabled:opacity-30 cursor-pointer"
+                            title="Pin to #1 Top"
+                          >
+                            <ChevronsUp className="w-3.5 h-3.5" />
+                            #1
+                          </button>
+                          <button
+                            type="button"
+                            disabled={fullIdx === 0}
+                            onClick={() =>
+                              handleMoveOrder('marketplace_listings', data.marketplaceListings, fullIdx, -1)
+                            }
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                            title="Move product up"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={fullIdx === data.marketplaceListings.length - 1}
+                            onClick={() =>
+                              handleMoveOrder('marketplace_listings', data.marketplaceListings, fullIdx, 1)
+                            }
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                            title="Move product down"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            Full Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateItem('marketplace', item.id)}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-blue-500 rounded-lg cursor-pointer"
+                            title="Duplicate listing"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({ active: !item.active }),
+                                });
+                                await syncAll();
+                              } catch (err) {
+                                notify(
+                                  err instanceof Error ? err.message : 'Failed to toggle listing',
+                                  'error',
+                                );
+                              }
+                            }}
+                            className={`px-2.5 py-1.5 text-[11px] font-semibold rounded-lg cursor-pointer ${
+                              item.active
+                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : 'bg-slate-100 text-slate-500'
+                            }`}
+                          >
+                            {item.active ? 'Active' : 'Hidden'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/admin/marketplace-listings/${item.id}`, {
+                                  method: 'DELETE',
+                                });
+                                notify('Listing deleted', 'info');
+                                await syncAll();
+                              } catch (err) {
+                                notify(
+                                  err instanceof Error ? err.message : 'Failed to delete listing',
+                                  'error',
+                                );
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 cursor-pointer"
+                            aria-label="Delete listing"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </div>
@@ -1256,6 +1580,41 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     })}
                   </div>
                 )}
+
+                <details className="pt-1 text-[11px]">
+                  <summary className="cursor-pointer font-bold text-blue-700 dark:text-blue-300 hover:underline">
+                    Bulk Import Accounts / Keys (1 per line)
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      rows={3}
+                      value={editBulkText}
+                      onChange={(e) => setEditBulkText(e.target.value)}
+                      placeholder={'user1@mail.com|Pass123|2FAKEY\nuser2@mail.com|Pass456\nLICENSE-KEY-001'}
+                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const imported = parseBulkLinesToAccounts(editBulkText);
+                        if (imported.length === 0) {
+                          notify('Paste at least 1 line to import.', 'error');
+                          return;
+                        }
+                        const next = [...editStockKeys, ...imported];
+                        setEditStockKeys(next);
+                        setEditingListing((prev) =>
+                          prev ? { ...prev, stock: next.length } : prev,
+                        );
+                        setEditBulkText('');
+                        notify(`Imported ${imported.length} item(s) to stock queue!`, 'success');
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl cursor-pointer"
+                    >
+                      Import Lines into Stock
+                    </button>
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -1425,111 +1784,273 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             </button>
           </form>
 
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
-            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white pb-3 border-b border-slate-100 dark:border-slate-800">
-              SMS Services (Edit Base Price Inline)
-            </h3>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {data.smsServices.map((svc, idx) => (
-                <div key={svc.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">{svc.name}</p>
-                    <p className="text-xs text-slate-500">
-                      {svc.category} · {svc.successRate}% rate · {svc.stock} stock
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
+          <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                SMS Services ({data.smsServices.length})
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={smsSearch}
+                    onChange={(e) => setSmsSearch(e.target.value)}
+                    placeholder="Search service..."
+                    className="pl-7 pr-2.5 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                  />
+                </div>
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl">
+                  {(['all', 'active', 'paused'] as const).map((st) => (
                     <button
+                      key={st}
                       type="button"
-                      disabled={idx === 0}
-                      onClick={() => handleMoveOrder('sms_services', data.smsServices, idx, -1)}
-                      className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                      title="Move up"
+                      onClick={() => setSmsStatusFilter(st)}
+                      className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold capitalize cursor-pointer ${
+                        smsStatusFilter === st
+                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
                     >
-                      <ArrowUp className="w-3.5 h-3.5" />
+                      {st}
                     </button>
-                    <button
-                      type="button"
-                      disabled={idx === data.smsServices.length - 1}
-                      onClick={() => handleMoveOrder('sms_services', data.smsServices, idx, 1)}
-                      className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                      title="Move down"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-xs text-slate-400">{symbol}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {selectedSmsIds.length > 0 && (
+              <div className="sticky top-14 z-10 p-3 rounded-xl bg-slate-900 text-white dark:bg-blue-950 border border-slate-700 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+                <div className="flex items-center gap-2 text-xs font-bold">
+                  <span>{selectedSmsIds.length} SMS selected</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSmsIds([])}
+                    className="text-[11px] underline text-slate-300 cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('smsServices', selectedSmsIds, 'activate', () => setSelectedSmsIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-emerald-600 rounded-lg cursor-pointer"
+                  >
+                    Activate
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('smsServices', selectedSmsIds, 'pause', () => setSelectedSmsIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 rounded-lg cursor-pointer"
+                  >
+                    Pause
+                  </button>
+                  <div className="flex items-center gap-1 bg-white/10 rounded-lg px-1.5 py-0.5">
                     <input
                       type="number"
-                      min={0}
-                      defaultValue={svc.basePrice}
-                      onBlur={async (e) => {
-                        const val = Number(e.target.value);
-                        if (!Number.isFinite(val) || val < 0) {
-                          e.target.value = String(svc.basePrice);
-                          return;
-                        }
-                        if (val !== svc.basePrice) {
-                          try {
-                            await apiFetch(`/api/admin/sms-services/${svc.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ basePrice: val }),
-                            });
-                            notify(`Updated ${svc.name} price`, 'success');
-                            await syncAll();
-                          } catch (err) {
-                            e.target.value = String(svc.basePrice);
-                            notify(err instanceof Error ? err.message : 'Price update failed', 'error');
-                          }
-                        }
-                      }}
-                      className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                      value={bulkPercent}
+                      onChange={(e) => setBulkPercent(Number(e.target.value))}
+                      className="w-12 px-1 py-0.5 text-[11px] font-mono bg-transparent text-white border border-white/20 rounded"
                     />
                     <button
                       type="button"
-                      onClick={() => setEditingSms({ ...svc })}
-                      className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                      disabled={bulkBusy}
+                      onClick={() =>
+                        runBulkAction(
+                          'smsServices',
+                          selectedSmsIds,
+                          'price_percent',
+                          () => setSelectedSmsIds([]),
+                          bulkPercent,
+                        )
+                      }
+                      className="px-2 py-0.5 text-[11px] font-bold bg-blue-600 rounded cursor-pointer"
                     >
-                      <Edit3 className="w-3 h-3" />
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiFetch(`/api/admin/sms-services/${svc.id}`, {
-                            method: 'PATCH',
-                            body: JSON.stringify({ active: !svc.active }),
-                          });
-                          await syncAll();
-                        } catch (err) {
-                          notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
-                        }
-                      }}
-                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
-                        svc.active
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : 'bg-slate-100 text-slate-500'
-                      }`}
-                    >
-                      {svc.active ? 'Active' : 'Paused'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiFetch(`/api/admin/sms-services/${svc.id}`, { method: 'DELETE' });
-                          await syncAll();
-                        } catch (err) {
-                          notify(err instanceof Error ? err.message : 'Delete failed', 'error');
-                        }
-                      }}
-                      className="text-rose-500 p-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
+                      % Price
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('smsServices', selectedSmsIds, 'delete', () => setSelectedSmsIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-rose-600 rounded-lg cursor-pointer"
+                  >
+                    Delete
+                  </button>
                 </div>
-              ))}
+              </div>
+            )}
+
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {data.smsServices
+                .filter((svc) => {
+                  if (smsStatusFilter === 'active' && !svc.active) return false;
+                  if (smsStatusFilter === 'paused' && svc.active) return false;
+                  const q = smsSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    svc.name.toLowerCase().includes(q) || svc.category.toLowerCase().includes(q)
+                  );
+                })
+                .map((svc) => {
+                  const fullIdx = data.smsServices.findIndex((x) => x.id === svc.id);
+                  const isChecked = selectedSmsIds.includes(svc.id);
+                  return (
+                    <div key={svc.id} className="py-3.5 space-y-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) =>
+                            setSelectedSmsIds((prev) =>
+                              e.target.checked ? [...prev, svc.id] : prev.filter((id) => id !== svc.id),
+                            )
+                          }
+                          className="mt-1 w-4 h-4 accent-blue-600 rounded cursor-pointer shrink-0"
+                          aria-label={`Select ${svc.name}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-800 text-white">
+                              #{fullIdx + 1}
+                            </span>
+                            <p className="text-sm font-bold text-slate-900 dark:text-white">{svc.name}</p>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              {svc.category}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {svc.successRate}% success · {svc.stock} stock
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100/80 dark:border-slate-800/70">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">
+                            Price ({symbol})
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            defaultValue={svc.basePrice}
+                            key={`sms-price-${svc.id}-${svc.basePrice}`}
+                            onBlur={async (e) => {
+                              const val = Number(e.target.value);
+                              if (!Number.isFinite(val) || val < 0) {
+                                e.target.value = String(svc.basePrice);
+                                return;
+                              }
+                              if (val !== svc.basePrice) {
+                                try {
+                                  await apiFetch(`/api/admin/sms-services/${svc.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ basePrice: val }),
+                                  });
+                                  notify(`Updated ${svc.name} price`, 'success');
+                                  await syncAll();
+                                } catch (err) {
+                                  e.target.value = String(svc.basePrice);
+                                  notify(err instanceof Error ? err.message : 'Price update failed', 'error');
+                                }
+                              }
+                            }}
+                            className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={fullIdx === 0}
+                          onClick={() => handleMoveToTop('sms_services', data.smsServices, fullIdx)}
+                          className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                          title="Move to #1"
+                        >
+                          <ChevronsUp className="w-3.5 h-3.5" />
+                          #1
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fullIdx === 0}
+                          onClick={() => handleMoveOrder('sms_services', data.smsServices, fullIdx, -1)}
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                          title="Move up"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fullIdx === data.smsServices.length - 1}
+                          onClick={() => handleMoveOrder('sms_services', data.smsServices, fullIdx, 1)}
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                          title="Move down"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSms({ ...svc })}
+                          className="px-2.5 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicateItem('smsServices', svc.id)}
+                          className="px-2 py-1 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" />
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/admin/sms-services/${svc.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ active: !svc.active }),
+                              });
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
+                            }
+                          }}
+                          className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
+                            svc.active
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {svc.active ? 'Active' : 'Paused'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/admin/sms-services/${svc.id}`, { method: 'DELETE' });
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 rounded-lg cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </div>
@@ -1603,107 +2124,159 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             </button>
           </form>
 
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 divide-y divide-slate-100 dark:divide-slate-800">
-            {data.smsCountries.map((c, idx) => (
-              <div key={c.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    {c.name} ({c.dialCode})
-                  </p>
-                  <p className="text-xs text-slate-500">ISO: {c.code}</p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={idx === 0}
-                    onClick={() => handleMoveOrder('sms_countries', data.smsCountries, idx, -1)}
-                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                    title="Move up"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={idx === data.smsCountries.length - 1}
-                    onClick={() => handleMoveOrder('sms_countries', data.smsCountries, idx, 1)}
-                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                    title="Move down"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                  </button>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min={0.1}
-                    defaultValue={c.multiplier}
-                    onBlur={async (e) => {
-                      const val = Number(e.target.value);
-                      if (!Number.isFinite(val) || val < 0.1) {
-                        e.target.value = String(c.multiplier);
-                        return;
-                      }
-                      if (val !== c.multiplier) {
-                        try {
-                          await apiFetch(`/api/admin/sms-countries/${c.id}`, {
-                            method: 'PATCH',
-                            body: JSON.stringify({ multiplier: val }),
-                          });
-                          notify(`Updated ${c.name} rate multiplier`, 'success');
-                          await syncAll();
-                        } catch (err) {
-                          e.target.value = String(c.multiplier);
-                          notify(err instanceof Error ? err.message : 'Multiplier update failed', 'error');
-                        }
-                      }
-                    }}
-                    className="w-20 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setEditingCountry({ ...c })}
-                    className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
-                  >
-                    <Edit3 className="w-3 h-3" />
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await apiFetch(`/api/admin/sms-countries/${c.id}`, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ active: !c.active }),
-                        });
-                        await syncAll();
-                      } catch (err) {
-                        notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
-                      }
-                    }}
-                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
-                      c.active
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'bg-slate-100 text-slate-500'
-                    }`}
-                  >
-                    {c.active ? 'Active' : 'Paused'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await apiFetch(`/api/admin/sms-countries/${c.id}`, { method: 'DELETE' });
-                        await syncAll();
-                      } catch (err) {
-                        notify(err instanceof Error ? err.message : 'Delete failed', 'error');
-                      }
-                    }}
-                    className="text-rose-500 p-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+          <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                SMS Countries ({data.smsCountries.length})
+              </h3>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={cntSearch}
+                  onChange={(e) => setCntSearch(e.target.value)}
+                  placeholder="Filter countries..."
+                  className="pl-7 pr-2.5 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
               </div>
-            ))}
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {data.smsCountries
+                .filter((c) => {
+                  const q = cntSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    c.name.toLowerCase().includes(q) ||
+                    c.code.toLowerCase().includes(q) ||
+                    c.dialCode.toLowerCase().includes(q)
+                  );
+                })
+                .map((c) => {
+                  const fullIdx = data.smsCountries.findIndex((x) => x.id === c.id);
+                  return (
+                    <div key={c.id} className="py-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-800 text-white">
+                              #{fullIdx + 1}
+                            </span>
+                            <p className="text-sm font-bold text-slate-900 dark:text-white">
+                              {c.name} ({c.dialCode})
+                            </p>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">ISO: {c.code}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100/80 dark:border-slate-800/70">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">Mult (x)</span>
+                          <input
+                            type="number"
+                            step="0.05"
+                            min={0.1}
+                            defaultValue={c.multiplier}
+                            key={`cnt-mult-${c.id}-${c.multiplier}`}
+                            onBlur={async (e) => {
+                              const val = Number(e.target.value);
+                              if (!Number.isFinite(val) || val < 0.1) {
+                                e.target.value = String(c.multiplier);
+                                return;
+                              }
+                              if (val !== c.multiplier) {
+                                try {
+                                  await apiFetch(`/api/admin/sms-countries/${c.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ multiplier: val }),
+                                  });
+                                  notify(`Updated ${c.name} rate multiplier`, 'success');
+                                  await syncAll();
+                                } catch (err) {
+                                  e.target.value = String(c.multiplier);
+                                  notify(err instanceof Error ? err.message : 'Multiplier update failed', 'error');
+                                }
+                              }
+                            }}
+                            className="w-20 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={fullIdx === 0}
+                          onClick={() => handleMoveToTop('sms_countries', data.smsCountries, fullIdx)}
+                          className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                          title="Move to #1"
+                        >
+                          <ChevronsUp className="w-3.5 h-3.5" />
+                          #1
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fullIdx === 0}
+                          onClick={() => handleMoveOrder('sms_countries', data.smsCountries, fullIdx, -1)}
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                          title="Move up"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fullIdx === data.smsCountries.length - 1}
+                          onClick={() => handleMoveOrder('sms_countries', data.smsCountries, fullIdx, 1)}
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                          title="Move down"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCountry({ ...c })}
+                          className="px-2.5 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/admin/sms-countries/${c.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ active: !c.active }),
+                              });
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
+                            }
+                          }}
+                          className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
+                            c.active
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {c.active ? 'Active' : 'Paused'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/admin/sms-countries/${c.id}`, { method: 'DELETE' });
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 rounded-lg cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
       )}
@@ -1811,112 +2384,278 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             </button>
           </form>
 
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 divide-y divide-slate-100 dark:divide-slate-800">
-            {data.boostingServices.map((b, idx) => (
-              <div key={b.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                    {b.name}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {b.platform} · {b.speedLabel} · {b.refillPolicy}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={idx === 0}
-                    onClick={() =>
-                      handleMoveOrder('boosting_services', data.boostingServices, idx, -1)
-                    }
-                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                    title="Move up"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={idx === data.boostingServices.length - 1}
-                    onClick={() =>
-                      handleMoveOrder('boosting_services', data.boostingServices, idx, 1)
-                    }
-                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
-                    title="Move down"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                  </button>
+          <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                Boosting Packages ({data.boostingServices.length})
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input
-                    type="number"
-                    min={0}
-                    defaultValue={b.ratePer1k}
-                    onBlur={async (e) => {
-                      const val = Number(e.target.value);
-                      if (!Number.isFinite(val) || val < 0) {
-                        e.target.value = String(b.ratePer1k);
-                        return;
-                      }
-                      if (val !== b.ratePer1k) {
-                        try {
-                          await apiFetch(`/api/admin/boosting-services/${b.id}`, {
-                            method: 'PATCH',
-                            body: JSON.stringify({ ratePer1k: val }),
-                          });
-                          notify(`Updated ${b.name} rate`, 'success');
-                          await syncAll();
-                        } catch (err) {
-                          e.target.value = String(b.ratePer1k);
-                          notify(err instanceof Error ? err.message : 'Rate update failed', 'error');
-                        }
-                      }
-                    }}
-                    className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                    type="text"
+                    value={boostSearch}
+                    onChange={(e) => setBoostSearch(e.target.value)}
+                    placeholder="Search package..."
+                    className="pl-7 pr-2.5 py-1 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                   />
+                </div>
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl">
+                  {(['all', 'active', 'paused'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setBoostStatusFilter(st)}
+                      className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold capitalize cursor-pointer ${
+                        boostStatusFilter === st
+                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {selectedBoostIds.length > 0 && (
+              <div className="sticky top-14 z-10 p-3 rounded-xl bg-slate-900 text-white dark:bg-blue-950 border border-slate-700 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+                <div className="flex items-center gap-2 text-xs font-bold">
+                  <span>{selectedBoostIds.length} package(s) selected</span>
                   <button
                     type="button"
-                    onClick={() => setEditingBoost({ ...b })}
-                    className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                    onClick={() => setSelectedBoostIds([])}
+                    className="text-[11px] underline text-slate-300 cursor-pointer"
                   >
-                    <Edit3 className="w-3 h-3" />
-                    Edit
+                    Clear
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('boosting', selectedBoostIds, 'activate', () => setSelectedBoostIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-emerald-600 rounded-lg cursor-pointer"
+                  >
+                    Activate
                   </button>
                   <button
                     type="button"
-                    onClick={async () => {
-                      try {
-                        await apiFetch(`/api/admin/boosting-services/${b.id}`, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ active: !b.active }),
-                        });
-                        await syncAll();
-                      } catch (err) {
-                        notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
-                      }
-                    }}
-                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
-                      b.active
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'bg-slate-100 text-slate-500'
-                    }`}
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('boosting', selectedBoostIds, 'pause', () => setSelectedBoostIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 rounded-lg cursor-pointer"
                   >
-                    {b.active ? 'Active' : 'Paused'}
+                    Pause
                   </button>
+                  <div className="flex items-center gap-1 bg-white/10 rounded-lg px-1.5 py-0.5">
+                    <input
+                      type="number"
+                      value={bulkPercent}
+                      onChange={(e) => setBulkPercent(Number(e.target.value))}
+                      className="w-12 px-1 py-0.5 text-[11px] font-mono bg-transparent text-white border border-white/20 rounded"
+                    />
+                    <button
+                      type="button"
+                      disabled={bulkBusy}
+                      onClick={() =>
+                        runBulkAction(
+                          'boosting',
+                          selectedBoostIds,
+                          'price_percent',
+                          () => setSelectedBoostIds([]),
+                          bulkPercent,
+                        )
+                      }
+                      className="px-2 py-0.5 text-[11px] font-bold bg-blue-600 rounded cursor-pointer"
+                    >
+                      % Rate
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={async () => {
-                      try {
-                        await apiFetch(`/api/admin/boosting-services/${b.id}`, { method: 'DELETE' });
-                        await syncAll();
-                      } catch (err) {
-                        notify(err instanceof Error ? err.message : 'Delete failed', 'error');
-                      }
-                    }}
-                    className="text-rose-500 p-1 cursor-pointer"
+                    disabled={bulkBusy}
+                    onClick={() =>
+                      runBulkAction('boosting', selectedBoostIds, 'delete', () => setSelectedBoostIds([]))
+                    }
+                    className="px-2.5 py-1 text-[11px] font-bold bg-rose-600 rounded-lg cursor-pointer"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    Delete
                   </button>
                 </div>
               </div>
-            ))}
+            )}
+
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {data.boostingServices
+                .filter((b) => {
+                  if (boostStatusFilter === 'active' && !b.active) return false;
+                  if (boostStatusFilter === 'paused' && b.active) return false;
+                  const q = boostSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    b.name.toLowerCase().includes(q) ||
+                    b.platform.toLowerCase().includes(q) ||
+                    b.category.toLowerCase().includes(q)
+                  );
+                })
+                .map((b) => {
+                  const fullIdx = data.boostingServices.findIndex((x) => x.id === b.id);
+                  const isChecked = selectedBoostIds.includes(b.id);
+                  return (
+                    <div key={b.id} className="py-3.5 space-y-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) =>
+                            setSelectedBoostIds((prev) =>
+                              e.target.checked ? [...prev, b.id] : prev.filter((id) => id !== b.id),
+                            )
+                          }
+                          className="mt-1 w-4 h-4 accent-blue-600 rounded cursor-pointer shrink-0"
+                          aria-label={`Select ${b.name}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-800 text-white">
+                              #{fullIdx + 1}
+                            </span>
+                            <p className="text-sm font-bold text-slate-900 dark:text-white break-words">
+                              {b.name}
+                            </p>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {b.platform} · {b.category} · {b.speedLabel} · {b.refillPolicy}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100/80 dark:border-slate-800/70">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">
+                            Rate/1K ({symbol})
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            defaultValue={b.ratePer1k}
+                            key={`boost-rate-${b.id}-${b.ratePer1k}`}
+                            onBlur={async (e) => {
+                              const val = Number(e.target.value);
+                              if (!Number.isFinite(val) || val < 0) {
+                                e.target.value = String(b.ratePer1k);
+                                return;
+                              }
+                              if (val !== b.ratePer1k) {
+                                try {
+                                  await apiFetch(`/api/admin/boosting-services/${b.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ ratePer1k: val }),
+                                  });
+                                  notify(`Updated ${b.name} rate`, 'success');
+                                  await syncAll();
+                                } catch (err) {
+                                  e.target.value = String(b.ratePer1k);
+                                  notify(err instanceof Error ? err.message : 'Rate update failed', 'error');
+                                }
+                              }
+                            }}
+                            className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={fullIdx === 0}
+                          onClick={() => handleMoveToTop('boosting_services', data.boostingServices, fullIdx)}
+                          className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                          title="Move to #1"
+                        >
+                          <ChevronsUp className="w-3.5 h-3.5" />
+                          #1
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fullIdx === 0}
+                          onClick={() =>
+                            handleMoveOrder('boosting_services', data.boostingServices, fullIdx, -1)
+                          }
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                          title="Move up"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fullIdx === data.boostingServices.length - 1}
+                          onClick={() =>
+                            handleMoveOrder('boosting_services', data.boostingServices, fullIdx, 1)
+                          }
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                          title="Move down"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingBoost({ ...b })}
+                          className="px-2.5 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicateItem('boosting', b.id)}
+                          className="px-2 py-1 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" />
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/admin/boosting-services/${b.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ active: !b.active }),
+                              });
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Toggle failed', 'error');
+                            }
+                          }}
+                          className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg cursor-pointer ${
+                            b.active
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {b.active ? 'Active' : 'Paused'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/admin/boosting-services/${b.id}`, { method: 'DELETE' });
+                              await syncAll();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 rounded-lg cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
       )}
@@ -2141,12 +2880,16 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                         price: Number(prodPrice),
                         stock: Number(prodStock),
                         credentialTemplate: prodTemplate,
+                        imageUrl: prodImageUrl,
+                        logoUrl: prodLogoUrl,
                       }),
                     });
                     setProdTitle('');
                     setProdSpec('');
                     setProdDesc('');
                     setProdWarning('');
+                    setProdImageUrl('');
+                    setProdLogoUrl('');
                     notify('Product added to custom section!', 'success');
                     await syncAll();
                   } catch (err) {
@@ -2248,6 +2991,28 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   placeholder="Vault Credential Template"
                   className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                 />
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    {prodImageUrl ? 'Cover Ready' : 'Upload Cover'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleUploadImage(e, setProdImageUrl)}
+                      className="hidden"
+                    />
+                  </label>
+                  <label className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    {prodLogoUrl ? 'Logo Ready' : 'Upload Logo'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleUploadImage(e, setProdLogoUrl)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
                 <button
                   type="submit"
                   className="w-full py-2.5 text-xs font-bold text-white bg-slate-900 dark:bg-blue-600 rounded-xl cursor-pointer"
@@ -2258,9 +3023,9 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             )}
           </div>
 
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
             <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-              Active Sidebar Sections
+              Active Sidebar Sections ({data.customSections.length})
             </h3>
             {data.customSections.length === 0 ? (
               <p className="text-xs text-slate-500 py-8 text-center">
@@ -2270,33 +3035,43 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
               data.customSections.map((sec, idx) => (
                 <div
                   key={sec.id}
-                  className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5"
+                  className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold text-slate-900 dark:text-white">{sec.name}</p>
-                        {sec.badgeTag && (
-                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
-                            {sec.badgeTag}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500">{sec.description}</p>
-                      {sec.aiNotes && (
-                        <p className="text-[11px] text-violet-600 dark:text-violet-400 mt-0.5">
-                          AI Note: {sec.aiNotes}
-                        </p>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-800 text-white">
+                        #{idx + 1}
+                      </span>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">{sec.name}</p>
+                      {sec.badgeTag && (
+                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                          {sec.badgeTag}
+                        </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <p className="text-xs text-slate-500">{sec.description}</p>
+                    {sec.aiNotes && (
+                      <p className="text-[11px] text-violet-600 dark:text-violet-400">
+                        AI Note: {sec.aiNotes}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveToTop('custom_sections', data.customSections, idx)}
+                        className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                      >
+                        <ChevronsUp className="w-3.5 h-3.5" />
+                        #1
+                      </button>
                       <button
                         type="button"
                         disabled={idx === 0}
                         onClick={() =>
                           handleMoveOrder('custom_sections', data.customSections, idx, -1)
                         }
-                        className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
                         title="Move section up"
                       >
                         <ArrowUp className="w-3.5 h-3.5" />
@@ -2307,7 +3082,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                         onClick={() =>
                           handleMoveOrder('custom_sections', data.customSections, idx, 1)
                         }
-                        className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
                         title="Move section down"
                       >
                         <ArrowDown className="w-3.5 h-3.5" />
@@ -2315,10 +3090,10 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       <button
                         type="button"
                         onClick={() => setEditingSection({ ...sec })}
-                        className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                        className="px-2.5 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
                       >
                         <Edit3 className="w-3 h-3" />
-                        Edit
+                        Edit Section
                       </button>
                       <button
                         type="button"
@@ -2330,26 +3105,75 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                             notify(err instanceof Error ? err.message : 'Failed to delete section', 'error');
                           }
                         }}
-                        className="p-1 text-rose-500 hover:text-rose-600 cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 rounded-lg cursor-pointer"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
                       </button>
                     </div>
                   </div>
                   {sec.products.length > 0 && (
                     <div className="divide-y divide-slate-100 dark:divide-slate-800 pt-2 border-t border-slate-100 dark:border-slate-800">
-                      {sec.products.map((p) => (
-                        <div key={p.id} className="py-2 flex items-center justify-between gap-2 text-xs">
-                          <span className="min-w-0 truncate">
-                            {p.title} · <span className="font-mono">{formatNaira(p.price, symbol)}</span> ({p.stock})
-                          </span>
-                          <div className="flex items-center gap-2 shrink-0">
+                      {sec.products.map((p, pIdx) => (
+                        <div key={p.id} className="py-2.5 space-y-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 font-semibold text-slate-900 dark:text-white truncate">
+                              <span className="font-mono text-[10px] text-slate-400 mr-1.5">#{pIdx + 1}</span>
+                              {p.title}
+                            </span>
+                            <span className="font-mono text-slate-600 dark:text-slate-300 shrink-0">
+                              {formatNaira(p.price, symbol)} · Stock {p.stock}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={pIdx === 0}
+                              onClick={() =>
+                                handleMoveToTop('section_products', sec.products, pIdx, sec.id)
+                              }
+                              className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-30 cursor-pointer"
+                            >
+                              <ChevronsUp className="w-3 h-3" />
+                              #1
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pIdx === 0}
+                              onClick={() =>
+                                handleMoveOrder('section_products', sec.products, pIdx, -1, sec.id)
+                              }
+                              className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                              title="Move product up"
+                            >
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pIdx === sec.products.length - 1}
+                              onClick={() =>
+                                handleMoveOrder('section_products', sec.products, pIdx, 1, sec.id)
+                              }
+                              className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 disabled:opacity-30 cursor-pointer"
+                              title="Move product down"
+                            >
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => setEditingSecProduct({ ...p })}
-                              className="text-blue-600 font-semibold cursor-pointer"
+                              className="px-2 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
                             >
+                              <Edit3 className="w-3 h-3" />
                               Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateItem('sectionProduct', p.id)}
+                              className="px-2 py-1 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <Copy className="w-3 h-3" />
+                              Copy
                             </button>
                             <button
                               type="button"
@@ -2366,8 +3190,9 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                                   );
                                 }
                               }}
-                              className="text-rose-500 cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 rounded-lg cursor-pointer"
                             >
+                              <Trash2 className="w-3 h-3" />
                               Remove
                             </button>
                           </div>
@@ -2861,6 +3686,55 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 className="px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
             </div>
+            <input
+              type="text"
+              value={editingSecProduct.credentialTemplate || ''}
+              onChange={(e) =>
+                setEditingSecProduct({ ...editingSecProduct, credentialTemplate: e.target.value })
+              }
+              placeholder="Credential Template"
+              className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                <ImageIcon className="w-3.5 h-3.5" />
+                {editingSecProduct.imageUrl ? 'Change Cover' : 'Upload Cover'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) =>
+                    handleUploadImage(e, (url) =>
+                      setEditingSecProduct((prev) => (prev ? { ...prev, imageUrl: url } : prev)),
+                    )
+                  }
+                  className="hidden"
+                />
+              </label>
+              <label className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                <ImageIcon className="w-3.5 h-3.5" />
+                {editingSecProduct.logoUrl ? 'Change Logo' : 'Upload Logo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) =>
+                    handleUploadImage(e, (url) =>
+                      setEditingSecProduct((prev) => (prev ? { ...prev, logoUrl: url } : prev)),
+                    )
+                  }
+                  className="hidden"
+                />
+              </label>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={editingSecProduct.active ?? true}
+                onChange={(e) =>
+                  setEditingSecProduct({ ...editingSecProduct, active: e.target.checked })
+                }
+              />
+              Visible to Buyers
+            </label>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -2928,6 +3802,7 @@ export function AdminCommsAndSettingsPanel({
   const [tutSum, setTutSum] = useState('');
   const [tutBody, setTutBody] = useState('');
   const [tutVideo, setTutVideo] = useState('');
+  const [editingTutorial, setEditingTutorial] = useState<TutorialItem | null>(null);
 
   // Tickets state
   const [selectedTicketId, setSelectedTicketId] = useState(data.tickets[0]?.id || '');
@@ -3588,31 +4463,161 @@ export function AdminCommsAndSettingsPanel({
 
         <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 divide-y divide-slate-100 dark:divide-slate-800">
           {data.tutorials.map((t) => (
-            <div key={t.id} className="py-3.5 flex items-start justify-between gap-3">
-              <div>
+            <div key={t.id} className="py-3.5 flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-slate-900 dark:text-white">{t.title}</p>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {t.category} · {t.duration}
                 </p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{t.summary}</p>
               </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await apiFetch(`/api/admin/tutorials/${t.id}`, { method: 'DELETE' });
-                    await onRefresh();
-                  } catch (err) {
-                    notify(err instanceof Error ? err.message : 'Delete failed', 'error');
-                  }
-                }}
-                className="text-rose-500 p-1 cursor-pointer"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setEditingTutorial({ ...t })}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-blue-600 text-white rounded-lg cursor-pointer inline-flex items-center gap-1"
+                >
+                  <Edit3 className="w-3 h-3" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await apiFetch(`/api/admin/tutorials/${t.id}`, { method: 'DELETE' });
+                      await onRefresh();
+                    } catch (err) {
+                      notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                    }
+                  }}
+                  className="text-rose-500 p-1.5 cursor-pointer"
+                  aria-label="Delete tutorial"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
+
+        {editingTutorial && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+            onClick={() => setEditingTutorial(null)}
+          >
+            <form
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await apiFetch(`/api/admin/tutorials/${editingTutorial.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                      title: editingTutorial.title,
+                      category: editingTutorial.category,
+                      duration: editingTutorial.duration,
+                      summary: editingTutorial.summary,
+                      content: editingTutorial.content,
+                      videoUrl: editingTutorial.videoUrl || '',
+                    }),
+                  });
+                  setEditingTutorial(null);
+                  notify('Tutorial guide updated!', 'success');
+                  await onRefresh();
+                } catch (err) {
+                  notify(err instanceof Error ? err.message : 'Failed to update tutorial', 'error');
+                }
+              }}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-5 space-y-3 my-auto shadow-2xl"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  Edit Tutorial Guide
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setEditingTutorial(null)}
+                  className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <input
+                type="text"
+                required
+                value={editingTutorial.title}
+                onChange={(e) =>
+                  setEditingTutorial({ ...editingTutorial, title: e.target.value })
+                }
+                placeholder="Guide Title"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  value={editingTutorial.category}
+                  onChange={(e) =>
+                    setEditingTutorial({ ...editingTutorial, category: e.target.value })
+                  }
+                  placeholder="Category"
+                  className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+                <input
+                  type="text"
+                  value={editingTutorial.duration}
+                  onChange={(e) =>
+                    setEditingTutorial({ ...editingTutorial, duration: e.target.value })
+                  }
+                  placeholder="Duration"
+                  className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <input
+                type="text"
+                value={editingTutorial.summary}
+                onChange={(e) =>
+                  setEditingTutorial({ ...editingTutorial, summary: e.target.value })
+                }
+                placeholder="Summary"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <input
+                type="text"
+                value={editingTutorial.videoUrl || ''}
+                onChange={(e) =>
+                  setEditingTutorial({ ...editingTutorial, videoUrl: e.target.value })
+                }
+                placeholder="Optional Video URL"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <textarea
+                required
+                rows={5}
+                value={editingTutorial.content}
+                onChange={(e) =>
+                  setEditingTutorial({ ...editingTutorial, content: e.target.value })
+                }
+                placeholder="Step-by-step instructions..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingTutorial(null)}
+                  className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer"
+                >
+                  Save Guide
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     );
   }
@@ -3866,21 +4871,51 @@ export function AdminCommsAndSettingsPanel({
                         className="hidden"
                       />
                     </label>
-                    {showcaseCards.length > 1 && (
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() =>
-                          setFormSettings({
-                            ...formSettings,
-                            landingShowcaseCards: showcaseCards.filter((_, i) => i !== idx),
-                          })
-                        }
-                        className="p-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white cursor-pointer"
-                        title="Remove showcase card"
+                        disabled={idx === 0}
+                        onClick={() => {
+                          const next = [...showcaseCards];
+                          const [moved] = next.splice(idx, 1);
+                          next.splice(idx - 1, 0, moved);
+                          setFormSettings({ ...formSettings, landingShowcaseCards: next });
+                        }}
+                        className="p-1.5 rounded-lg bg-black/75 hover:bg-black text-white disabled:opacity-35 cursor-pointer"
+                        title="Move card earlier"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <ArrowUp className="w-3.5 h-3.5" />
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        disabled={idx === showcaseCards.length - 1}
+                        onClick={() => {
+                          const next = [...showcaseCards];
+                          const [moved] = next.splice(idx, 1);
+                          next.splice(idx + 1, 0, moved);
+                          setFormSettings({ ...formSettings, landingShowcaseCards: next });
+                        }}
+                        className="p-1.5 rounded-lg bg-black/75 hover:bg-black text-white disabled:opacity-35 cursor-pointer"
+                        title="Move card later"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      {showcaseCards.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFormSettings({
+                              ...formSettings,
+                              landingShowcaseCards: showcaseCards.filter((_, i) => i !== idx),
+                            })
+                          }
+                          className="p-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white cursor-pointer"
+                          title="Remove showcase card"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, BookOpen, Check, Copy, LifeBuoy, Send, Share2, Shield } from 'lucide-react';
+import { Bell, BookOpen, Check, Copy, LifeBuoy, Send, Share2, Shield, Upload } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { apiFetch, copyText, formatNaira } from '../../lib/api';
+import { apiFetch, copyText, fileToDataUrl, formatNaira } from '../../lib/api';
+import { UserAvatar } from '../UserAvatar';
 import type { NotificationItem, SupportTicket, TutorialItem } from '../../types';
 
 export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
@@ -390,6 +391,7 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
   const symbol = catalog?.settings?.currencySymbol || '₦';
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [referralData, setReferralData] = useState<{
@@ -403,6 +405,7 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
     if (user) {
       setName(user.name);
       setEmail(user.email);
+      setAvatarUrl(user.avatarUrl || '');
     }
   }, [user]);
 
@@ -422,7 +425,7 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
     try {
       await apiFetch('/api/user/profile', {
         method: 'PATCH',
-        body: JSON.stringify({ name, email }),
+        body: JSON.stringify({ name, email, avatarUrl }),
       });
       await refreshUser();
       notify('Profile updated', 'success');
@@ -477,8 +480,48 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
           className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
         >
           <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-            Profile &amp; Email
+            Profile, Avatar &amp; Email
           </h2>
+
+          <div className="flex flex-wrap items-center gap-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+            <UserAvatar name={name || user?.name} avatarUrl={avatarUrl} size="xl" />
+            <div className="flex-1 min-w-[180px] space-y-2">
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Profile Picture
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload Photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const dataUrl = await fileToDataUrl(file);
+                        setAvatarUrl(dataUrl);
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Could not load image', 'error');
+                      }
+                    }}
+                  />
+                </label>
+                {avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setAvatarUrl('')}
+                    className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    Use 3D Avatar
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Full Name

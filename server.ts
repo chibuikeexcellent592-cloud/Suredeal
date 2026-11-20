@@ -227,7 +227,7 @@ async function startServer() {
       maintenanceMessage:
         s.maintenanceMessage ||
         'We’re currently performing scheduled maintenance. Please check back shortly.',
-      siteName: s.siteName || 'SureDeal Store',
+      siteName: s.siteName || 'Ultimate Tech App',
       siteLogoUrl: s.siteLogoUrl || '',
       supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
       supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
@@ -1324,6 +1324,20 @@ async function startServer() {
         user.email = email;
       }
     }
+    if (typeof req.body?.avatarUrl === 'string') {
+      const av = req.body.avatarUrl.trim();
+      if (!av) {
+        user.avatarUrl = undefined;
+      } else if (
+        (av.startsWith('data:image/') || av.startsWith('https://') || av.startsWith('http://')) &&
+        av.length <= 2_500_000
+      ) {
+        user.avatarUrl = av;
+      } else {
+        res.status(400).json({ error: 'Invalid avatar image format or size too large.' });
+        return;
+      }
+    }
     store.save();
     res.json({ user: toPublicUser(user) });
   });
@@ -1391,6 +1405,17 @@ async function startServer() {
     const visibleTransactions = db.transactions.filter((t) => !t.adminCleared);
     const visibleSmsOrders = db.smsOrders.filter((s) => !s.adminCleared);
     const visibleBoostingOrders = db.boostingOrders.filter((b) => !b.adminCleared);
+    const userById = new Map(db.users.map((u) => [u.id, u]));
+    const visibleVaultItems = db.vaultItems
+      .filter((v) => !v.adminCleared)
+      .map((v) => {
+        const buyer = userById.get(v.userId);
+        return {
+          ...v,
+          buyerEmail: v.buyerEmail || buyer?.email || 'Unknown user',
+          buyerName: v.buyerName || buyer?.name || 'User',
+        };
+      });
 
     const totalRevenue = visibleTransactions
       .filter((t) => t.type === 'purchase')
@@ -1430,6 +1455,7 @@ async function startServer() {
       boostingServices: db.boostingServices,
       marketplaceCategories: db.marketplaceCategories,
       marketplaceListings: db.marketplaceListings,
+      vaultItems: visibleVaultItems,
       customSections: db.customSections,
       notifications: db.notifications,
       emailLogs: db.emailLogs,
@@ -1601,6 +1627,30 @@ async function startServer() {
         target.email,
         `Account set to ${req.body.status}`,
       );
+    }
+    if (typeof req.body?.referralCode === 'string' && req.body.referralCode.trim()) {
+      const cleanCode = req.body.referralCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+      if (cleanCode.length >= 3) {
+        const conflict = store.db.users.some(
+          (u) => u.id !== target.id && u.referralCode.toUpperCase() === cleanCode,
+        );
+        if (conflict) {
+          res.status(409).json({ error: 'Referral code already belongs to another user' });
+          return;
+        }
+        target.referralCode = cleanCode;
+      }
+    }
+    if (typeof req.body?.avatarUrl === 'string') {
+      const av = req.body.avatarUrl.trim();
+      if (!av) {
+        target.avatarUrl = undefined;
+      } else if (
+        (av.startsWith('data:image/') || av.startsWith('https://') || av.startsWith('http://')) &&
+        av.length <= 2_500_000
+      ) {
+        target.avatarUrl = av;
+      }
     }
     if (typeof req.body?.newPassword === 'string' && req.body.newPassword.length >= 6) {
       target.passwordHash = hashPassword(req.body.newPassword);
@@ -1996,6 +2046,23 @@ async function startServer() {
     res.json({ ok: true });
   });
 
+  app.delete('/api/admin/vault-items/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const target = store.db.vaultItems.find((v) => v.id === req.params.id && !v.adminCleared);
+    if (!target) {
+      res.status(404).json({ error: 'Vault delivery record not found' });
+      return;
+    }
+    target.adminCleared = true;
+    store.logAudit(
+      req.currentUser!.email,
+      'DELETE_VAULT_ITEM',
+      req.params.id,
+      'Cleared vault delivery record from Overwatch (buyer copy preserved)',
+    );
+    store.save();
+    res.json({ ok: true });
+  });
+
   app.delete('/api/admin/transactions/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
     const target = store.db.transactions.find((t) => t.id === req.params.id && !t.adminCleared);
     if (!target) {
@@ -2242,7 +2309,7 @@ async function startServer() {
   });
 
   app.post('/api/admin/catalog/reorder', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
-    const kind = String(req.body?.kind || '');
+    const rawKind = String(req.body?.kind || req.body?.entity || '').trim();
     const orderedIds = Array.isArray(req.body?.orderedIds)
       ? req.body.orderedIds.map(String)
       : [];
@@ -2250,25 +2317,177 @@ async function startServer() {
       res.status(400).json({ error: 'orderedIds array is required' });
       return;
     }
-    if (kind === 'marketplace') {
+    if (rawKind === 'marketplace' || rawKind === 'marketplace_listings') {
       store.db.marketplaceListings = reorderByIds(store.db.marketplaceListings, orderedIds);
-    } else if (kind === 'categories') {
+    } else if (rawKind === 'categories' || rawKind === 'marketplace_categories') {
       store.db.marketplaceCategories = reorderByIds(store.db.marketplaceCategories, orderedIds);
-    } else if (kind === 'smsServices') {
+    } else if (rawKind === 'smsServices' || rawKind === 'sms_services') {
       store.db.smsServices = reorderByIds(store.db.smsServices, orderedIds);
-    } else if (kind === 'smsCountries') {
+    } else if (rawKind === 'smsCountries' || rawKind === 'sms_countries') {
       store.db.smsCountries = reorderByIds(store.db.smsCountries, orderedIds);
-    } else if (kind === 'boosting') {
+    } else if (rawKind === 'boosting' || rawKind === 'boosting_services') {
       store.db.boostingServices = reorderByIds(store.db.boostingServices, orderedIds);
-    } else if (kind === 'sections') {
+    } else if (rawKind === 'sections' || rawKind === 'custom_sections') {
       store.db.customSections = reorderByIds(store.db.customSections, orderedIds);
+    } else if (rawKind === 'sectionProducts' || rawKind === 'section_products') {
+      const sectionId = String(req.body?.sectionId || '').trim();
+      const targetSec =
+        (sectionId ? store.db.customSections.find((s) => s.id === sectionId) : undefined) ||
+        store.db.customSections.find((s) => s.products.some((p) => p.id === orderedIds[0]));
+      if (!targetSec) {
+        res.status(404).json({ error: 'Custom section not found for product reorder' });
+        return;
+      }
+      targetSec.products = reorderByIds(targetSec.products, orderedIds);
     } else {
-      res.status(400).json({ error: 'Unsupported reorder kind' });
+      res.status(400).json({ error: `Unsupported reorder kind: ${rawKind || 'empty'}` });
       return;
     }
-    store.logAudit(req.currentUser!.email, 'REORDER_CATALOG', kind, `Reordered ${orderedIds.length} items`);
+    store.logAudit(req.currentUser!.email, 'REORDER_CATALOG', rawKind, `Reordered ${orderedIds.length} items`);
     store.save();
-    res.json({ ok: true });
+    res.json({ ok: true, kind: rawKind });
+  });
+
+  app.post('/api/admin/catalog/bulk', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const target = String(req.body?.target || '').trim();
+    const action = String(req.body?.action || '').trim();
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const percentRaw = Number(req.body?.percent || 0);
+    const percent = Number.isFinite(percentRaw) ? Math.max(-90, Math.min(500, percentRaw)) : 0;
+    if (!ids.length) {
+      res.status(400).json({ error: 'Select at least one item' });
+      return;
+    }
+    const idSet = new Set(ids);
+    let affected = 0;
+
+    if (target === 'marketplace') {
+      if (action === 'delete') {
+        const before = store.db.marketplaceListings.length;
+        store.db.marketplaceListings = store.db.marketplaceListings.filter((l) => !idSet.has(l.id));
+        affected = before - store.db.marketplaceListings.length;
+      } else {
+        for (const l of store.db.marketplaceListings) {
+          if (!idSet.has(l.id)) continue;
+          if (action === 'activate') { l.active = true; affected += 1; }
+          else if (action === 'pause') { l.active = false; affected += 1; }
+          else if (action === 'price_percent') {
+            l.price = Math.max(50, Math.round(l.price * (1 + percent / 100)));
+            affected += 1;
+          }
+        }
+      }
+    } else if (target === 'smsServices') {
+      if (action === 'delete') {
+        const before = store.db.smsServices.length;
+        store.db.smsServices = store.db.smsServices.filter((s) => !idSet.has(s.id));
+        affected = before - store.db.smsServices.length;
+      } else {
+        for (const s of store.db.smsServices) {
+          if (!idSet.has(s.id)) continue;
+          if (action === 'activate') { s.active = true; affected += 1; }
+          else if (action === 'pause') { s.active = false; affected += 1; }
+          else if (action === 'price_percent') {
+            s.basePrice = Math.max(50, Math.round(s.basePrice * (1 + percent / 100)));
+            affected += 1;
+          }
+        }
+      }
+    } else if (target === 'boosting') {
+      if (action === 'delete') {
+        const before = store.db.boostingServices.length;
+        store.db.boostingServices = store.db.boostingServices.filter((b) => !idSet.has(b.id));
+        affected = before - store.db.boostingServices.length;
+      } else {
+        for (const b of store.db.boostingServices) {
+          if (!idSet.has(b.id)) continue;
+          if (action === 'activate') { b.active = true; affected += 1; }
+          else if (action === 'pause') { b.active = false; affected += 1; }
+          else if (action === 'price_percent') {
+            b.ratePer1k = Math.max(10, Math.round(b.ratePer1k * (1 + percent / 100)));
+            affected += 1;
+          }
+        }
+      }
+    } else {
+      res.status(400).json({ error: 'Unsupported bulk target' });
+      return;
+    }
+
+    store.logAudit(
+      req.currentUser!.email,
+      `BULK_${action.toUpperCase()}`,
+      target,
+      `Applied ${action} to ${affected} item(s)`,
+    );
+    store.save();
+    res.json({ ok: true, affected });
+  });
+
+  app.post('/api/admin/catalog/duplicate', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const target = String(req.body?.target || '').trim();
+    const id = String(req.body?.id || '').trim();
+    if (!id) {
+      res.status(400).json({ error: 'Source id is required' });
+      return;
+    }
+    if (target === 'marketplace') {
+      const idx = store.db.marketplaceListings.findIndex((l) => l.id === id);
+      if (idx === -1) { res.status(404).json({ error: 'Listing not found' }); return; }
+      const src = store.db.marketplaceListings[idx];
+      const copy: MarketplaceListing = {
+        ...src,
+        id: makeId('mkt'),
+        title: `${src.title} (Copy)`,
+        features: [...src.features],
+        stockKeys: [...src.stockKeys],
+        soldCount: 0,
+      };
+      store.db.marketplaceListings.splice(idx + 1, 0, copy);
+      store.logAudit(req.currentUser!.email, 'DUPLICATE_LISTING', copy.title, `Cloned from ${src.id}`);
+      store.save();
+      res.status(201).json({ ok: true, item: copy });
+      return;
+    }
+    if (target === 'smsServices') {
+      const idx = store.db.smsServices.findIndex((s) => s.id === id);
+      if (idx === -1) { res.status(404).json({ error: 'SMS service not found' }); return; }
+      const src = store.db.smsServices[idx];
+      const copy: SmsService = { ...src, id: makeId('svc'), name: `${src.name} (Copy)` };
+      store.db.smsServices.splice(idx + 1, 0, copy);
+      store.logAudit(req.currentUser!.email, 'DUPLICATE_SMS_SERVICE', copy.name, `Cloned from ${src.id}`);
+      store.save();
+      res.status(201).json({ ok: true, item: copy });
+      return;
+    }
+    if (target === 'boosting') {
+      const idx = store.db.boostingServices.findIndex((b) => b.id === id);
+      if (idx === -1) { res.status(404).json({ error: 'Boosting service not found' }); return; }
+      const src = store.db.boostingServices[idx];
+      const copy: BoostingService = { ...src, id: makeId('bst'), name: `${src.name} (Copy)` };
+      store.db.boostingServices.splice(idx + 1, 0, copy);
+      store.logAudit(req.currentUser!.email, 'DUPLICATE_BOOST_SERVICE', copy.name, `Cloned from ${src.id}`);
+      store.save();
+      res.status(201).json({ ok: true, item: copy });
+      return;
+    }
+    if (target === 'sectionProduct') {
+      const sectionId = String(req.body?.sectionId || '').trim();
+      const sec =
+        (sectionId ? store.db.customSections.find((s) => s.id === sectionId) : undefined) ||
+        store.db.customSections.find((s) => s.products.some((p) => p.id === id));
+      if (!sec) { res.status(404).json({ error: 'Custom section not found' }); return; }
+      const idx = sec.products.findIndex((p) => p.id === id);
+      if (idx === -1) { res.status(404).json({ error: 'Section product not found' }); return; }
+      const src = sec.products[idx];
+      const copy = { ...src, id: makeId('secp'), title: `${src.title} (Copy)` };
+      sec.products.splice(idx + 1, 0, copy);
+      store.logAudit(req.currentUser!.email, 'DUPLICATE_SECTION_PRODUCT', copy.title, `Cloned in ${sec.name}`);
+      store.save();
+      res.status(201).json({ ok: true, item: copy });
+      return;
+    }
+    res.status(400).json({ error: 'Unsupported duplicate target' });
   });
 
   app.post('/api/admin/marketplace-listings', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
@@ -2766,6 +2985,34 @@ async function startServer() {
     res.status(201).json({ tutorial });
   });
 
+  app.patch('/api/admin/tutorials/:id', requireAuth, requireAdmin, (req, res) => {
+    const tutorial = store.db.tutorials.find((t) => t.id === req.params.id);
+    if (!tutorial) {
+      res.status(404).json({ error: 'Tutorial not found' });
+      return;
+    }
+    if (typeof req.body?.title === 'string' && req.body.title.trim()) {
+      tutorial.title = req.body.title.trim();
+    }
+    if (typeof req.body?.category === 'string' && req.body.category.trim()) {
+      tutorial.category = req.body.category.trim();
+    }
+    if (typeof req.body?.duration === 'string') {
+      tutorial.duration = req.body.duration.trim();
+    }
+    if (typeof req.body?.summary === 'string') {
+      tutorial.summary = req.body.summary.trim();
+    }
+    if (typeof req.body?.content === 'string') {
+      tutorial.content = req.body.content.trim();
+    }
+    if (typeof req.body?.videoUrl === 'string') {
+      tutorial.videoUrl = req.body.videoUrl.trim();
+    }
+    store.save();
+    res.json({ tutorial });
+  });
+
   app.delete('/api/admin/tutorials/:id', requireAuth, requireAdmin, (req, res) => {
     store.db.tutorials = store.db.tutorials.filter((t) => t.id !== req.params.id);
     store.save();
@@ -3005,6 +3252,7 @@ async function startServer() {
     if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
     if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
 
+    s.brandMigratedV2 = true;
     store.logAudit(req.currentUser!.email, 'UPDATE_SETTINGS', 'Overwatch Settings', 'Saved global configuration');
     store.save();
     res.json({ settings: s });

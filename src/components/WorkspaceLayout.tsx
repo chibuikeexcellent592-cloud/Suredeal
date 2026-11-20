@@ -28,6 +28,7 @@ import { useApp } from '../context/AppContext';
 import { apiFetch, formatNaira } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
 import { PinnedMarquee } from './PinnedMarquee';
+import { UserAvatar } from './UserAvatar';
 import { BoostingPanel } from './workspace/BoostingPanel';
 import { CustomSectionPanel, MarketplacePanel } from './workspace/MarketplacePanel';
 import { OrdersPanel } from './workspace/OrdersPanel';
@@ -58,7 +59,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   const settings = catalog?.settings;
-  const siteName = settings?.siteName || 'SureDeal Store';
+  const siteName = settings?.siteName || 'Ultimate Tech App';
   const siteTagline = settings?.siteTagline || 'Digital solutions for every market';
   const symbol = settings?.currencySymbol || '₦';
   const currencyCode = settings?.currencyCode || 'NGN';
@@ -73,12 +74,12 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
   const communityPlatform = settings?.communityChannelPlatform || 'whatsapp';
   const communityTitle =
     settings?.communityChannelTitle ||
-    (communityPlatform === 'telegram' ? 'Join our Telegram' : 'Join our WhatsApp');
+    (communityPlatform === 'telegram' ? `${siteName} Telegram` : `${siteName} News`);
   const communitySubtitle =
-    settings?.communityChannelSubtitle || 'Restock alerts, promos & live support';
+    settings?.communityChannelSubtitle || 'Get exclusive updates & drops';
   const communityCta =
     settings?.communityChannelCta ||
-    (communityPlatform === 'telegram' ? 'Open Channel' : 'Join Group');
+    (communityPlatform === 'telegram' ? 'Open Channel' : 'Join WhatsApp');
   const communityUrl = settings?.communityChannelUrl?.trim() || fallbackWhatsappUrl;
 
   const refreshCounts = () => {
@@ -173,12 +174,6 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
     setProfileMenuOpen(false);
   };
 
-  const initials = (user?.name || 'SD')
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() || '')
-    .join('');
-
   const sidebarContent = (
     <div className="flex flex-col h-full justify-between bg-white dark:bg-slate-900 overflow-y-auto">
       <div>
@@ -196,7 +191,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               shape="rounded"
             />
             <div className="min-w-0">
-              <p className="font-display text-base font-bold text-slate-900 dark:text-white leading-tight truncate">
+              <p className="font-display text-base font-extrabold text-slate-900 dark:text-white leading-tight truncate">
                 {siteName}
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
@@ -214,18 +209,17 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
           </button>
         </div>
 
-        {/* User Profile Row with Ring & Order Badge (IMG_6033) */}
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
-          <div className="relative w-11 h-11 rounded-full bg-gradient-to-br from-blue-100 to-sky-200 dark:from-blue-900/60 dark:to-sky-800/60 ring-2 ring-blue-600/70 flex items-center justify-center font-display font-bold text-sm text-blue-700 dark:text-blue-200 shrink-0">
-            {initials}
-            {ordersCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
-                {ordersCount > 99 ? '99+' : ordersCount}
-              </span>
-            )}
-          </div>
+        {/* User Profile Row with Purple Ring, 3D Avatar & Cream Order Count Badge */}
+        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3.5">
+          <UserAvatar
+            name={user?.name}
+            avatarUrl={user?.avatarUrl}
+            size="lg"
+            showOrdersBadge
+            ordersCount={ordersCount}
+          />
           <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+            <p className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
               {user?.name}
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user?.email}</p>
@@ -374,37 +368,51 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
         </div>
       </div>
 
-      {/* Bottom Community Channel Card (IMG_6036) + Public/Sign Out */}
+      {/* Bottom Community Channel Card + Public/Sign Out */}
       <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
         {communityEnabled && (
           <a
             href={communityUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className={`block rounded-2xl p-3.5 text-white shadow-sm transition-transform hover:-translate-y-0.5 ${
+            className={`relative block overflow-hidden rounded-2xl p-4 text-center border transition-transform hover:-translate-y-0.5 ${
               communityPlatform === 'telegram'
-                ? 'bg-gradient-to-br from-sky-500 to-blue-600 shadow-sky-500/20'
-                : 'bg-gradient-to-br from-emerald-500 to-green-600 shadow-emerald-500/20'
+                ? 'bg-sky-50/90 dark:bg-sky-950/35 border-sky-200 dark:border-sky-800/60 text-sky-950 dark:text-sky-100'
+                : 'bg-emerald-50/90 dark:bg-emerald-950/35 border-emerald-200 dark:border-emerald-800/60 text-emerald-950 dark:text-emerald-100'
             }`}
           >
-            <div className="flex items-start gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                {communityPlatform === 'telegram' ? (
-                  <Send className="w-4 h-4" />
-                ) : (
-                  <MessageCircle className="w-4 h-4" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-extrabold leading-tight truncate">{communityTitle}</p>
-                <p className="text-[11px] text-white/85 mt-0.5 line-clamp-2">
-                  {communitySubtitle}
-                </p>
-                <span className="inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-lg bg-white text-slate-900 text-[11px] font-bold">
-                  {communityCta}
-                </span>
-              </div>
+            <div
+              className={`w-11 h-11 rounded-full mx-auto mb-2.5 flex items-center justify-center text-white shadow-sm ${
+                communityPlatform === 'telegram' ? 'bg-sky-500' : 'bg-[#22C55E]'
+              }`}
+            >
+              {communityPlatform === 'telegram' ? (
+                <Send className="w-5 h-5" />
+              ) : (
+                <MessageCircle className="w-5 h-5" />
+              )}
             </div>
+            <p className="font-display text-sm font-extrabold leading-tight truncate">
+              {communityTitle}
+            </p>
+            <p
+              className={`text-xs mt-1 line-clamp-2 ${
+                communityPlatform === 'telegram'
+                  ? 'text-sky-700 dark:text-sky-300'
+                  : 'text-emerald-700 dark:text-emerald-300'
+              }`}
+            >
+              {communitySubtitle}
+            </p>
+            <span
+              className={`mt-3 w-full inline-flex items-center justify-center px-4 py-2 rounded-full text-xs font-bold text-white shadow-xs ${
+                communityPlatform === 'telegram'
+                  ? 'bg-sky-600 hover:bg-sky-700'
+                  : 'bg-[#22C55E] hover:bg-emerald-600'
+              }`}
+            >
+              {communityCta}
+            </span>
           </a>
         )}
 
@@ -453,13 +461,13 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
 
         {/* Main Content Viewport */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Header matching IMG_6032 */}
+          {/* Header matching attached brand/profile screenshot */}
           <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3.5 sm:px-6 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <button
                 type="button"
                 onClick={() => setMobileOpen(true)}
-                className="lg:hidden w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 cursor-pointer"
+                className="lg:hidden w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-900/70 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 cursor-pointer"
                 aria-label="Open menu"
               >
                 <Menu className="w-5 h-5" />
@@ -516,12 +524,14 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                 <button
                   type="button"
                   onClick={() => setProfileMenuOpen((v) => !v)}
-                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
                   aria-label="Account menu"
                 >
-                  <span className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-sky-500 text-white text-[11px] font-bold flex items-center justify-center ring-2 ring-blue-500/30">
-                    {initials}
-                  </span>
+                  <UserAvatar
+                    name={user?.name}
+                    avatarUrl={user?.avatarUrl}
+                    size="sm"
+                  />
                   <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
                 </button>
 

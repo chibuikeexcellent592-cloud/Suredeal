@@ -42,7 +42,7 @@ export function MaintenanceScreen({
   const tapTimerRef = useRef<number | null>(null);
 
   const settings = catalog?.settings;
-  const siteName = settings?.siteName || 'SureDeal Store';
+  const siteName = settings?.siteName || 'Ultimate Tech App';
   const symbol = settings?.currencySymbol || '₦';
   const contactEmail = settings?.supportEmail || 'chibuikeexcellent592@gmail.com';
   const whatsappDisplay =

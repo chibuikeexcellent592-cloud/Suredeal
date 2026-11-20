@@ -11,7 +11,7 @@ export function FloatingWhatsAppButton() {
   const rawPhone = settings?.supportWhatsapp || settings?.adminNotifyPhone || '+2347031537390';
   const digits = rawPhone.replace(/[^\d]/g, '') || '2347031537390';
   const displayPhone = rawPhone.trim() || '+2347031537390';
-  const siteName = settings?.siteName || 'SureDeal Store';
+  const siteName = settings?.siteName || 'Ultimate Tech App';
 
   return (
     <a

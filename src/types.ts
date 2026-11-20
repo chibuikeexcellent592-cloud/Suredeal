@@ -98,6 +98,7 @@ export interface PlatformSettings {
   smtpPass?: string;
   smtpFrom?: string;
   resendApiKey?: string;
+  brandMigratedV2?: boolean;
 }
 
 export interface MaintenanceStatusResponse {
@@ -123,6 +124,7 @@ export interface PublicUser {
   referredBy?: string;
   referralRewardClaimed?: boolean;
   emailVerified?: boolean;
+  avatarUrl?: string;
   createdAt: string;
   lastLoginAt?: string;
 }
@@ -249,6 +251,8 @@ export interface VaultItem {
   buyWarningLevel?: 'serious' | 'info';
   createdAt: string;
   adminCleared?: boolean;
+  buyerEmail?: string;
+  buyerName?: string;
 }
 
 export interface CustomSectionProduct {

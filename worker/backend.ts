@@ -660,7 +660,7 @@ export class SureDealStoreDO {
           maintenanceMessage:
             s.maintenanceMessage ||
             'We’re currently performing scheduled maintenance. Please check back shortly.',
-          siteName: s.siteName || 'SureDeal Store',
+          siteName: s.siteName || 'Ultimate Tech App',
           siteLogoUrl: s.siteLogoUrl || '',
           supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
           supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
@@ -1663,6 +1663,19 @@ export class SureDealStoreDO {
             currentUser.email = email;
           }
         }
+        if (typeof body.avatarUrl === 'string') {
+          const av = body.avatarUrl.trim();
+          if (!av) {
+            currentUser.avatarUrl = undefined;
+          } else if (
+            (av.startsWith('data:image/') || av.startsWith('https://') || av.startsWith('http://')) &&
+            av.length <= 2_500_000
+          ) {
+            currentUser.avatarUrl = av;
+          } else {
+            return errJson('Invalid avatar image format or size too large.', 400);
+          }
+        }
         this.persistKeys('users');
         return okJson({ user: toPublicUser(currentUser) });
       }
@@ -1729,6 +1742,17 @@ export class SureDealStoreDO {
           const visibleTransactions = db.transactions.filter((t) => !t.adminCleared);
           const visibleSmsOrders = db.smsOrders.filter((s) => !s.adminCleared);
           const visibleBoostingOrders = db.boostingOrders.filter((b) => !b.adminCleared);
+          const userById = new Map(db.users.map((u) => [u.id, u]));
+          const visibleVaultItems = db.vaultItems
+            .filter((v) => !v.adminCleared)
+            .map((v) => {
+              const buyer = userById.get(v.userId);
+              return {
+                ...v,
+                buyerEmail: v.buyerEmail || buyer?.email || 'Unknown user',
+                buyerName: v.buyerName || buyer?.name || 'User',
+              };
+            });
 
           const totalRevenue = visibleTransactions
             .filter((t) => t.type === 'purchase')
@@ -1771,6 +1795,7 @@ export class SureDealStoreDO {
             boostingServices: db.boostingServices,
             marketplaceCategories: db.marketplaceCategories,
             marketplaceListings: db.marketplaceListings,
+            vaultItems: visibleVaultItems,
             customSections: db.customSections,
             notifications: db.notifications,
             emailLogs: db.emailLogs,
@@ -1991,6 +2016,27 @@ export class SureDealStoreDO {
               target.email,
               `Account set to ${body.status}`,
             );
+          }
+          if (typeof body.referralCode === 'string' && body.referralCode.trim()) {
+            const cleanCode = body.referralCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+            if (cleanCode.length >= 3) {
+              const conflict = db.users.some(
+                (u) => u.id !== target.id && u.referralCode.toUpperCase() === cleanCode,
+              );
+              if (conflict) return errJson('Referral code already belongs to another user', 409);
+              target.referralCode = cleanCode;
+            }
+          }
+          if (typeof body.avatarUrl === 'string') {
+            const av = body.avatarUrl.trim();
+            if (!av) {
+              target.avatarUrl = undefined;
+            } else if (
+              (av.startsWith('data:image/') || av.startsWith('https://') || av.startsWith('http://')) &&
+              av.length <= 2_500_000
+            ) {
+              target.avatarUrl = av;
+            }
           }
           if (typeof body.newPassword === 'string' && body.newPassword.length >= 6) {
             target.passwordHash = await hashPasswordWeb(body.newPassword);
@@ -2452,6 +2498,22 @@ export class SureDealStoreDO {
           return okJson({ ok: true });
         }
 
+        const adminVaultDelMatch = pathname.match(/^\/api\/admin\/vault-items\/([^/]+)$/);
+        if (method === 'DELETE' && adminVaultDelMatch) {
+          const vaultId = decodeURIComponent(adminVaultDelMatch[1]);
+          const target = db.vaultItems.find((v) => v.id === vaultId && !v.adminCleared);
+          if (!target) return errJson('Vault delivery record not found', 404);
+          target.adminCleared = true;
+          this.logAudit(
+            currentUser.email,
+            'DELETE_VAULT_ITEM',
+            vaultId,
+            'Cleared vault delivery record from Overwatch (buyer copy preserved)',
+          );
+          this.persistKeys('vaultItems', 'auditLogs');
+          return okJson({ ok: true });
+        }
+
         // --- ADMIN CATALOG CRUD ---
         if (method === 'POST' && pathname === '/api/admin/sms-services') {
           const body = await readJsonBody(request);
@@ -2665,33 +2727,180 @@ export class SureDealStoreDO {
 
         if (method === 'POST' && pathname === '/api/admin/catalog/reorder') {
           const body = await readJsonBody(request);
-          const kind = String(body.kind || '');
+          const rawKind = String(body.kind || body.entity || '').trim();
           const orderedIds = Array.isArray(body.orderedIds) ? body.orderedIds.map(String) : [];
           if (orderedIds.length === 0) return errJson('orderedIds array is required', 400);
-          if (kind === 'marketplace') {
+          if (rawKind === 'marketplace' || rawKind === 'marketplace_listings') {
             db.marketplaceListings = reorderByIds(db.marketplaceListings, orderedIds);
             this.persistKeys('marketplaceListings');
-          } else if (kind === 'categories') {
+          } else if (rawKind === 'categories' || rawKind === 'marketplace_categories') {
             db.marketplaceCategories = reorderByIds(db.marketplaceCategories, orderedIds);
             this.persistKeys('marketplaceCategories');
-          } else if (kind === 'smsServices') {
+          } else if (rawKind === 'smsServices' || rawKind === 'sms_services') {
             db.smsServices = reorderByIds(db.smsServices, orderedIds);
             this.persistKeys('smsServices');
-          } else if (kind === 'smsCountries') {
+          } else if (rawKind === 'smsCountries' || rawKind === 'sms_countries') {
             db.smsCountries = reorderByIds(db.smsCountries, orderedIds);
             this.persistKeys('smsCountries');
-          } else if (kind === 'boosting') {
+          } else if (rawKind === 'boosting' || rawKind === 'boosting_services') {
             db.boostingServices = reorderByIds(db.boostingServices, orderedIds);
             this.persistKeys('boostingServices');
-          } else if (kind === 'sections') {
+          } else if (rawKind === 'sections' || rawKind === 'custom_sections') {
             db.customSections = reorderByIds(db.customSections, orderedIds);
             this.persistKeys('customSections');
+          } else if (rawKind === 'sectionProducts' || rawKind === 'section_products') {
+            const sectionId = String(body.sectionId || '').trim();
+            const targetSec =
+              (sectionId ? db.customSections.find((s) => s.id === sectionId) : undefined) ||
+              db.customSections.find((s) => s.products.some((p) => p.id === orderedIds[0]));
+            if (!targetSec) {
+              return errJson('Custom section not found for product reorder', 404);
+            }
+            targetSec.products = reorderByIds(targetSec.products, orderedIds);
+            this.persistKeys('customSections');
           } else {
-            return errJson('Unsupported reorder kind', 400);
+            return errJson(`Unsupported reorder kind: ${rawKind || 'empty'}`, 400);
           }
-          this.logAudit(currentUser.email, 'REORDER_CATALOG', kind, `Reordered ${orderedIds.length} items`);
+          this.logAudit(currentUser.email, 'REORDER_CATALOG', rawKind, `Reordered ${orderedIds.length} items`);
           this.persistKeys('auditLogs');
-          return okJson({ ok: true });
+          return okJson({ ok: true, kind: rawKind });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/catalog/bulk') {
+          const body = await readJsonBody(request);
+          const target = String(body.target || '').trim();
+          const action = String(body.action || '').trim();
+          const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+          const percentRaw = Number(body.percent || 0);
+          const percent = Number.isFinite(percentRaw) ? Math.max(-90, Math.min(500, percentRaw)) : 0;
+          if (!ids.length) return errJson('Select at least one item', 400);
+          const idSet = new Set(ids);
+          let affected = 0;
+
+          if (target === 'marketplace') {
+            if (action === 'delete') {
+              const before = db.marketplaceListings.length;
+              db.marketplaceListings = db.marketplaceListings.filter((l) => !idSet.has(l.id));
+              affected = before - db.marketplaceListings.length;
+            } else {
+              for (const l of db.marketplaceListings) {
+                if (!idSet.has(l.id)) continue;
+                if (action === 'activate') { l.active = true; affected += 1; }
+                else if (action === 'pause') { l.active = false; affected += 1; }
+                else if (action === 'price_percent') {
+                  l.price = Math.max(50, Math.round(l.price * (1 + percent / 100)));
+                  affected += 1;
+                }
+              }
+            }
+            this.persistKeys('marketplaceListings');
+          } else if (target === 'smsServices') {
+            if (action === 'delete') {
+              const before = db.smsServices.length;
+              db.smsServices = db.smsServices.filter((s) => !idSet.has(s.id));
+              affected = before - db.smsServices.length;
+            } else {
+              for (const s of db.smsServices) {
+                if (!idSet.has(s.id)) continue;
+                if (action === 'activate') { s.active = true; affected += 1; }
+                else if (action === 'pause') { s.active = false; affected += 1; }
+                else if (action === 'price_percent') {
+                  s.basePrice = Math.max(50, Math.round(s.basePrice * (1 + percent / 100)));
+                  affected += 1;
+                }
+              }
+            }
+            this.persistKeys('smsServices');
+          } else if (target === 'boosting') {
+            if (action === 'delete') {
+              const before = db.boostingServices.length;
+              db.boostingServices = db.boostingServices.filter((b) => !idSet.has(b.id));
+              affected = before - db.boostingServices.length;
+            } else {
+              for (const b of db.boostingServices) {
+                if (!idSet.has(b.id)) continue;
+                if (action === 'activate') { b.active = true; affected += 1; }
+                else if (action === 'pause') { b.active = false; affected += 1; }
+                else if (action === 'price_percent') {
+                  b.ratePer1k = Math.max(10, Math.round(b.ratePer1k * (1 + percent / 100)));
+                  affected += 1;
+                }
+              }
+            }
+            this.persistKeys('boostingServices');
+          } else {
+            return errJson('Unsupported bulk target', 400);
+          }
+
+          this.logAudit(
+            currentUser.email,
+            `BULK_${action.toUpperCase()}`,
+            target,
+            `Applied ${action} to ${affected} item(s)`,
+          );
+          this.persistKeys('auditLogs');
+          return okJson({ ok: true, affected });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/catalog/duplicate') {
+          const body = await readJsonBody(request);
+          const target = String(body.target || '').trim();
+          const id = String(body.id || '').trim();
+          if (!id) return errJson('Source id is required', 400);
+
+          if (target === 'marketplace') {
+            const idx = db.marketplaceListings.findIndex((l) => l.id === id);
+            if (idx === -1) return errJson('Listing not found', 404);
+            const src = db.marketplaceListings[idx];
+            const copy: MarketplaceListing = {
+              ...src,
+              id: makeId('mkt'),
+              title: `${src.title} (Copy)`,
+              features: [...src.features],
+              stockKeys: [...src.stockKeys],
+              soldCount: 0,
+            };
+            db.marketplaceListings.splice(idx + 1, 0, copy);
+            this.logAudit(currentUser.email, 'DUPLICATE_LISTING', copy.title, `Cloned from ${src.id}`);
+            this.persistKeys('marketplaceListings', 'auditLogs');
+            return okJson({ ok: true, item: copy }, 201);
+          }
+          if (target === 'smsServices') {
+            const idx = db.smsServices.findIndex((s) => s.id === id);
+            if (idx === -1) return errJson('SMS service not found', 404);
+            const src = db.smsServices[idx];
+            const copy: SmsService = { ...src, id: makeId('svc'), name: `${src.name} (Copy)` };
+            db.smsServices.splice(idx + 1, 0, copy);
+            this.logAudit(currentUser.email, 'DUPLICATE_SMS_SERVICE', copy.name, `Cloned from ${src.id}`);
+            this.persistKeys('smsServices', 'auditLogs');
+            return okJson({ ok: true, item: copy }, 201);
+          }
+          if (target === 'boosting') {
+            const idx = db.boostingServices.findIndex((b) => b.id === id);
+            if (idx === -1) return errJson('Boosting service not found', 404);
+            const src = db.boostingServices[idx];
+            const copy: BoostingService = { ...src, id: makeId('bst'), name: `${src.name} (Copy)` };
+            db.boostingServices.splice(idx + 1, 0, copy);
+            this.logAudit(currentUser.email, 'DUPLICATE_BOOST_SERVICE', copy.name, `Cloned from ${src.id}`);
+            this.persistKeys('boostingServices', 'auditLogs');
+            return okJson({ ok: true, item: copy }, 201);
+          }
+          if (target === 'sectionProduct') {
+            const sectionId = String(body.sectionId || '').trim();
+            const sec =
+              (sectionId ? db.customSections.find((s) => s.id === sectionId) : undefined) ||
+              db.customSections.find((s) => s.products.some((p) => p.id === id));
+            if (!sec) return errJson('Custom section not found', 404);
+            const idx = sec.products.findIndex((p) => p.id === id);
+            if (idx === -1) return errJson('Section product not found', 404);
+            const src = sec.products[idx];
+            const copy = { ...src, id: makeId('secp'), title: `${src.title} (Copy)` };
+            sec.products.splice(idx + 1, 0, copy);
+            this.logAudit(currentUser.email, 'DUPLICATE_SECTION_PRODUCT', copy.title, `Cloned in ${sec.name}`);
+            this.persistKeys('customSections', 'auditLogs');
+            return okJson({ ok: true, item: copy }, 201);
+          }
+          return errJson('Unsupported duplicate target', 400);
         }
 
         if (method === 'POST' && pathname === '/api/admin/marketplace-listings') {
@@ -3174,6 +3383,32 @@ export class SureDealStoreDO {
         }
 
         const tutDelMatch = pathname.match(/^\/api\/admin\/tutorials\/([^/]+)$/);
+        if (method === 'PATCH' && tutDelMatch) {
+          const id = decodeURIComponent(tutDelMatch[1]);
+          const tutorial = db.tutorials.find((t) => t.id === id);
+          if (!tutorial) return errJson('Tutorial not found', 404);
+          const body = await readJsonBody(request);
+          if (typeof body.title === 'string' && body.title.trim()) {
+            tutorial.title = body.title.trim();
+          }
+          if (typeof body.category === 'string' && body.category.trim()) {
+            tutorial.category = body.category.trim();
+          }
+          if (typeof body.duration === 'string') {
+            tutorial.duration = body.duration.trim();
+          }
+          if (typeof body.summary === 'string') {
+            tutorial.summary = body.summary.trim();
+          }
+          if (typeof body.content === 'string') {
+            tutorial.content = body.content.trim();
+          }
+          if (typeof body.videoUrl === 'string') {
+            tutorial.videoUrl = body.videoUrl.trim();
+          }
+          this.persistKeys('tutorials');
+          return okJson({ tutorial });
+        }
         if (method === 'DELETE' && tutDelMatch) {
           const id = decodeURIComponent(tutDelMatch[1]);
           db.tutorials = db.tutorials.filter((t) => t.id !== id);
@@ -3426,6 +3661,7 @@ export class SureDealStoreDO {
           if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
           if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
 
+          s.brandMigratedV2 = true;
           this.logAudit(
             currentUser.email,
             'UPDATE_SETTINGS',

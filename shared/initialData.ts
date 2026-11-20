@@ -23,7 +23,7 @@ export function createInitialDatabaseState(
 
   return {
     settings: {
-      siteName: 'SureDeal Store',
+      siteName: 'Ultimate Tech App',
       siteTagline: 'Digital solutions for every market',
       siteLogoUrl: '',
       currencyCode: 'NGN',
@@ -31,7 +31,7 @@ export function createInitialDatabaseState(
       announcementBanner: '',
       pinnedTickerEnabled: true,
       pinnedTickerText:
-        'Welcome to SureDeal Store — Instant Moniepoint Funding (7031537390), Verified Proxies, Social Boosting & Virtual SMS Numbers Active 24/7.',
+        'Welcome to Ultimate Tech App — Instant Moniepoint Funding (7031537390), Verified Proxies, Social Boosting & Virtual SMS Numbers Active 24/7.',
       pinnedTickerTheme: 'blue',
       brandColor: '#2563EB',
       accentColor: '#0EA5E9',
@@ -44,12 +44,13 @@ export function createInitialDatabaseState(
       showFloatingWhatsapp: true,
       communityChannelEnabled: true,
       communityChannelPlatform: 'whatsapp',
-      communityChannelTitle: 'Join WhatsApp',
-      communityChannelSubtitle: 'Get latest updates & drops',
+      communityChannelTitle: 'Ultimate Tech App News',
+      communityChannelSubtitle: 'Get exclusive updates & drops',
       communityChannelUrl: 'https://wa.me/2347031537390',
-      communityChannelCta: 'Join',
+      communityChannelCta: 'Join WhatsApp',
       creatorName: 'Excellent',
       creatorUrl: '',
+      brandMigratedV2: true,
       allowNewSignups: true,
       enableSmsService: true,
       enableBoostingService: true,
@@ -510,7 +511,7 @@ export function createInitialDatabaseState(
     notifications: [
       {
         id: 'ntf_welcome',
-        title: 'Welcome to SureDeal Store',
+        title: 'Welcome to Ultimate Tech App',
         message:
           'Fund your wallet via Moniepoint (7031537390 · UCHECHI BLESSING OJI) and upload your receipt for rapid verification.',
         type: 'info',
@@ -529,7 +530,7 @@ export function createInitialDatabaseState(
         summary:
           'Step-by-step guide to transferring Naira (₦) to Moniepoint 7031537390 and uploading your receipt for automated AI inspection.',
         content:
-          '1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in SureDeal Store and click Submit Deposit.',
+          '1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in Ultimate Tech App and click Submit Deposit.',
         videoUrl: '',
         createdAt: now,
       },
@@ -577,6 +578,42 @@ export function mergeParsedDatabaseState(
         (mergedSettings as Record<string, unknown>)[key] = value;
       }
     }
+  }
+  if (!parsed.settings?.brandMigratedV2) {
+    if (mergedSettings.siteName === 'SureDeal Store') {
+      mergedSettings.siteName = 'Ultimate Tech App';
+    }
+    if (!mergedSettings.siteTagline || mergedSettings.siteTagline === 'Trusted Digital Tools') {
+      mergedSettings.siteTagline = 'Digital solutions for every market';
+    }
+    if (mergedSettings.pinnedTickerText?.includes('Welcome to SureDeal Store')) {
+      mergedSettings.pinnedTickerText = mergedSettings.pinnedTickerText.replace(
+        'Welcome to SureDeal Store',
+        'Welcome to Ultimate Tech App',
+      );
+    }
+    if (
+      !mergedSettings.communityChannelTitle ||
+      mergedSettings.communityChannelTitle === 'Join WhatsApp' ||
+      mergedSettings.communityChannelTitle === 'Join Our Community'
+    ) {
+      mergedSettings.communityChannelTitle = 'Ultimate Tech App News';
+    }
+    if (
+      !mergedSettings.communityChannelSubtitle ||
+      mergedSettings.communityChannelSubtitle === 'Get latest updates & drops' ||
+      mergedSettings.communityChannelSubtitle === 'Get restock alerts & flash deals'
+    ) {
+      mergedSettings.communityChannelSubtitle = 'Get exclusive updates & drops';
+    }
+    if (
+      !mergedSettings.communityChannelCta ||
+      mergedSettings.communityChannelCta === 'Join' ||
+      mergedSettings.communityChannelCta === 'Join Channel'
+    ) {
+      mergedSettings.communityChannelCta = 'Join WhatsApp';
+    }
+    mergedSettings.brandMigratedV2 = true;
   }
   return {
     ...defaults,

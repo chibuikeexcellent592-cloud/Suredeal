@@ -26,6 +26,7 @@ import {
   Moon,
   Package,
   PauseCircle,
+  Pencil,
   PlayCircle,
   Plus,
   Receipt,
@@ -41,8 +42,10 @@ import {
   Tag,
   Trash2,
   TrendingUp,
+  Upload,
   UserPlus,
   Users,
+  KeyRound,
   X,
   XCircle,
   Zap,
@@ -50,13 +53,16 @@ import {
 import { useApp } from '../context/AppContext';
 import { apiFetch, copyText, formatCountdown, formatNaira, resolveApiUrl } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
+import { UserAvatar } from './UserAvatar';
 import type {
   AdminAlert,
   AuditLogEntry,
   BoostingOrder,
   PromoCode,
+  PublicUser,
   SmsOrder,
   SmsPoolNumber,
+  VaultItem,
   WalletTransaction,
 } from '../types';
 import {
@@ -81,6 +87,7 @@ interface FullAdminOverview extends AdminOverviewPayload {
   smsOrders: SmsOrder[];
   smsPool: SmsPoolNumber[];
   boostingOrders: BoostingOrder[];
+  vaultItems?: VaultItem[];
   adminAlerts: AdminAlert[];
   promoCodes: PromoCode[];
   auditLogs: AuditLogEntry[];
@@ -167,6 +174,17 @@ export function AdminDashboard({
   );
   const [airdropping, setAirdropping] = useState(false);
   const [confirmClearAudit, setConfirmClearAudit] = useState(false);
+  const [vaultSearch, setVaultSearch] = useState('');
+  const [confirmClearVault, setConfirmClearVault] = useState(false);
+  const [editingUser, setEditingUser] = useState<PublicUser | null>(null);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserRole, setEditUserRole] = useState<'user' | 'admin'>('user');
+  const [editUserStatus, setEditUserStatus] = useState<'active' | 'suspended'>('active');
+  const [editUserReferral, setEditUserReferral] = useState('');
+  const [editUserAvatar, setEditUserAvatar] = useState('');
+  const [editUserPass, setEditUserPass] = useState('');
+  const [savingUserEdit, setSavingUserEdit] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loadAdmin = useCallback(async () => {
@@ -285,6 +303,73 @@ export function AdminDashboard({
     return matchesFilter && matchesSearch;
   });
 
+  const openEditUser = (target: PublicUser) => {
+    setEditingUser(target);
+    setEditUserName(target.name);
+    setEditUserEmail(target.email);
+    setEditUserRole(target.role);
+    setEditUserStatus(target.status);
+    setEditUserReferral(target.referralCode || '');
+    setEditUserAvatar(target.avatarUrl || '');
+    setEditUserPass('');
+  };
+
+  const handleEditUserAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1_500_000) {
+      notify('Avatar image must be under 1.5MB', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setEditUserAvatar(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveUserEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setSavingUserEdit(true);
+    try {
+      await apiFetch(`/api/admin/users/${editingUser.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: editUserName.trim(),
+          email: editUserEmail.trim(),
+          role: editUserRole,
+          status: editUserStatus,
+          referralCode: editUserReferral.trim(),
+          avatarUrl: editUserAvatar.trim(),
+          ...(editUserPass.trim().length >= 6 ? { newPassword: editUserPass.trim() } : {}),
+        }),
+      });
+      setEditingUser(null);
+      notify(`Updated ${editUserEmail.trim()} permanently!`, 'success');
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to update user', 'error');
+    } finally {
+      setSavingUserEdit(false);
+    }
+  };
+
+  const vaultItemsList = data.vaultItems || [];
+  const filteredVaultItems = vaultItemsList.filter((v) => {
+    const q = vaultSearch.trim().toLowerCase();
+    return (
+      !q ||
+      v.title.toLowerCase().includes(q) ||
+      v.category.toLowerCase().includes(q) ||
+      (v.buyerEmail || '').toLowerCase().includes(q) ||
+      (v.buyerName || '').toLowerCase().includes(q) ||
+      v.deliveredCredential.toLowerCase().includes(q)
+    );
+  });
+
   const handleExportUsersCsv = () => {
     const header = 'Name,Email,Role,Status,Balance,ReferralCode,CreatedAt';
     const rows = data.users.map((u) =>
@@ -302,7 +387,7 @@ export function AdminDashboard({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `suredeal-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `ultimate-tech-users-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     notify('Users CSV exported', 'success');
@@ -474,12 +559,7 @@ export function AdminDashboard({
 
   const allTabs = [...primaryMenu, ...operationsMenu];
   const activeTabLabel = allTabs.find((t) => t.id === tab)?.label || 'Overview';
-  const siteName = data.settings.siteName || 'SureDeal Store';
-  const initials = (user?.name || 'AD')
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() || '')
-    .join('');
+  const siteName = data.settings.siteName || 'Ultimate Tech App';
 
   const selectTab = (next: AdminTab) => {
     setTab(next);
@@ -542,9 +622,11 @@ export function AdminDashboard({
 
         {/* Website Creator Profile Row */}
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
-          <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-100 to-blue-200 dark:from-amber-900/40 dark:to-blue-900/60 border-2 border-amber-500/50 flex items-center justify-center font-display font-bold text-sm text-slate-900 dark:text-white shrink-0">
-            {initials}
-          </div>
+          <UserAvatar
+            name={user?.name}
+            avatarUrl={user?.avatarUrl}
+            size="md"
+          />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
@@ -793,6 +875,42 @@ export function AdminDashboard({
             </div>
           </header>
 
+          {/* Sticky Scrollable Overwatch Creator Tool Strip — full visibility on mobile Safari & desktop */}
+          <div className="sticky top-16 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2 overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-1.5 min-w-max">
+              {allTabs.map((item) => {
+                const Icon = item.icon;
+                const active = tab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => selectTab(item.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors shrink-0 cursor-pointer ${
+                      active
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-purple-50 dark:hover:bg-purple-950/40'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span>{item.label}</span>
+                    {item.badge && item.badge > 0 ? (
+                      <span
+                        className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none ${
+                          active
+                            ? 'bg-white/25 text-white'
+                            : 'bg-purple-600 text-white'
+                        }`}
+                      >
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
           {/* OVERVIEW TAB */}
           {tab === 'overview' && (
@@ -836,6 +954,43 @@ export function AdminDashboard({
                   >
                     Audit queue →
                   </button>
+                </div>
+              </div>
+
+              {/* Creator Quick-Launch Tool Grid */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Crown className="w-4 h-4 text-amber-500" />
+                    Creator Console Quick-Launch Tools
+                  </h2>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Full edit, reorder, duplicate &amp; delete access across every module
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                  {[
+                    { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
+                    { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
+                    { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
+                    { label: 'Landing Studio', sub: 'Hero, brand & stats', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
+                    { label: 'Broadcasts & Mail', sub: `${data.notifications.length} notices`, tab: 'notifications' as AdminTab, icon: Bell, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
+                    { label: 'Master Controls', sub: data.settings.maintenanceMode ? 'Maintenance ON' : 'Live & online', tab: 'settings' as AdminTab, icon: Sliders, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' },
+                  ].map((tool) => {
+                    const ToolIcon = tool.icon;
+                    return (
+                      <button
+                        key={tool.label}
+                        type="button"
+                        onClick={() => selectTab(tool.tab)}
+                        className={`p-3 rounded-xl border text-left transition-all hover:shadow-xs cursor-pointer ${tool.tint}`}
+                      >
+                        <ToolIcon className="w-4 h-4 mb-1.5" />
+                        <p className="text-xs font-bold leading-snug">{tool.label}</p>
+                        <p className="text-[11px] opacity-80 mt-0.5 truncate">{tool.sub}</p>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1495,33 +1650,36 @@ export function AdminDashboard({
                   {filteredUsers.map((u) => (
                     <div key={u.id} className="py-4 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-bold text-slate-900 dark:text-white">
-                              {u.name}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <UserAvatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                {u.name}
+                              </p>
+                              <span
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                                  u.role === 'admin'
+                                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                              >
+                                {u.role}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                                  u.status === 'active'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                }`}
+                              >
+                                {u.status}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5 truncate">
+                              {u.email} · Ref: <span className="font-mono">{u.referralCode}</span>
                             </p>
-                            <span
-                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                                u.role === 'admin'
-                                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
-                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                              }`}
-                            >
-                              {u.role}
-                            </span>
-                            <span
-                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                                u.status === 'active'
-                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                  : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                              }`}
-                            >
-                              {u.status}
-                            </span>
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {u.email} · Ref: <span className="font-mono">{u.referralCode}</span>
-                          </p>
                         </div>
                         <p className="font-display text-lg font-extrabold text-blue-600 dark:text-blue-400 tabular-nums">
                           {formatNaira(u.balance, symbol)}
@@ -1651,6 +1809,15 @@ export function AdminDashboard({
                           className="px-2.5 py-1.5 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer"
                         >
                           Reset Pass
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => openEditUser(u)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-100 cursor-pointer"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          Edit User
                         </button>
 
                         <button
@@ -2787,6 +2954,147 @@ export function AdminDashboard({
                   </div>
                 )}
               </div>
+
+              {/* Marketplace & Section Vault Deliveries */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-purple-600" />
+                      Marketplace &amp; Section Vault Deliveries ({filteredVaultItems.length} / {vaultItemsList.length})
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      Every delivered digital asset credential or key. Clearing here hides from Overwatch while buyers keep their Vault items.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {vaultItemsList.length > 0 && (
+                      confirmClearVault ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch('/api/admin/orders/clear', {
+                                  method: 'POST',
+                                  body: JSON.stringify({ scope: 'vault' }),
+                                });
+                                setConfirmClearVault(false);
+                                notify('Vault delivery log cleared from Overwatch', 'success');
+                                await loadAdmin();
+                              } catch (err) {
+                                notify(err instanceof Error ? err.message : 'Clear failed', 'error');
+                              }
+                            }}
+                            className="px-3 py-1.5 text-xs font-bold bg-rose-600 text-white rounded-xl cursor-pointer"
+                          >
+                            Confirm Clear Vault Log
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmClearVault(false)}
+                            className="px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-xl cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmClearVault(true)}
+                          className="px-3 py-1.5 text-xs font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                        >
+                          Clear Vault Log
+                        </button>
+                      )
+                    )}
+                    <div className="relative w-full sm:w-64">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={vaultSearch}
+                        onChange={(e) => setVaultSearch(e.target.value)}
+                        placeholder="Search buyer, product, key..."
+                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {filteredVaultItems.length === 0 ? (
+                  <p className="py-6 text-center text-xs text-slate-500">
+                    No marketplace or section vault deliveries match your filter.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
+                    {filteredVaultItems.map((v) => (
+                      <div key={v.id} className="py-3.5 flex flex-wrap items-start justify-between gap-3 text-xs">
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
+                              {v.sourceType} · {v.category}
+                            </span>
+                            <span className="font-mono text-[11px] text-slate-400">#{v.id}</span>
+                            <span className="text-[11px] text-slate-400">
+                              · {new Date(v.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="font-bold text-slate-900 dark:text-white">
+                            {v.title} ·{' '}
+                            <span className="font-mono text-blue-600 dark:text-blue-400">
+                              {formatNaira(v.price, symbol)}
+                            </span>
+                          </p>
+                          <p className="text-slate-600 dark:text-slate-300">
+                            Buyer: <span className="font-semibold">{v.buyerName || 'User'}</span> ({v.buyerEmail || v.userId})
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-[11px] px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 break-all">
+                              {v.deliveredCredential}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await copyText(v.deliveredCredential);
+                                notify('Delivered credential copied', 'success');
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 rounded-lg cursor-pointer"
+                            >
+                              <Copy className="w-3 h-3" />
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setInspectUserId(v.userId)}
+                            className="px-2.5 py-1.5 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                          >
+                            Buyer 360°
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/admin/vault-items/${v.id}`, { method: 'DELETE' });
+                                notify('Vault record cleared from Overwatch', 'info');
+                                await loadAdmin();
+                              } catch (err) {
+                                notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+                              }
+                            }}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                            aria-label="Delete vault delivery record"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -3163,18 +3471,32 @@ export function AdminDashboard({
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotifyTargetUserId(inspectedUser.id);
-                        setInspectUserId(null);
-                        setTab('notifications');
-                      }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      Send Direct Alert
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = inspectedUser;
+                          setInspectUserId(null);
+                          openEditUser(target);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Edit User
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotifyTargetUserId(inspectedUser.id);
+                          setInspectUserId(null);
+                          setTab('notifications');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Send Direct Alert
+                      </button>
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
@@ -3191,6 +3513,159 @@ export function AdminDashboard({
               );
             })()}
           </div>
+        </div>
+      )}
+
+      {/* Full Edit User Modal */}
+      {editingUser && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setEditingUser(null)}
+        >
+          <form
+            onSubmit={handleSaveUserEdit}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl my-auto"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <UserAvatar name={editUserName} avatarUrl={editUserAvatar} size="sm" />
+                <div className="min-w-0">
+                  <h3 className="font-display text-base font-extrabold text-slate-900 dark:text-white truncate">
+                    Edit User Account
+                  </h3>
+                  <p className="text-[11px] text-slate-500 truncate">{editingUser.email}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingUser(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                aria-label="Close user editor"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editUserName}
+                  onChange={(e) => setEditUserName(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={editUserEmail}
+                  onChange={(e) => setEditUserEmail(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500">Account Role</label>
+                <select
+                  value={editUserRole}
+                  onChange={(e) => setEditUserRole(e.target.value as 'user' | 'admin')}
+                  disabled={editingUser.email.toLowerCase() === 'chibuikeexcellent592@gmail.com'}
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 disabled:opacity-60"
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500">Status</label>
+                <select
+                  value={editUserStatus}
+                  onChange={(e) => setEditUserStatus(e.target.value as 'active' | 'suspended')}
+                  disabled={editingUser.role === 'admin'}
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 disabled:opacity-60"
+                >
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500">Referral Code</label>
+                <input
+                  type="text"
+                  value={editUserReferral}
+                  onChange={(e) => setEditUserReferral(e.target.value.toUpperCase())}
+                  className="mt-1 w-full px-3 py-2 font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500">
+                  Set New Password (optional)
+                </label>
+                <input
+                  type="password"
+                  value={editUserPass}
+                  onChange={(e) => setEditUserPass(e.target.value)}
+                  placeholder="Leave blank to keep"
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <label className="text-[11px] font-semibold text-slate-500">
+                Profile Avatar (Upload photo, paste URL, or clear for 3D default)
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={editUserAvatar}
+                  onChange={(e) => setEditUserAvatar(e.target.value)}
+                  placeholder="https://... or leave blank for 3D portrait"
+                  className="flex-1 min-w-[180px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+                <label className="inline-flex items-center gap-1.5 px-3 py-2 font-semibold border border-slate-200 dark:border-slate-700 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleEditUserAvatarUpload}
+                    className="hidden"
+                  />
+                </label>
+                {editUserAvatar && (
+                  <button
+                    type="button"
+                    onClick={() => setEditUserAvatar('')}
+                    className="px-3 py-2 font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl cursor-pointer"
+                  >
+                    Reset 3D
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setEditingUser(null)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingUserEdit}
+                className="px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60 rounded-xl cursor-pointer"
+              >
+                {savingUserEdit ? 'Saving...' : 'Save User Changes'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

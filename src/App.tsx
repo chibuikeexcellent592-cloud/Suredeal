@@ -30,7 +30,7 @@ class AppErrorBoundary extends Component<
       return (
         <div className="min-h-screen flex items-center justify-center px-6 py-12 bg-[var(--site-bg)] text-slate-900 dark:text-slate-100">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-sm">
-            <h1 className="font-display text-xl font-bold">SureDeal Store</h1>
+            <h1 className="font-display text-xl font-bold">Ultimate Tech App</h1>
             <p className="text-sm text-slate-600 dark:text-slate-400">
               Something went wrong while rendering the page.
             </p>
@@ -56,10 +56,10 @@ function AppRouter() {
   const [previewMaintenance, setPreviewMaintenance] = useState(false);
 
   useEffect(() => {
-    if (catalog?.settings?.siteName) {
-      document.title = `${catalog.settings.siteName} — SMS Verification, Social Boosting & Digital Marketplace`;
-    }
-  }, [catalog?.settings?.siteName]);
+    const name = catalog?.settings?.siteName || 'Ultimate Tech App';
+    const tag = catalog?.settings?.siteTagline || 'Digital solutions for every market';
+    document.title = `${name} — ${tag}`;
+  }, [catalog?.settings?.siteName, catalog?.settings?.siteTagline]);
 
   const isMaintenanceLocked =
     Boolean(catalog?.settings?.maintenanceMode) && user?.role !== 'admin';
@@ -91,7 +91,7 @@ function AppRouter() {
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--site-bg)] text-sm text-slate-500">
-        Loading SureDeal Store...
+        Loading Ultimate Tech App...
       </div>
     );
   }
