@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 interface UserAvatarProps {
   name?: string;
   avatarUrl?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showOrdersBadge?: boolean;
   ordersCount?: number;
   className?: string;
@@ -14,6 +14,7 @@ const SIZE_CLASSES: Record<NonNullable<UserAvatarProps['size']>, string> = {
   md: 'w-10 h-10',
   lg: 'w-12 h-12',
   xl: 'w-14 h-14',
+  '2xl': 'w-20 h-20',
 };
 
 const BADGE_CLASSES: Record<NonNullable<UserAvatarProps['size']>, string> = {
@@ -21,6 +22,7 @@ const BADGE_CLASSES: Record<NonNullable<UserAvatarProps['size']>, string> = {
   md: 'min-w-[20px] h-[20px] text-[10px] -bottom-0.5 -right-0.5',
   lg: 'min-w-[22px] h-[22px] text-[11px] -bottom-1 -right-1',
   xl: 'min-w-[24px] h-[24px] text-xs -bottom-1 -right-1',
+  '2xl': 'min-w-[26px] h-[26px] text-xs -bottom-1 -right-1',
 };
 
 export function UserAvatar({

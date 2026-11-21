@@ -386,7 +386,13 @@ export function SupportPanel() {
   );
 }
 
-export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void }) {
+export function SettingsPanel({
+  onOpenReferral,
+  focusSection,
+}: {
+  onOpenReferral?: () => void;
+  focusSection?: 'profile' | 'password';
+}) {
   const { user, catalog, refreshUser, notify } = useApp();
   const symbol = catalog?.settings?.currencySymbol || '₦';
   const [name, setName] = useState(user?.name || '');
@@ -419,6 +425,15 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
       .then(setReferralData)
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!focusSection) return;
+    const elId = focusSection === 'password' ? 'settings-password-card' : 'settings-profile-card';
+    const el = document.getElementById(elId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [focusSection]);
 
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -476,8 +491,13 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <form
+          id="settings-profile-card"
           onSubmit={handleProfileSave}
-          className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
+          className={`lg:col-span-6 bg-white dark:bg-slate-900 border rounded-xl p-5 space-y-4 transition-all ${
+            focusSection === 'profile'
+              ? 'border-purple-400 ring-2 ring-purple-500/20'
+              : 'border-slate-200 dark:border-slate-800'
+          }`}
         >
           <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
             Profile, Avatar &amp; Email
@@ -553,8 +573,13 @@ export function SettingsPanel({ onOpenReferral }: { onOpenReferral?: () => void 
         </form>
 
         <form
+          id="settings-password-card"
           onSubmit={handlePasswordChange}
-          className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
+          className={`lg:col-span-6 bg-white dark:bg-slate-900 border rounded-xl p-5 space-y-4 transition-all ${
+            focusSection === 'password'
+              ? 'border-purple-400 ring-2 ring-purple-500/20'
+              : 'border-slate-200 dark:border-slate-800'
+          }`}
         >
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-blue-600 dark:text-blue-400" />

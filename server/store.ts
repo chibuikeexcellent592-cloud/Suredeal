@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AdminAlert } from '../src/types.ts';
+import type { AccountingRecord, AdminAlert } from '../src/types.ts';
 import type { DatabaseState, PendingSignupVerification, StoredUser } from '../shared/dbTypes.ts';
 import {
   createInitialDatabaseState,
@@ -150,6 +150,28 @@ class StoreManager {
     });
     if (this.state.adminAlerts.length > 100) {
       this.state.adminAlerts = this.state.adminAlerts.slice(0, 100);
+    }
+  }
+
+  public recordAccountingEntry(entry: Omit<AccountingRecord, 'id'>): void {
+    if (!Array.isArray(this.state.accountingRecords)) {
+      this.state.accountingRecords = [];
+    }
+    this.state.accountingRecords.unshift({
+      id: makeId('acc'),
+      ...entry,
+    });
+  }
+
+  public syncAccountingStatus(sourceId: string, status: string, detailOverride?: string): void {
+    if (!Array.isArray(this.state.accountingRecords)) return;
+    for (const rec of this.state.accountingRecords) {
+      if (rec.sourceId === sourceId) {
+        rec.status = status;
+        if (detailOverride) {
+          rec.detail = detailOverride;
+        }
+      }
     }
   }
 

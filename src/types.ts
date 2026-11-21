@@ -99,6 +99,16 @@ export interface PlatformSettings {
   smtpFrom?: string;
   resendApiKey?: string;
   brandMigratedV2?: boolean;
+  brandMigratedV3?: boolean;
+  dashboardNoticeEnabled?: boolean;
+  dashboardNoticeText?: string;
+  dashboardNoticeTone?: 'amber' | 'info' | 'emerald' | 'rose';
+  dashboardWalletBadge?: string;
+  dashboardWalletTitle?: string;
+  dashboardWalletSubtitle?: string;
+  dashboardBalanceLabel?: string;
+  dashboardFundButtonLabel?: string;
+  dashboardHistoryButtonLabel?: string;
 }
 
 export interface MaintenanceStatusResponse {
@@ -397,19 +407,47 @@ export interface AdminAlert {
   id: string;
   title: string;
   detail: string;
-  category: 'deposit' | 'order' | 'ticket' | 'user' | 'system';
+  category: 'deposit' | 'order' | 'ticket' | 'user' | 'visitor' | 'system';
   read: boolean;
   createdAt: string;
 }
 
 export interface AdminPhoneAlertDispatch {
   id: string;
-  eventType: 'new_user' | 'wallet_funding' | 'new_order';
+  eventType: 'new_user' | 'wallet_funding' | 'new_order' | 'system';
   targetPhone: string;
   message: string;
   whatsappUrl: string;
   deliveryStatus: 'queued' | 'webhook_dispatched';
   createdAt: string;
+}
+
+export interface AccountingRecord {
+  id: string;
+  kind: 'order' | 'transaction';
+  sourceId: string;
+  category: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  title: string;
+  detail: string;
+  amount: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface VisitorSessionLog {
+  visitorId: string;
+  path: string;
+  device: string;
+  visitedAt: string;
+}
+
+export interface VisitorStats {
+  totalVisits: number;
+  lastVisitAt?: string;
+  recentSessions: VisitorSessionLog[];
 }
 
 export interface PromoCode {

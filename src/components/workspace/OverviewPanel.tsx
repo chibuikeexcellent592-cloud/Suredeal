@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowRight,
   Bell,
   BookOpen,
+  CheckCircle2,
   Eye,
   EyeOff,
   History,
+  Info,
   KeyRound,
   MessageSquare,
   Phone,
   Plus,
+  ShieldCheck,
   ShoppingBag,
   TrendingUp,
   Wallet,
@@ -59,70 +63,125 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
     };
   }, [user?.balance]);
 
+  const settings = catalog?.settings;
+  const noticeEnabled = settings?.dashboardNoticeEnabled !== false;
+  const noticeText =
+    settings?.dashboardNoticeText?.trim() ||
+    'This platform provides digital tools for legitimate use only. Users are responsible.';
+  const noticeTone = settings?.dashboardNoticeTone || 'amber';
+
+  const walletBadge = settings?.dashboardWalletBadge?.trim() || '';
+  const rawWalletTitle = settings?.dashboardWalletTitle?.trim() || 'Dashboard Overview, {{NAME}} 👋';
+  const walletTitle = rawWalletTitle.replace(/\{\{NAME\}\}/gi, firstName);
+  const walletSubtitle =
+    settings?.dashboardWalletSubtitle?.trim() ||
+    (user?.role === 'admin'
+      ? 'Overwatch creator access is active across your storefront and catalog.'
+      : 'Rent virtual SMS numbers, launch social campaigns, and manage your digital Vault.');
+  const balanceLabel = settings?.dashboardBalanceLabel?.trim() || 'Account Balance';
+  const fundButtonLabel = settings?.dashboardFundButtonLabel?.trim() || 'Add Funds';
+  const historyButtonLabel = settings?.dashboardHistoryButtonLabel?.trim() || 'History';
+
+  const noticeBoxStyles =
+    noticeTone === 'info'
+      ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-800/70 text-sky-900 dark:text-sky-100'
+      : noticeTone === 'emerald'
+        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/70 text-emerald-900 dark:text-emerald-100'
+        : noticeTone === 'rose'
+          ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/70 text-rose-900 dark:text-rose-100'
+          : 'bg-[#FFF8E7] dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/70 text-amber-800 dark:text-amber-200';
+
+  const NoticeIcon =
+    noticeTone === 'info' ? Info : noticeTone === 'emerald' ? CheckCircle2 : AlertTriangle;
+
   return (
-    <div className="space-y-6">
-      {/* Quick Action Row matching IMG_6035 */}
-      <div className="flex flex-wrap items-center gap-2.5">
-        <button
-          type="button"
-          onClick={() => onNavigate('wallet')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm shadow-blue-600/20 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+    <div className="space-y-5">
+      {/* Admin-Configurable Dashboard Notice Alert Box (IMG_6077) */}
+      {noticeEnabled && noticeText && (
+        <div
+          className={`rounded-2xl border px-4 py-3.5 flex items-start gap-3 text-xs sm:text-sm font-medium leading-relaxed shadow-2xs ${noticeBoxStyles}`}
         >
-          <Plus className="w-3.5 h-3.5" />
-          Fund Account
-        </button>
-        <button
-          type="button"
-          onClick={() => onNavigate('marketplace')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-300 text-slate-800 dark:text-slate-100 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          <ShoppingBag className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-          Buy Accounts
-        </button>
-        <button
-          type="button"
-          onClick={() => onNavigate('sms')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-300 text-slate-800 dark:text-slate-100 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          <Phone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          Buy Number
-        </button>
-        <button
-          type="button"
-          onClick={() => onNavigate('boosting')}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-300 text-slate-800 dark:text-slate-100 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          <TrendingUp className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-          Social Boost
-        </button>
+          <NoticeIcon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 mt-0.5" />
+          <p className="min-w-0 whitespace-pre-line">{noticeText}</p>
+        </div>
+      )}
+
+      {/* Quick Action Pills Row (IMG_6077 + Open Overwatch on the Left) */}
+      <div className="flex items-center gap-2.5 overflow-x-auto pb-1">
         {user?.role === 'admin' && (
           <button
             type="button"
             onClick={() => onNavigate('admin')}
-            className="ml-auto inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-sm whitespace-nowrap shrink-0 cursor-pointer transition-colors"
           >
-            Open Overwatch
+            <span className="w-7 h-7 rounded-full bg-white/15 flex items-center justify-center text-white shrink-0">
+              <ShieldCheck className="w-4 h-4" />
+            </span>
+            <span>Open Overwatch</span>
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => onNavigate('wallet')}
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+        >
+          <span className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-300 flex items-center justify-center shrink-0">
+            <Plus className="w-4 h-4" />
+          </span>
+          <span>Fund Account</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('marketplace')}
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+        >
+          <span className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-300 flex items-center justify-center shrink-0">
+            <ShoppingBag className="w-4 h-4" />
+          </span>
+          <span>Buy Accounts</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('sms')}
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+        >
+          <span className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-300 flex items-center justify-center shrink-0">
+            <Phone className="w-4 h-4" />
+          </span>
+          <span>Buy Number</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('boosting')}
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+        >
+          <span className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-300 flex items-center justify-center shrink-0">
+            <TrendingUp className="w-4 h-4" />
+          </span>
+          <span>Social Boost</span>
+        </button>
       </div>
 
-      {/* Vibrant Brand Balance Hero Card */}
+      {/* Vibrant Admin-Editable Balance Hero Card */}
       <section className="rounded-3xl bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 p-6 sm:p-7 text-white shadow-xl shadow-blue-600/20 space-y-5">
-        <div className="space-y-1">
+        <div className="space-y-1.5">
+          {walletBadge && (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-white/15 text-[11px] font-bold uppercase tracking-wider text-blue-50">
+              {walletBadge}
+            </span>
+          )}
           <h1 className="font-display text-xl sm:text-2xl font-extrabold tracking-tight">
-            Dashboard Overview, {firstName} 👋
+            {walletTitle}
           </h1>
           <p className="text-xs sm:text-sm text-blue-100">
-            {user?.role === 'admin'
-              ? 'Overwatch creator access is active across your storefront and catalog.'
-              : 'Rent virtual SMS numbers, launch social campaigns, and manage your digital Vault.'}
+            {walletSubtitle}
           </p>
         </div>
 
         <div className="pt-1 flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-100">
-              <span>Account Balance</span>
+              <span>{balanceLabel}</span>
               <button
                 type="button"
                 onClick={() => setHideBalance((v) => !v)}
@@ -144,7 +203,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
               className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white text-blue-700 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              Add Funds
+              {fundButtonLabel}
             </button>
             <button
               type="button"
@@ -152,7 +211,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
               className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs font-bold backdrop-blur-xs transition-colors cursor-pointer"
             >
               <History className="w-3.5 h-3.5" />
-              History
+              {historyButtonLabel}
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

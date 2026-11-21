@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -6,7 +7,6 @@ import {
   Clock,
   MessageCircle,
   RefreshCw,
-  Shield,
   Wrench,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -42,7 +42,7 @@ export function MaintenanceScreen({
   const tapTimerRef = useRef<number | null>(null);
 
   const settings = catalog?.settings;
-  const siteName = settings?.siteName || 'Ultimate Tech App';
+  const siteName = settings?.siteName || 'SureDeal Store';
   const symbol = settings?.currencySymbol || '₦';
   const contactEmail = settings?.supportEmail || 'chibuikeexcellent592@gmail.com';
   const whatsappDisplay =
@@ -62,22 +62,26 @@ export function MaintenanceScreen({
     settings?.maintenanceMessage ||
     'We’re currently performing scheduled maintenance. Please check back shortly.';
 
-  const handleScreenTap = () => {
+  const handleScreenTap = (e: MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('button, a, input, textarea, select')) {
+      return;
+    }
     tapCountRef.current += 1;
     if (tapTimerRef.current) {
       window.clearTimeout(tapTimerRef.current);
     }
-    if (tapCountRef.current >= 10) {
+    if (tapCountRef.current >= 15) {
       tapCountRef.current = 0;
       onAdminSignIn();
       return;
     }
     tapTimerRef.current = window.setTimeout(() => {
       tapCountRef.current = 0;
-    }, 4500);
+    }, 7000);
   };
 
-  const handleCheckAgain = async (e: React.MouseEvent) => {
+  const handleCheckAgain = async (e: MouseEvent) => {
     e.stopPropagation();
     if (checking) return;
     setChecking(true);
@@ -153,10 +157,7 @@ export function MaintenanceScreen({
         </span>
       </header>
 
-      <main
-        onClick={(e) => e.stopPropagation()}
-        className="max-w-xl w-full mx-auto my-auto py-8"
-      >
+      <main className="max-w-xl w-full mx-auto my-auto py-8">
         <div className="bg-white dark:bg-slate-900/90 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 dark:shadow-none space-y-6">
           <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
             <Wrench className="w-6 h-6" />
@@ -248,21 +249,10 @@ export function MaintenanceScreen({
         </div>
       </main>
 
-      <footer className="max-w-xl w-full mx-auto pt-4 border-t border-slate-200/80 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center justify-between gap-2">
+      <footer className="max-w-xl w-full mx-auto pt-4 border-t border-slate-200/80 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex items-center justify-center sm:justify-between gap-2">
         <span>
           &copy; {new Date().getFullYear()} {creatorName}. All rights reserved.
         </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdminSignIn();
-          }}
-          className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-medium underline cursor-pointer"
-        >
-          <Shield className="w-3.5 h-3.5" />
-          Team Access
-        </button>
       </footer>
     </div>
   );

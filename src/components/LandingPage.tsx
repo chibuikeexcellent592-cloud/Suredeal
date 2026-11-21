@@ -47,7 +47,7 @@ export function LandingPage({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const settings = catalog?.settings;
-  const siteName = settings?.siteName || 'Ultimate Tech App';
+  const siteName = settings?.siteName || 'SureDeal Store';
   const symbol = settings?.currencySymbol || '₦';
   const contactEmail = settings?.supportEmail || 'chibuikeexcellent592@gmail.com';
   const whatsappDisplay = settings?.supportWhatsapp || settings?.adminNotifyPhone || '+2347031537390';

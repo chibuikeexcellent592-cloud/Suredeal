@@ -1,4 +1,5 @@
 import type {
+  AccountingRecord,
   AdminAlert,
   AdminPhoneAlertDispatch,
   AuditLogEntry,
@@ -19,6 +20,7 @@ import type {
   SupportTicket,
   TutorialItem,
   VaultItem,
+  VisitorStats,
   WalletTransaction,
 } from '../src/types.ts';
 
@@ -52,6 +54,8 @@ export interface DatabaseState {
   vaultItems: VaultItem[];
   customSections: CustomSection[];
   transactions: WalletTransaction[];
+  accountingRecords: AccountingRecord[];
+  visitorStats: VisitorStats;
   notifications: NotificationItem[];
   emailLogs: EmailLog[];
   tutorials: TutorialItem[];

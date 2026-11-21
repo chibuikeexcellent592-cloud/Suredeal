@@ -74,10 +74,10 @@ function ProductInlineLogo({
   }, [logoUrl]);
 
   const lower = title.toLowerCase();
-  const boxClass =
-    size === 'md'
-      ? 'w-10 h-10 rounded-xl shrink-0 animate-logo-bounce'
-      : 'w-8 h-8 rounded-lg shrink-0 animate-logo-bounce';
+  const isMd = size === 'md';
+  const boxClass = isMd
+    ? 'w-9 h-9 rounded-xl shrink-0 animate-logo-bounce'
+    : 'w-6 h-6 sm:w-7 sm:h-7 rounded-lg shrink-0 animate-logo-bounce';
 
   if (logoUrl && !imgFailed) {
     return (
@@ -100,7 +100,7 @@ function ProductInlineLogo({
       <div
         className={`${boxClass} bg-blue-50 dark:bg-blue-950/70 border border-blue-200/80 dark:border-blue-800 flex items-center justify-center`}
       >
-        <svg viewBox="0 0 48 48" className="w-5 h-5" aria-hidden="true">
+        <svg viewBox="0 0 48 48" className={isMd ? 'w-4.5 h-4.5' : 'w-3.5 h-3.5'} aria-hidden="true">
           <defs>
             <linearGradient id="cliproxyInlineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stopColor="#6D28D9" />
@@ -122,7 +122,7 @@ function ProductInlineLogo({
       <div
         className={`${boxClass} bg-sky-500 text-white flex items-center justify-center shadow-xs`}
       >
-        <span className="font-display text-base font-black leading-none">9</span>
+        <span className={`font-display font-black leading-none ${isMd ? 'text-sm' : 'text-xs'}`}>9</span>
       </div>
     );
   }
@@ -132,7 +132,7 @@ function ProductInlineLogo({
       <div
         className={`${boxClass} bg-emerald-600 text-white flex items-center justify-center shadow-xs`}
       >
-        <ShieldCheck className="w-4 h-4" />
+        <ShieldCheck className={isMd ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
       </div>
     );
   }
@@ -140,7 +140,7 @@ function ProductInlineLogo({
   const initial = title.trim().charAt(0).toUpperCase() || 'S';
   return (
     <div
-      className={`${boxClass} bg-gradient-to-br from-blue-600 to-sky-500 text-white flex items-center justify-center font-display font-bold text-xs shadow-xs`}
+      className={`${boxClass} bg-gradient-to-br from-blue-600 to-sky-500 text-white flex items-center justify-center font-display font-bold shadow-xs ${isMd ? 'text-xs' : 'text-[11px]'}`}
     >
       {initial}
     </div>

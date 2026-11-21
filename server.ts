@@ -128,8 +128,9 @@ function creditReferrerOnFirstVerifiedDeposit(depositor: StoredUser, now: string
     return false;
   }
   inviter.balance += bonus;
+  const bonusTxId = makeId('tx');
   store.db.transactions.unshift({
-    id: makeId('tx'),
+    id: bonusTxId,
     userId: inviter.id,
     userName: inviter.name,
     userEmail: inviter.email,
@@ -137,6 +138,19 @@ function creditReferrerOnFirstVerifiedDeposit(depositor: StoredUser, now: string
     amount: bonus,
     status: 'completed',
     description: `Referral bonus unlocked on ${depositor.email}'s first verified deposit`,
+    createdAt: now,
+  });
+  store.recordAccountingEntry({
+    kind: 'transaction',
+    sourceId: bonusTxId,
+    category: 'referral_bonus',
+    userId: inviter.id,
+    userName: inviter.name,
+    userEmail: inviter.email,
+    title: 'REFERRAL BONUS',
+    detail: `Referral bonus unlocked on ${depositor.email}'s first verified deposit`,
+    amount: bonus,
+    status: 'completed',
     createdAt: now,
   });
   store.db.notifications.unshift({
@@ -227,13 +241,56 @@ async function startServer() {
       maintenanceMessage:
         s.maintenanceMessage ||
         'We’re currently performing scheduled maintenance. Please check back shortly.',
-      siteName: s.siteName || 'Ultimate Tech App',
+      siteName: s.siteName || 'SureDeal Store',
       siteLogoUrl: s.siteLogoUrl || '',
       supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
       supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
       creatorName: s.creatorName || 'Excellent',
       checkedAt: new Date().toISOString(),
     });
+  });
+
+  // --- PUBLIC VISITOR NOTIFICATION ---
+  app.post('/api/public/visit', (req, res) => {
+    const visitorId = String(req.body?.visitorId || req.ip || 'anon').trim().slice(0, 64);
+    const visitPath = String(req.body?.path || '/').trim().slice(0, 120) || '/';
+    const device = String(req.body?.device || req.headers['user-agent'] || 'Web Browser')
+      .trim()
+      .slice(0, 80);
+
+    if (!store.db.visitorStats) {
+      store.db.visitorStats = { totalVisits: 0, recentSessions: [] };
+    }
+    const stats = store.db.visitorStats;
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const fiveMinMs = 5 * 60 * 1000;
+    const alreadySeenRecently = (stats.recentSessions || []).some(
+      (s) => s.visitorId === visitorId && nowMs - new Date(s.visitedAt).getTime() < fiveMinMs,
+    );
+
+    if (!alreadySeenRecently) {
+      stats.totalVisits = (stats.totalVisits || 0) + 1;
+      stats.lastVisitAt = nowIso;
+      stats.recentSessions = [
+        { visitorId, path: visitPath, device, visitedAt: nowIso },
+        ...(stats.recentSessions || []),
+      ].slice(0, 50);
+
+      store.addAdminAlert(
+        'Website Visitor',
+        `Visitor viewed ${visitPath} · ${device}`,
+        'visitor',
+      );
+      store.save();
+
+      void dispatchAdminPhoneAlert({
+        eventType: 'system',
+        message: `[${store.db.settings.siteName || 'SureDeal Store'}] Website Visitor on ${visitPath} (${device})`,
+      });
+    }
+
+    res.json({ ok: true, totalVisits: stats.totalVisits });
   });
 
   // --- PUBLIC CATALOG ---
@@ -356,8 +413,9 @@ async function startServer() {
     store.db.users.push(newUser);
 
     if (welcomeBonus > 0) {
+      const welcomeTxId = makeId('tx');
       store.db.transactions.unshift({
-        id: makeId('tx'),
+        id: welcomeTxId,
         userId: newUser.id,
         userName: newUser.name,
         userEmail: newUser.email,
@@ -365,6 +423,19 @@ async function startServer() {
         amount: welcomeBonus,
         status: 'completed',
         description: `Welcome Promo Bonus credited on signup`,
+        createdAt: now,
+      });
+      store.recordAccountingEntry({
+        kind: 'transaction',
+        sourceId: welcomeTxId,
+        category: 'welcome_bonus',
+        userId: newUser.id,
+        userName: newUser.name,
+        userEmail: newUser.email,
+        title: 'WELCOME BONUS',
+        detail: 'Welcome Promo Bonus credited on signup',
+        amount: welcomeBonus,
+        status: 'completed',
         createdAt: now,
       });
     }
@@ -463,8 +534,10 @@ async function startServer() {
       const user = store.db.users.find((u) => u.id === order.userId);
       if (user) {
         user.balance += order.price;
+        const refundIso = new Date(now).toISOString();
+        const refundTxId = makeId('tx');
         store.db.transactions.unshift({
-          id: makeId('tx'),
+          id: refundTxId,
           userId: user.id,
           userName: user.name,
           userEmail: user.email,
@@ -472,7 +545,21 @@ async function startServer() {
           amount: order.price,
           status: 'completed',
           description: `Auto-Refund (15m Timer Expired): ${order.serviceName} (${order.phoneNumber})`,
-          createdAt: new Date(now).toISOString(),
+          createdAt: refundIso,
+        });
+        store.syncAccountingStatus(order.id, 'expired');
+        store.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: refundTxId,
+          category: 'refund',
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          title: 'SMS EXPIRED REFUND',
+          detail: `Auto-Refund (15m Timer Expired): ${order.serviceName} (${order.phoneNumber})`,
+          amount: order.price,
+          status: 'completed',
+          createdAt: refundIso,
         });
         store.db.notifications.unshift({
           id: makeId('ntf'),
@@ -591,8 +678,10 @@ async function startServer() {
     }
 
     store.db.smsOrders.unshift(order);
+    const smsTxId = makeId('tx');
+    const smsNowIso = new Date(now).toISOString();
     store.db.transactions.unshift({
-      id: makeId('tx'),
+      id: smsTxId,
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
@@ -600,7 +689,33 @@ async function startServer() {
       amount: price,
       status: 'completed',
       description: `SMS Rental: ${service.name} (${country.name})`,
-      createdAt: new Date(now).toISOString(),
+      createdAt: smsNowIso,
+    });
+    store.recordAccountingEntry({
+      kind: 'order',
+      sourceId: order.id,
+      category: 'SMS Verification',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: `${service.name} (${country.name})`,
+      detail: `Number: ${phoneNumber}`,
+      amount: price,
+      status: order.status,
+      createdAt: smsNowIso,
+    });
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: smsTxId,
+      category: 'purchase',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: 'SMS RENTAL',
+      detail: `SMS Rental: ${service.name} (${country.name})`,
+      amount: price,
+      status: 'completed',
+      createdAt: smsNowIso,
     });
     store.addAdminAlert(
       'New SMS Number Rented',
@@ -680,8 +795,10 @@ async function startServer() {
       poolItem.used = false;
       poolItem.assignedOrderId = undefined;
     }
+    const cancelNow = new Date().toISOString();
+    const cancelTxId = makeId('tx');
     store.db.transactions.unshift({
-      id: makeId('tx'),
+      id: cancelTxId,
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
@@ -689,7 +806,21 @@ async function startServer() {
       amount: order.price,
       status: 'completed',
       description: `Instant SMS Refund: ${order.serviceName} (${order.phoneNumber})`,
-      createdAt: new Date().toISOString(),
+      createdAt: cancelNow,
+    });
+    store.syncAccountingStatus(order.id, 'cancelled');
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: cancelTxId,
+      category: 'refund',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: 'SMS CANCEL REFUND',
+      detail: `Instant SMS Refund: ${order.serviceName} (${order.phoneNumber})`,
+      amount: order.price,
+      status: 'completed',
+      createdAt: cancelNow,
     });
     store.save();
     res.json({ order, balance: user.balance });
@@ -762,8 +893,9 @@ async function startServer() {
     };
 
     store.db.boostingOrders.unshift(order);
+    const boostTxId = makeId('tx');
     store.db.transactions.unshift({
-      id: makeId('tx'),
+      id: boostTxId,
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
@@ -771,6 +903,32 @@ async function startServer() {
       amount,
       status: 'completed',
       description: `Social Boost: ${service.platform} · ${quantity.toLocaleString()} qty`,
+      createdAt: now,
+    });
+    store.recordAccountingEntry({
+      kind: 'order',
+      sourceId: order.id,
+      category: 'Social Boosting',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: `${service.platform} · ${service.name}`,
+      detail: `Qty: ${quantity.toLocaleString()} · Link: ${targetUrl}`,
+      amount,
+      status: order.status,
+      createdAt: now,
+    });
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: boostTxId,
+      category: 'purchase',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: 'SOCIAL BOOST',
+      detail: `Social Boost: ${service.platform} · ${quantity.toLocaleString()} qty`,
+      amount,
+      status: 'completed',
       createdAt: now,
     });
     store.addAdminAlert(
@@ -929,9 +1087,23 @@ async function startServer() {
 
     for (let i = createdVaultItems.length - 1; i >= 0; i--) {
       store.db.vaultItems.unshift(createdVaultItems[i]);
+      store.recordAccountingEntry({
+        kind: 'order',
+        sourceId: createdVaultItems[i].id,
+        category: 'Marketplace',
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        title: createdVaultItems[i].title,
+        detail: `${listing.category} · ${listing.deliveryType}`,
+        amount: createdVaultItems[i].price,
+        status: 'delivered',
+        createdAt: now,
+      });
     }
+    const mktTxId = makeId('tx');
     store.db.transactions.unshift({
-      id: makeId('tx'),
+      id: mktTxId,
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
@@ -939,6 +1111,19 @@ async function startServer() {
       amount: finalTotal,
       status: 'completed',
       description: `Marketplace Order: ${listing.title}${quantity > 1 ? ` × ${quantity}` : ''}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
+      createdAt: now,
+    });
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: mktTxId,
+      category: 'purchase',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: 'MARKETPLACE PURCHASE',
+      detail: `Marketplace Order: ${listing.title}${quantity > 1 ? ` × ${quantity}` : ''}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
+      amount: finalTotal,
+      status: 'completed',
       createdAt: now,
     });
     store.addAdminAlert(
@@ -1046,9 +1231,23 @@ async function startServer() {
 
     for (let i = createdVaultItems.length - 1; i >= 0; i--) {
       store.db.vaultItems.unshift(createdVaultItems[i]);
+      store.recordAccountingEntry({
+        kind: 'order',
+        sourceId: createdVaultItems[i].id,
+        category: 'Custom Section',
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        title: createdVaultItems[i].title,
+        detail: `${section.name} · Vault Delivery`,
+        amount: createdVaultItems[i].price,
+        status: 'delivered',
+        createdAt: now,
+      });
     }
+    const secTxId = makeId('tx');
     store.db.transactions.unshift({
-      id: makeId('tx'),
+      id: secTxId,
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
@@ -1056,6 +1255,19 @@ async function startServer() {
       amount: totalPrice,
       status: 'completed',
       description: `${section.name}: ${product.title}${quantity > 1 ? ` × ${quantity}` : ''}`,
+      createdAt: now,
+    });
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: secTxId,
+      category: 'purchase',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: 'SECTION PURCHASE',
+      detail: `${section.name}: ${product.title}${quantity > 1 ? ` × ${quantity}` : ''}`,
+      amount: totalPrice,
+      status: 'completed',
       createdAt: now,
     });
     store.save();
@@ -1164,6 +1376,19 @@ async function startServer() {
     };
 
     db.transactions.unshift(transaction);
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: transaction.id,
+      category: 'deposit',
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      title: 'WALLET DEPOSIT',
+      detail: transaction.description,
+      amount,
+      status,
+      createdAt: now,
+    });
     store.addAdminAlert(
       autoVerified
         ? 'Deposit Auto-Verified'
@@ -1464,6 +1689,89 @@ async function startServer() {
       adminAlerts: db.adminAlerts,
       promoCodes: db.promoCodes,
       auditLogs: db.auditLogs,
+      accountingRecords: db.accountingRecords || [],
+      visitorStats: db.visitorStats || { totalVisits: 0, recentSessions: [] },
+    });
+  });
+
+  // --- IMMUTABLE ACCOUNTING LEDGER CONTROLS ---
+  app.delete('/api/admin/accounting/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const before = (store.db.accountingRecords || []).length;
+    const target = (store.db.accountingRecords || []).find((r) => r.id === req.params.id);
+    if (!target) {
+      res.status(404).json({ error: 'Accounting record not found' });
+      return;
+    }
+    store.db.accountingRecords = store.db.accountingRecords.filter((r) => r.id !== req.params.id);
+    store.logAudit(
+      req.currentUser!.email,
+      'DELETE_ACCOUNTING_RECORD',
+      target.sourceId,
+      `Deleted accounting entry ${target.title} (${before} -> ${store.db.accountingRecords.length})`,
+    );
+    store.save();
+    res.json({ ok: true });
+  });
+
+  app.post('/api/admin/accounting/clear', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const scope = String(req.body?.scope || 'all');
+    const current = store.db.accountingRecords || [];
+    let removed = 0;
+    if (scope === 'order' || scope === 'transaction') {
+      store.db.accountingRecords = current.filter((r) => {
+        if (r.kind === scope) {
+          removed += 1;
+          return false;
+        }
+        return true;
+      });
+    } else {
+      removed = current.length;
+      store.db.accountingRecords = [];
+    }
+    store.logAudit(
+      req.currentUser!.email,
+      'CLEAR_ACCOUNTING_ARCHIVE',
+      scope,
+      `Cleared ${removed} immutable accounting record(s) from Accounting Console`,
+    );
+    store.save();
+    res.json({ ok: true, removed });
+  });
+
+  // --- SOFT REFRESH WEBSITE (OPERATIONAL RESET PRESERVING USERS, BALANCES, SETTINGS, CATALOG & ACCOUNTING) ---
+  app.post('/api/admin/system/refresh-ops', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+    const db = store.db;
+    const counts = {
+      smsOrders: db.smsOrders.length,
+      boostingOrders: db.boostingOrders.length,
+      vaultItems: db.vaultItems.length,
+      transactions: db.transactions.length,
+    };
+    db.smsOrders = [];
+    db.boostingOrders = [];
+    db.vaultItems = [];
+    db.transactions = [];
+    db.pendingSignups = [];
+    db.smsPool.forEach((p) => {
+      p.used = false;
+      p.assignedOrderId = undefined;
+    });
+    store.logAudit(
+      req.currentUser!.email,
+      'REFRESH_WEBSITE_OPS',
+      'System Reset',
+      `Refreshed live queues (cleared ${counts.transactions} tx, ${counts.smsOrders} sms, ${counts.boostingOrders} boost, ${counts.vaultItems} vault); preserved all users, wallet balances, website settings/logo, products & accounting archive`,
+    );
+    store.save();
+    res.json({
+      ok: true,
+      cleared: counts,
+      preserved: {
+        users: db.users.length,
+        accountingRecords: (db.accountingRecords || []).length,
+        marketplaceListings: db.marketplaceListings.length,
+      },
     });
   });
 
@@ -1575,8 +1883,10 @@ async function startServer() {
       txType = 'admin_credit';
     }
 
+    const balNow = new Date().toISOString();
+    const balTxId = makeId('tx');
     store.db.transactions.unshift({
-      id: makeId('tx'),
+      id: balTxId,
       userId: target.id,
       userName: target.name,
       userEmail: target.email,
@@ -1584,7 +1894,20 @@ async function startServer() {
       amount: Math.abs(delta),
       status: 'completed',
       description: note,
-      createdAt: new Date().toISOString(),
+      createdAt: balNow,
+    });
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: balTxId,
+      category: txType,
+      userId: target.id,
+      userName: target.name,
+      userEmail: target.email,
+      title: txType === 'admin_debit' ? 'ADMIN DEBIT' : 'ADMIN CREDIT',
+      detail: note,
+      amount: Math.abs(delta),
+      status: 'completed',
+      createdAt: balNow,
     });
     store.logAudit(req.currentUser!.email, `BALANCE_${mode.toUpperCase()}`, target.email, `${note} (${amount})`);
     store.save();
@@ -1742,6 +2065,7 @@ async function startServer() {
       return;
     }
 
+    store.syncAccountingStatus(tx.id, tx.status);
     store.logAudit(req.currentUser!.email, `DEPOSIT_${decision.toUpperCase()}`, tx.userEmail, `Amount: ${tx.amount}`);
     store.save();
     res.json({ transaction: tx });
@@ -1775,6 +2099,7 @@ async function startServer() {
       }
       tx.status = 'verified';
       tx.adminNote = 'Verified by Our Team';
+      store.syncAccountingStatus(tx.id, 'verified');
       totalCredited += tx.amount;
     }
     if (matched.length > 0) {
@@ -1841,8 +2166,10 @@ async function startServer() {
         const user = store.db.users.find((u) => u.id === order.userId);
         if (user) {
           user.balance += order.amount;
+          const refBoostNow = new Date().toISOString();
+          const refBoostTxId = makeId('tx');
           store.db.transactions.unshift({
-            id: makeId('tx'),
+            id: refBoostTxId,
             userId: user.id,
             userName: user.name,
             userEmail: user.email,
@@ -1850,11 +2177,25 @@ async function startServer() {
             amount: order.amount,
             status: 'completed',
             description: `Refund for cancelled boost order ${order.id}`,
-            createdAt: new Date().toISOString(),
+            createdAt: refBoostNow,
+          });
+          store.recordAccountingEntry({
+            kind: 'transaction',
+            sourceId: refBoostTxId,
+            category: 'refund',
+            userId: user.id,
+            userName: user.name,
+            userEmail: user.email,
+            title: 'BOOST CANCEL REFUND',
+            detail: `Refund for cancelled boost order ${order.id}`,
+            amount: order.amount,
+            status: 'completed',
+            createdAt: refBoostNow,
           });
         }
       }
       order.status = nextStatus;
+      store.syncAccountingStatus(order.id, nextStatus);
       if (nextStatus === 'completed') {
         order.remains = 0;
       }
@@ -2509,11 +2850,27 @@ async function startServer() {
     const computedStock =
       stockKeys.length > 0 ? stockKeys.length : Math.max(0, Number(req.body?.stock ?? 0));
 
+    const rawCat = String(req.body?.category ?? '').trim();
+    const defaultCat = store.db.marketplaceCategories[0]?.name || 'General';
+    let resolvedCategory = rawCat || defaultCat;
+    const existingCat = store.db.marketplaceCategories.find(
+      (c) => c.name.trim().toLowerCase() === resolvedCategory.toLowerCase(),
+    );
+    if (existingCat) {
+      resolvedCategory = existingCat.name;
+    } else if (resolvedCategory) {
+      store.db.marketplaceCategories.push({
+        id: makeId('cat'),
+        name: resolvedCategory,
+        description: `${resolvedCategory} digital products`,
+      });
+    }
+
     const listing: MarketplaceListing = {
       id: makeId('mkt'),
       title: String(req.body?.title || 'New Digital Asset').trim(),
-      category: String(req.body?.category || 'Proxies').trim(),
-      popularTag: String(req.body?.popularTag || 'Proxy').trim(),
+      category: resolvedCategory,
+      popularTag: String(req.body?.popularTag || resolvedCategory).trim(),
       shortSpec: String(req.body?.shortSpec || 'Instant digital delivery').trim(),
       description: String(req.body?.description || '').trim(),
       buyWarning: String(req.body?.buyWarning || store.db.settings.defaultBuyWarning).trim(),
@@ -2539,7 +2896,7 @@ async function startServer() {
       req.currentUser!.email,
       'CREATE_LISTING',
       listing.title,
-      `Price: ${listing.price}, Accounts: ${stockKeys.length}`,
+      `Category: ${listing.category}, Price: ${listing.price}, Accounts: ${stockKeys.length}`,
     );
     store.save();
     res.status(201).json({ listing });
@@ -2573,9 +2930,26 @@ async function startServer() {
         : typeof req.body?.stock === 'number' && Number.isFinite(req.body.stock)
           ? Math.max(0, Math.floor(req.body.stock))
           : item.stock;
+    let nextCategory = item.category;
+    if (typeof req.body?.category === 'string' && req.body.category.trim()) {
+      const trimmed = req.body.category.trim();
+      const matched = store.db.marketplaceCategories.find(
+        (c) => c.name.trim().toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (matched) {
+        nextCategory = matched.name;
+      } else {
+        nextCategory = trimmed;
+        store.db.marketplaceCategories.push({
+          id: makeId('cat'),
+          name: trimmed,
+          description: `${trimmed} digital products`,
+        });
+      }
+    }
     Object.assign(item, {
       title: req.body?.title ?? item.title,
-      category: req.body?.category ?? item.category,
+      category: nextCategory,
       popularTag: req.body?.popularTag ?? item.popularTag,
       shortSpec: req.body?.shortSpec ?? item.shortSpec,
       description: req.body?.description ?? item.description,
@@ -2596,7 +2970,7 @@ async function startServer() {
       credentialTemplate: req.body?.credentialTemplate ?? item.credentialTemplate,
       active: typeof req.body?.active === 'boolean' ? req.body.active : item.active,
     });
-    store.logAudit(req.currentUser!.email, 'UPDATE_LISTING', item.title, `Price: ${item.price}, Stock: ${item.stock}`);
+    store.logAudit(req.currentUser!.email, 'UPDATE_LISTING', item.title, `Category: ${item.category}, Price: ${item.price}, Stock: ${item.stock}`);
     store.save();
     res.json({ listing: item });
   });
@@ -2853,8 +3227,9 @@ async function startServer() {
     const activeUsers = store.db.users.filter((u) => u.status === 'active' && u.role !== 'admin');
     for (const u of activeUsers) {
       u.balance += amount;
+      const dropTxId = makeId('tx');
       store.db.transactions.unshift({
-        id: makeId('tx'),
+        id: dropTxId,
         userId: u.id,
         userName: u.name,
         userEmail: u.email,
@@ -2863,6 +3238,19 @@ async function startServer() {
         status: 'completed',
         description: title,
         adminNote: `Overwatch Airdrop by ${store.db.settings.creatorName || 'Creator'}`,
+        createdAt: now,
+      });
+      store.recordAccountingEntry({
+        kind: 'transaction',
+        sourceId: dropTxId,
+        category: 'admin_credit',
+        userId: u.id,
+        userName: u.name,
+        userEmail: u.email,
+        title: 'CREATOR AIRDROP',
+        detail: title,
+        amount,
+        status: 'completed',
         createdAt: now,
       });
     }
@@ -3252,7 +3640,41 @@ async function startServer() {
     if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
     if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
 
+    if (typeof body.dashboardNoticeEnabled === 'boolean') {
+      s.dashboardNoticeEnabled = body.dashboardNoticeEnabled;
+    }
+    if (typeof body.dashboardNoticeText === 'string') {
+      s.dashboardNoticeText = body.dashboardNoticeText.trim();
+    }
+    if (
+      body.dashboardNoticeTone === 'amber' ||
+      body.dashboardNoticeTone === 'info' ||
+      body.dashboardNoticeTone === 'emerald' ||
+      body.dashboardNoticeTone === 'rose'
+    ) {
+      s.dashboardNoticeTone = body.dashboardNoticeTone;
+    }
+    if (typeof body.dashboardWalletBadge === 'string') {
+      s.dashboardWalletBadge = body.dashboardWalletBadge.trim();
+    }
+    if (typeof body.dashboardWalletTitle === 'string') {
+      s.dashboardWalletTitle = body.dashboardWalletTitle.trim();
+    }
+    if (typeof body.dashboardWalletSubtitle === 'string') {
+      s.dashboardWalletSubtitle = body.dashboardWalletSubtitle.trim();
+    }
+    if (typeof body.dashboardBalanceLabel === 'string') {
+      s.dashboardBalanceLabel = body.dashboardBalanceLabel.trim();
+    }
+    if (typeof body.dashboardFundButtonLabel === 'string') {
+      s.dashboardFundButtonLabel = body.dashboardFundButtonLabel.trim();
+    }
+    if (typeof body.dashboardHistoryButtonLabel === 'string') {
+      s.dashboardHistoryButtonLabel = body.dashboardHistoryButtonLabel.trim();
+    }
+
     s.brandMigratedV2 = true;
+    s.brandMigratedV3 = true;
     store.logAudit(req.currentUser!.email, 'UPDATE_SETTINGS', 'Overwatch Settings', 'Saved global configuration');
     store.save();
     res.json({ settings: s });

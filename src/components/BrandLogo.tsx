@@ -19,7 +19,7 @@ const SIZE_MAP: Record<NonNullable<BrandLogoProps['size']>, string> = {
 
 export function BrandLogo({
   logoUrl,
-  siteName = 'Ultimate Tech App',
+  siteName = 'SureDeal Store',
   size = 'md',
   shape = 'circle',
   bounce = false,
@@ -33,7 +33,7 @@ export function BrandLogo({
 
   const shapeClass = shape === 'circle' ? 'rounded-full' : 'rounded-2xl';
   const animClass = bounce ? 'animate-logo-bounce' : '';
-  const initial = (siteName || 'U').trim().charAt(0).toUpperCase() || 'U';
+  const initial = (siteName || 'S').trim().charAt(0).toUpperCase() || 'S';
 
   if (logoUrl && !failed) {
     return (
@@ -51,7 +51,7 @@ export function BrandLogo({
     );
   }
 
-  // Signature 4-lobe purple clover/speech mark matching Ultimate Tech App identity
+  // Signature 4-lobe purple clover/speech mark fallback matching SureDeal Store identity
   return (
     <span
       className={`${SIZE_MAP[size]} flex items-center justify-center shrink-0 ${animClass} ${className}`}

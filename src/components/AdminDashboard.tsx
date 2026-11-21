@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  Archive,
   Award,
   BarChart3,
   Bell,
@@ -15,7 +16,9 @@ import {
   Download,
   Eye,
   FileClock,
+  FileSpreadsheet,
   Gift,
+  Globe,
   Home,
   Landmark,
   LayoutDashboard,
@@ -31,6 +34,7 @@ import {
   Plus,
   Receipt,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   Settings,
@@ -55,6 +59,7 @@ import { apiFetch, copyText, formatCountdown, formatNaira, resolveApiUrl } from 
 import { BrandLogo } from './BrandLogo';
 import { UserAvatar } from './UserAvatar';
 import type {
+  AccountingRecord,
   AdminAlert,
   AuditLogEntry,
   BoostingOrder,
@@ -63,6 +68,7 @@ import type {
   SmsOrder,
   SmsPoolNumber,
   VaultItem,
+  VisitorStats,
   WalletTransaction,
 } from '../types';
 import {
@@ -91,12 +97,58 @@ interface FullAdminOverview extends AdminOverviewPayload {
   adminAlerts: AdminAlert[];
   promoCodes: PromoCode[];
   auditLogs: AuditLogEntry[];
+  accountingRecords?: AccountingRecord[];
+  visitorStats?: VisitorStats;
+}
+
+const OVERWATCH_CACHE_KEY = 'sd_overwatch_cache_v1';
+
+function stripHeavyMedia<T>(value: T): T {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/') || value.startsWith('data:video/') || value.length > 2000) {
+      return '' as unknown as T;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripHeavyMedia(item)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const copy: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      copy[k] = stripHeavyMedia(v);
+    }
+    return copy as T;
+  }
+  return value;
+}
+
+function readOverwatchCache(): FullAdminOverview | null {
+  try {
+    const raw = window.localStorage.getItem(OVERWATCH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as FullAdminOverview;
+    if (!parsed || !parsed.settings || !parsed.metrics) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeOverwatchCache(payload: FullAdminOverview): void {
+  try {
+    const slim = stripHeavyMedia(payload);
+    window.localStorage.setItem(OVERWATCH_CACHE_KEY, JSON.stringify(slim));
+  } catch {
+    // Ignore storage quota errors safely
+  }
 }
 
 type AdminTab =
   | 'overview'
   | 'users'
   | 'orders'
+  | 'accounting'
   | 'catalog'
   | 'cms'
   | 'promos'
@@ -118,8 +170,11 @@ export function AdminDashboard({
   onPreviewMaintenance,
 }: AdminDashboardProps) {
   const { user, theme, toggleTheme, logout, notify, refreshCatalog } = useApp();
-  const [data, setData] = useState<FullAdminOverview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [cachedInitial] = useState<FullAdminOverview | null>(() => readOverwatchCache());
+  const [data, setData] = useState<FullAdminOverview | null>(cachedInitial);
+  const [loading, setLoading] = useState(!cachedInitial);
+  const [syncingLive, setSyncingLive] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userSearch, setUserSearch] = useState('');
@@ -140,6 +195,14 @@ export function AdminDashboard({
   const [txSearch, setTxSearch] = useState('');
   const [confirmClearOrders, setConfirmClearOrders] = useState<'completed' | 'all' | null>(null);
   const [confirmClearTx, setConfirmClearTx] = useState<string | null>(null);
+
+  // Accounting Archive Console state
+  const [accSearch, setAccSearch] = useState('');
+  const [accKindFilter, setAccKindFilter] = useState<'all' | 'order' | 'transaction'>('all');
+  const [accCatFilter, setAccCatFilter] = useState<string>('all');
+  const [confirmClearAccounting, setConfirmClearAccounting] = useState(false);
+  const [confirmRefreshOpsHeader, setConfirmRefreshOpsHeader] = useState(false);
+  const [refreshingOpsHeader, setRefreshingOpsHeader] = useState(false);
 
   // User God-Mode Forms
   const [newUserName, setNewUserName] = useState('');
@@ -188,13 +251,21 @@ export function AdminDashboard({
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loadAdmin = useCallback(async () => {
+    setSyncingLive(true);
+    setLoadError(null);
     try {
       const res = await apiFetch<FullAdminOverview>('/api/admin/overview');
       setData(res);
+      writeOverwatchCache(res);
     } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to load Overwatch console', 'error');
+      const msg = err instanceof Error ? err.message : 'Failed to load Overwatch console';
+      setLoadError(msg);
+      if (!readOverwatchCache()) {
+        notify(msg, 'error');
+      }
     } finally {
       setLoading(false);
+      setSyncingLive(false);
     }
   }, [notify]);
 
@@ -227,10 +298,35 @@ export function AdminDashboard({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  if (loading || !data) {
+  if (!data && loading) {
     return (
-      <div className="py-16 text-center text-sm text-slate-500">
-        Initializing Overwatch Creator Console...
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center bg-[var(--site-bg)] text-slate-500">
+        <div className="w-8 h-8 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+        <p className="text-sm font-medium">Initializing Overwatch Creator Console...</p>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center bg-[var(--site-bg)]">
+        <AlertTriangle className="w-8 h-8 text-amber-500" />
+        <div className="space-y-1 max-w-md">
+          <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
+            Could not reach Overwatch backend
+          </h2>
+          <p className="text-xs text-slate-500">{loadError || 'Network timeout occurred.'}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            void loadAdmin();
+          }}
+          className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
+        >
+          Retry Connection
+        </button>
       </div>
     );
   }
@@ -387,10 +483,90 @@ export function AdminDashboard({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ultimate-tech-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `suredeal-store-users-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     notify('Users CSV exported', 'success');
+  };
+
+  const accountingRecordsList = data.accountingRecords || [];
+  const visitorStats = data.visitorStats || { totalVisits: 0, recentSessions: [] };
+  const accountingCategories = Array.from(
+    new Set(accountingRecordsList.map((r) => r.category).filter(Boolean)),
+  ).sort();
+  const filteredAccountingRecords = accountingRecordsList.filter((r) => {
+    const matchesKind = accKindFilter === 'all' || r.kind === accKindFilter;
+    const matchesCat = accCatFilter === 'all' || r.category === accCatFilter;
+    const q = accSearch.trim().toLowerCase();
+    const matchesQ =
+      !q ||
+      r.id.toLowerCase().includes(q) ||
+      r.sourceId.toLowerCase().includes(q) ||
+      r.userName.toLowerCase().includes(q) ||
+      r.userEmail.toLowerCase().includes(q) ||
+      r.title.toLowerCase().includes(q) ||
+      r.detail.toLowerCase().includes(q) ||
+      r.category.toLowerCase().includes(q);
+    return matchesKind && matchesCat && matchesQ;
+  });
+
+  const accountingOrderSalesTotal = accountingRecordsList
+    .filter((r) => r.kind === 'order' && !['cancelled', 'expired', 'refunded'].includes(r.status))
+    .reduce((sum, r) => sum + r.amount, 0);
+  const accountingDepositsTotal = accountingRecordsList
+    .filter((r) => r.kind === 'transaction' && r.category === 'deposit' && r.status === 'verified')
+    .reduce((sum, r) => sum + r.amount, 0);
+  const accountingRefundsBonusesTotal = accountingRecordsList
+    .filter(
+      (r) =>
+        r.kind === 'transaction' &&
+        ['refund', 'admin_credit', 'referral_bonus', 'welcome_bonus'].includes(r.category),
+    )
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const handleExportAccountingCsv = () => {
+    const header = 'ArchiveID,Kind,SourceID,Category,UserName,UserEmail,Title,Detail,Amount,Status,Date';
+    const rows = filteredAccountingRecords.map((r) =>
+      [
+        r.id,
+        r.kind,
+        r.sourceId,
+        r.category,
+        `"${(r.userName || '').replace(/"/g, '""')}"`,
+        `"${(r.userEmail || '').replace(/"/g, '""')}"`,
+        `"${(r.title || '').replace(/"/g, '""')}"`,
+        `"${(r.detail || '').replace(/"/g, '""')}"`,
+        r.amount,
+        r.status,
+        r.createdAt,
+      ].join(','),
+    );
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `suredeal-accounting-archive-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    notify('Accounting Archive CSV exported', 'success');
+  };
+
+  const handleRefreshOpsSafe = async () => {
+    setRefreshingOpsHeader(true);
+    try {
+      await apiFetch('/api/admin/system/refresh-ops', { method: 'POST' });
+      setConfirmRefreshOpsHeader(false);
+      notify(
+        'Website queues refreshed! Users, balances, logo, products & Accounting Archive preserved.',
+        'success',
+      );
+      await loadAdmin();
+      await refreshCatalog();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Website refresh failed', 'error');
+    } finally {
+      setRefreshingOpsHeader(false);
+    }
   };
 
   // Compute live Overview analytics & inventory alerts
@@ -538,6 +714,12 @@ export function AdminDashboard({
         data.metrics.pendingBoostingCount +
         data.metrics.activeSmsCount,
     },
+    {
+      id: 'accounting',
+      label: `Accounting (${accountingRecordsList.length})`,
+      icon: Archive,
+      badge: accountingRecordsList.length,
+    },
     { id: 'users', label: `Users (${data.users.length})`, icon: Users },
     { id: 'catalog', label: 'Products', icon: Package, badge: lowStockItems.length },
     { id: 'cms', label: 'Landing Studio', icon: Sparkles },
@@ -559,7 +741,7 @@ export function AdminDashboard({
 
   const allTabs = [...primaryMenu, ...operationsMenu];
   const activeTabLabel = allTabs.find((t) => t.id === tab)?.label || 'Overview';
-  const siteName = data.settings.siteName || 'Ultimate Tech App';
+  const siteName = data.settings.siteName || 'SureDeal Store';
 
   const selectTab = (next: AdminTab) => {
     setTab(next);
@@ -826,7 +1008,23 @@ export function AdminDashboard({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
+              {syncingLive && (
+                <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[11px] font-semibold">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Live Syncing...
+                </span>
+              )}
+              {!syncingLive && loadError && (
+                <button
+                  type="button"
+                  onClick={() => void loadAdmin()}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-[11px] font-bold cursor-pointer"
+                  title={loadError}
+                >
+                  Offline Cache · Retry
+                </button>
+              )}
               {data.settings.maintenanceMode && (
                 <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[11px] font-bold">
                   Maintenance ON
@@ -836,7 +1034,7 @@ export function AdminDashboard({
               <button
                 type="button"
                 onClick={() => setCmdOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 hover:border-blue-400 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 hover:border-blue-400 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
                 title="Open Overwatch Command Palette (Ctrl+K / ⌘K)"
               >
                 <Command className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400" />
@@ -855,13 +1053,44 @@ export function AdminDashboard({
                 Landing Studio
               </button>
 
+              {confirmRefreshOpsHeader ? (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={refreshingOpsHeader}
+                    onClick={() => void handleRefreshOpsSafe()}
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-xs font-bold text-white cursor-pointer disabled:opacity-60"
+                  >
+                    {refreshingOpsHeader ? 'Resetting...' : 'Confirm Reset Queues'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRefreshOpsHeader(false)}
+                    className="px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmRefreshOpsHeader(true)}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 text-xs font-semibold text-amber-800 dark:text-amber-300 hover:bg-amber-100 cursor-pointer"
+                  title="Clear dashboard orders & transactions while preserving users, balances, logo, products & Accounting Archive"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden lg:inline">Refresh Website</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={loadAdmin}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-semibold text-white cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-semibold text-white cursor-pointer"
+                title="Sync latest Overwatch state"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Refresh</span>
+                <RefreshCw className={`w-3.5 h-3.5 ${syncingLive ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Sync</span>
               </button>
 
               <button
@@ -968,12 +1197,13 @@ export function AdminDashboard({
                     Full edit, reorder, duplicate &amp; delete access across every module
                   </span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
                   {[
                     { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
                     { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
+                    { label: 'Accounting', sub: `${accountingRecordsList.length} archived`, tab: 'accounting' as AdminTab, icon: Archive, tint: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60' },
                     { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
-                    { label: 'Landing Studio', sub: 'Hero, brand & stats', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
+                    { label: 'Landing Studio', sub: 'Notice, wallet & hero', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
                     { label: 'Broadcasts & Mail', sub: `${data.notifications.length} notices`, tab: 'notifications' as AdminTab, icon: Bell, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
                     { label: 'Master Controls', sub: data.settings.maintenanceMode ? 'Maintenance ON' : 'Live & online', tab: 'settings' as AdminTab, icon: Sliders, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' },
                   ].map((tool) => {
@@ -1418,87 +1648,143 @@ export function AdminDashboard({
                 </div>
               </div>
 
-              {/* Operational Alerts */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-                  <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-                    Live Operational Stream ({data.adminAlerts.length})
-                  </h2>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiFetch('/api/admin/activity/refresh', { method: 'POST' });
-                          notify('Overwatch activity stream & logs refreshed!', 'success');
-                          await loadAdmin();
-                        } catch (err) {
-                          notify(err instanceof Error ? err.message : 'Refresh failed', 'error');
-                        }
-                      }}
-                      className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
-                    >
-                      Refresh Activity
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiFetch('/api/admin/alerts/read-all', { method: 'POST' });
-                          notify('Alerts marked read', 'info');
-                          await loadAdmin();
-                        } catch (err) {
-                          notify(err instanceof Error ? err.message : 'Failed to update alerts', 'error');
-                        }
-                      }}
-                      className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
-                    >
-                      Mark All Read
-                    </button>
-                    {data.adminAlerts.length > 0 && (
+              {/* Live Storefront Visitor Monitor + Operational Alerts */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-emerald-600" />
+                      Live Storefront Visitors
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 tabular-nums">
+                      {visitorStats.totalVisits} total visits
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Every visitor who opens the website (even without signing in) triggers an instant Overwatch notification.
+                    {visitorStats.lastVisitAt && (
+                      <span className="block mt-0.5 text-slate-400">
+                        Last visit: {new Date(visitorStats.lastVisitAt).toLocaleString()}
+                      </span>
+                    )}
+                  </p>
+                  {visitorStats.recentSessions.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-slate-500">
+                      No public visitor sessions logged yet.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-56 overflow-y-auto">
+                      {visitorStats.recentSessions.slice(0, 12).map((sess, sIdx) => (
+                        <div
+                          key={`${sess.visitorId}-${sess.visitedAt}-${sIdx}`}
+                          className="py-2 flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 dark:text-white truncate">
+                              {sess.device || 'Visitor'} · <span className="font-mono text-[11px] text-blue-600 dark:text-blue-400">{sess.path || '/'}</span>
+                            </p>
+                            <p className="text-[10px] font-mono text-slate-400 truncate">
+                              ID: {sess.visitorId}
+                            </p>
+                          </div>
+                          <span className="text-[10px] text-slate-400 shrink-0">
+                            {new Date(sess.visitedAt).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                      Live Operational Stream ({data.adminAlerts.length})
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-3">
                       <button
                         type="button"
                         onClick={async () => {
                           try {
-                            await apiFetch('/api/admin/alerts', { method: 'DELETE' });
-                            notify('Operational stream cleared', 'info');
+                            await apiFetch('/api/admin/activity/refresh', { method: 'POST' });
+                            notify('Overwatch activity stream & logs refreshed!', 'success');
                             await loadAdmin();
                           } catch (err) {
-                            notify(err instanceof Error ? err.message : 'Failed to clear alerts', 'error');
+                            notify(err instanceof Error ? err.message : 'Refresh failed', 'error');
                           }
                         }}
-                        className="text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                        className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
                       >
-                        Clear Stream
+                        Refresh Activity
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await apiFetch('/api/admin/alerts/read-all', { method: 'POST' });
+                            notify('Alerts marked read', 'info');
+                            await loadAdmin();
+                          } catch (err) {
+                            notify(err instanceof Error ? err.message : 'Failed to update alerts', 'error');
+                          }
+                        }}
+                        className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                      >
+                        Mark All Read
+                      </button>
+                      {data.adminAlerts.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await apiFetch('/api/admin/alerts', { method: 'DELETE' });
+                              notify('Operational stream cleared', 'info');
+                              await loadAdmin();
+                            } catch (err) {
+                              notify(err instanceof Error ? err.message : 'Failed to clear alerts', 'error');
+                            }
+                          }}
+                          className="text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                        >
+                          Clear Stream
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                {data.adminAlerts.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-slate-500">
-                    All caught up — zero unread operational alerts.
-                  </p>
-                ) : (
-                  <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto">
-                    {data.adminAlerts.slice(0, 15).map((a) => (
-                      <div key={a.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold uppercase text-slate-600 dark:text-slate-300">
-                              {a.category}
-                            </span>
-                            <p className="font-semibold text-slate-900 dark:text-white truncate">{a.title}</p>
-                            {!a.read && <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />}
+                  {data.adminAlerts.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-slate-500">
+                      All caught up — zero unread operational alerts.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto">
+                      {data.adminAlerts.slice(0, 15).map((a) => (
+                        <div key={a.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  a.category === 'visitor'
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    : a.category === 'deposit'
+                                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                {a.category}
+                              </span>
+                              <p className="font-semibold text-slate-900 dark:text-white truncate">{a.title}</p>
+                              {!a.read && <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />}
+                            </div>
+                            <p className="text-slate-500 mt-0.5 truncate">{a.detail}</p>
                           </div>
-                          <p className="text-slate-500 mt-0.5 truncate">{a.detail}</p>
+                          <span className="text-[11px] text-slate-400 shrink-0">
+                            {new Date(a.createdAt).toLocaleTimeString()}
+                          </span>
                         </div>
-                        <span className="text-[11px] text-slate-400 shrink-0">
-                          {new Date(a.createdAt).toLocaleTimeString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -3255,6 +3541,248 @@ export function AdminDashboard({
             </div>
           )}
 
+          {/* ACCOUNTING ARCHIVE TAB (Independent from Dashboard Clear / Refresh) */}
+          {tab === 'accounting' && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 flex items-start gap-3">
+                <Archive className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-indigo-950 dark:text-indigo-200 leading-relaxed">
+                  <p className="font-bold">Permanent Accounting Ledger Archive</p>
+                  <p className="mt-0.5 opacity-90">
+                    Every order (SMS, Boosting, Marketplace &amp; Custom Vault) and wallet transaction is accounted for independently here. Clearing Orders &amp; Transactions or running Refresh Website on your dashboard never removes entries here unless you delete or clear them manually inside Accounting.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Recorded Order Sales
+                  </p>
+                  <p className="font-display text-2xl font-extrabold text-slate-900 dark:text-white mt-1.5 tabular-nums">
+                    {formatNaira(accountingOrderSalesTotal, symbol)}
+                  </p>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Verified Deposits
+                  </p>
+                  <p className="font-display text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5 tabular-nums">
+                    {formatNaira(accountingDepositsTotal, symbol)}
+                  </p>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Refunds &amp; Bonuses
+                  </p>
+                  <p className="font-display text-2xl font-extrabold text-blue-600 dark:text-blue-400 mt-1.5 tabular-nums">
+                    {formatNaira(accountingRefundsBonusesTotal, symbol)}
+                  </p>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Archived Records
+                  </p>
+                  <p className="font-display text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-1.5 tabular-nums">
+                    {accountingRecordsList.length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={accSearch}
+                        onChange={(e) => setAccSearch(e.target.value)}
+                        placeholder="Search by ID, order/tx ref, customer name, email, or item..."
+                        className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                      {(['all', 'order', 'transaction'] as const).map((k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setAccKindFilter(k)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize cursor-pointer ${
+                            accKindFilter === k
+                              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {k === 'all' ? 'All' : k === 'order' ? 'Orders' : 'Transactions'}
+                        </button>
+                      ))}
+                    </div>
+                    <select
+                      value={accCatFilter}
+                      onChange={(e) => setAccCatFilter(e.target.value)}
+                      className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                    >
+                      <option value="all">All Categories</option>
+                      {accountingCategories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleExportAccountingCsv}
+                      disabled={filteredAccountingRecords.length === 0}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                      Export CSV
+                    </button>
+                    {accountingRecordsList.length > 0 && (
+                      confirmClearAccounting ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch('/api/admin/accounting/clear', {
+                                  method: 'POST',
+                                  body: JSON.stringify({ kind: accKindFilter === 'all' ? 'all' : accKindFilter }),
+                                });
+                                setConfirmClearAccounting(false);
+                                notify('Accounting entries cleared permanently', 'info');
+                                await loadAdmin();
+                              } catch (err) {
+                                notify(err instanceof Error ? err.message : 'Failed to clear archive', 'error');
+                              }
+                            }}
+                            className="px-3 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl cursor-pointer"
+                          >
+                            Confirm Clear {accKindFilter === 'all' ? 'All' : accKindFilter}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmClearAccounting(false)}
+                            className="px-2.5 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmClearAccounting(true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Clear Archive
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {filteredAccountingRecords.length === 0 ? (
+                  <p className="py-12 text-center text-xs text-slate-500">
+                    No accounting entries match your search or filter.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[600px] overflow-y-auto">
+                    {filteredAccountingRecords.map((rec) => (
+                      <div
+                        key={rec.id}
+                        className="py-3.5 flex flex-wrap items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                rec.kind === 'order'
+                                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
+                                  : 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                              }`}
+                            >
+                              {rec.kind}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+                              {rec.category}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void copyText(rec.sourceId);
+                                notify(`Copied ID ${rec.sourceId}`, 'info');
+                              }}
+                              className="inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-500 cursor-pointer"
+                              title="Click to copy reference ID"
+                            >
+                              <Copy className="w-2.5 h-2.5" />
+                              {rec.sourceId}
+                            </button>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                ['completed', 'verified', 'received'].includes(rec.status)
+                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                  : ['cancelled', 'rejected', 'expired'].includes(rec.status)
+                                    ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                    : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                              }`}
+                            >
+                              {rec.status}
+                            </span>
+                          </div>
+                          <p className="font-bold text-slate-900 dark:text-white break-words">
+                            {rec.title}
+                          </p>
+                          <p className="text-slate-500 dark:text-slate-400 break-words">
+                            {rec.userName} ({rec.userEmail}) · {rec.detail}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right">
+                            <p className="font-mono font-extrabold text-sm text-slate-900 dark:text-white tabular-nums">
+                              {formatNaira(rec.amount, symbol)}
+                            </p>
+                            <p className="text-[10px] text-slate-400">
+                              {new Date(rec.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/admin/accounting/${rec.id}`, {
+                                  method: 'DELETE',
+                                });
+                                notify('Accounting entry deleted', 'info');
+                                await loadAdmin();
+                              } catch (err) {
+                                notify(
+                                  err instanceof Error ? err.message : 'Delete failed',
+                                  'error',
+                                );
+                              }
+                            }}
+                            className="p-2 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 cursor-pointer"
+                            aria-label="Delete accounting entry"
+                            title="Delete this entry from Accounting"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* AUDIT LOGS TAB */}
           {tab === 'audit' && (
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
@@ -3763,6 +4291,11 @@ export function AdminDashboard({
                     id: 'act_sync',
                     label: 'Force Refresh & Sync Store State',
                     run: () => void loadAdmin(),
+                  },
+                  {
+                    id: 'act_refresh_ops',
+                    label: 'Refresh Website Queues (Safe Preserve)',
+                    run: () => void handleRefreshOpsSafe(),
                   },
                   ...(onBackHome
                     ? [

@@ -23,7 +23,7 @@ export function AuthView({ initialMode, onBack, onSuccess }: AuthViewProps) {
   const [errorMsg, setErrorMsg] = useState('');
 
   const settings = catalog?.settings;
-  const siteName = settings?.siteName || 'Ultimate Tech App';
+  const siteName = settings?.siteName || 'SureDeal Store';
   const maintenance = Boolean(settings?.maintenanceMode);
 
   useEffect(() => {

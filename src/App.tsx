@@ -7,6 +7,7 @@ import { MaintenanceScreen } from './components/MaintenanceScreen';
 import { ToastContainer } from './components/ToastContainer';
 import { WorkspaceLayout } from './components/WorkspaceLayout';
 import { AppProvider, useApp } from './context/AppContext';
+import { resolveApiUrl } from './lib/api';
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -30,7 +31,7 @@ class AppErrorBoundary extends Component<
       return (
         <div className="min-h-screen flex items-center justify-center px-6 py-12 bg-[var(--site-bg)] text-slate-900 dark:text-slate-100">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-sm">
-            <h1 className="font-display text-xl font-bold">Ultimate Tech App</h1>
+            <h1 className="font-display text-xl font-bold">SureDeal Store</h1>
             <p className="text-sm text-slate-600 dark:text-slate-400">
               Something went wrong while rendering the page.
             </p>
@@ -56,10 +57,41 @@ function AppRouter() {
   const [previewMaintenance, setPreviewMaintenance] = useState(false);
 
   useEffect(() => {
-    const name = catalog?.settings?.siteName || 'Ultimate Tech App';
+    const name = catalog?.settings?.siteName || 'SureDeal Store';
     const tag = catalog?.settings?.siteTagline || 'Digital solutions for every market';
     document.title = `${name} — ${tag}`;
   }, [catalog?.settings?.siteName, catalog?.settings?.siteTagline]);
+
+  useEffect(() => {
+    try {
+      const lastPing = Number(sessionStorage.getItem('sd_visit_last_at') || '0');
+      const now = Date.now();
+      if (now - lastPing < 5 * 60 * 1000) return;
+
+      let visitorId = sessionStorage.getItem('sd_visitor_id') || '';
+      if (!visitorId) {
+        visitorId = `vis_${now}_${Math.random().toString(36).slice(2, 8)}`;
+        sessionStorage.setItem('sd_visitor_id', visitorId);
+      }
+      sessionStorage.setItem('sd_visit_last_at', String(now));
+
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+      const device = /mobile|iphone|android|ipad/i.test(ua) ? 'Mobile Browser' : 'Desktop Browser';
+
+      void fetch(resolveApiUrl('/api/public/visit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          visitorId,
+          path: typeof window !== 'undefined' ? window.location.pathname : '/',
+          device,
+          referrer: typeof document !== 'undefined' ? document.referrer : '',
+        }),
+      }).catch(() => {});
+    } catch {
+      // ignore storage or network failure
+    }
+  }, []);
 
   const isMaintenanceLocked =
     Boolean(catalog?.settings?.maintenanceMode) && user?.role !== 'admin';
@@ -91,7 +123,7 @@ function AppRouter() {
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--site-bg)] text-sm text-slate-500">
-        Loading Ultimate Tech App...
+        Loading SureDeal Store...
       </div>
     );
   }

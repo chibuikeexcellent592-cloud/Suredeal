@@ -8,6 +8,7 @@ import {
   mergeParsedDatabaseState,
 } from '../shared/initialData.ts';
 import type {
+  AccountingRecord,
   AdminAlert,
   BoostingService,
   CustomSection,
@@ -84,6 +85,8 @@ const STATE_KEYS: Array<keyof DatabaseState> = [
   'vaultItems',
   'customSections',
   'transactions',
+  'accountingRecords',
+  'visitorStats',
   'notifications',
   'emailLogs',
   'tutorials',
@@ -421,6 +424,30 @@ export class SureDealStoreDO {
     }
   }
 
+  private recordAccountingEntry(entry: Omit<AccountingRecord, 'id'>): void {
+    const db = this.db;
+    if (!Array.isArray(db.accountingRecords)) {
+      db.accountingRecords = [];
+    }
+    db.accountingRecords.unshift({
+      id: makeId('acc'),
+      ...entry,
+    });
+  }
+
+  private syncAccountingStatus(sourceId: string, status: string, detailOverride?: string): void {
+    const db = this.db;
+    if (!Array.isArray(db.accountingRecords)) return;
+    for (const rec of db.accountingRecords) {
+      if (rec.sourceId === sourceId) {
+        rec.status = status;
+        if (detailOverride) {
+          rec.detail = detailOverride;
+        }
+      }
+    }
+  }
+
   private scheduleNextSmsExpiryAlarm(): void {
     try {
       const db = this.db;
@@ -456,8 +483,10 @@ export class SureDealStoreDO {
       const user = db.users.find((u) => u.id === order.userId);
       if (user) {
         user.balance += order.price;
+        const refundIso = new Date(now).toISOString();
+        const refundTxId = makeId('tx');
         db.transactions.unshift({
-          id: makeId('tx'),
+          id: refundTxId,
           userId: user.id,
           userName: user.name,
           userEmail: user.email,
@@ -465,7 +494,21 @@ export class SureDealStoreDO {
           amount: order.price,
           status: 'completed',
           description: `Auto-Refund (15m Timer Expired): ${order.serviceName} (${order.phoneNumber})`,
-          createdAt: new Date(now).toISOString(),
+          createdAt: refundIso,
+        });
+        this.syncAccountingStatus(order.id, 'expired');
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: refundTxId,
+          category: 'refund',
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          title: 'SMS EXPIRED REFUND',
+          detail: `Auto-Refund (15m Timer Expired): ${order.serviceName} (${order.phoneNumber})`,
+          amount: order.price,
+          status: 'completed',
+          createdAt: refundIso,
         });
         db.notifications.unshift({
           id: makeId('ntf'),
@@ -474,7 +517,7 @@ export class SureDealStoreDO {
           type: 'info',
           targetUserId: user.id,
           readBy: [],
-          createdAt: new Date(now).toISOString(),
+          createdAt: refundIso,
         });
       }
 
@@ -486,7 +529,14 @@ export class SureDealStoreDO {
     }
 
     if (changed) {
-      this.persistKeys('smsOrders', 'users', 'transactions', 'notifications', 'smsPool');
+      this.persistKeys(
+        'smsOrders',
+        'users',
+        'transactions',
+        'accountingRecords',
+        'notifications',
+        'smsPool',
+      );
       this.scheduleNextSmsExpiryAlarm();
     }
     return changed;
@@ -510,8 +560,9 @@ export class SureDealStoreDO {
       return false;
     }
     inviter.balance += bonus;
+    const bonusTxId = makeId('tx');
     db.transactions.unshift({
-      id: makeId('tx'),
+      id: bonusTxId,
       userId: inviter.id,
       userName: inviter.name,
       userEmail: inviter.email,
@@ -519,6 +570,19 @@ export class SureDealStoreDO {
       amount: bonus,
       status: 'completed',
       description: `Referral bonus unlocked on ${depositor.email}'s first verified deposit`,
+      createdAt: now,
+    });
+    this.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: bonusTxId,
+      category: 'referral_bonus',
+      userId: inviter.id,
+      userName: inviter.name,
+      userEmail: inviter.email,
+      title: 'REFERRAL BONUS',
+      detail: `Referral bonus unlocked on ${depositor.email}'s first verified deposit`,
+      amount: bonus,
+      status: 'completed',
       createdAt: now,
     });
     db.notifications.unshift({
@@ -660,13 +724,55 @@ export class SureDealStoreDO {
           maintenanceMessage:
             s.maintenanceMessage ||
             'We’re currently performing scheduled maintenance. Please check back shortly.',
-          siteName: s.siteName || 'Ultimate Tech App',
+          siteName: s.siteName || 'SureDeal Store',
           siteLogoUrl: s.siteLogoUrl || '',
           supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
           supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
           creatorName: s.creatorName || 'Excellent',
           checkedAt: new Date().toISOString(),
         });
+      }
+
+      // --- PUBLIC VISITOR NOTIFICATION ---
+      if (method === 'POST' && pathname === '/api/public/visit') {
+        const body = await readJsonBody(request);
+        const db = this.db;
+        const visitorId = String(body.visitorId || 'anon').trim().slice(0, 64);
+        const visitPath = String(body.path || '/').trim().slice(0, 120) || '/';
+        const device = String(
+          body.device || request.headers.get('user-agent') || 'Web Browser',
+        )
+          .trim()
+          .slice(0, 80);
+
+        if (!db.visitorStats) {
+          db.visitorStats = { totalVisits: 0, recentSessions: [] };
+        }
+        const stats = db.visitorStats;
+        const nowMs = Date.now();
+        const nowIso = new Date(nowMs).toISOString();
+        const fiveMinMs = 5 * 60 * 1000;
+        const alreadySeenRecently = (stats.recentSessions || []).some(
+          (s) => s.visitorId === visitorId && nowMs - new Date(s.visitedAt).getTime() < fiveMinMs,
+        );
+
+        if (!alreadySeenRecently) {
+          stats.totalVisits = (stats.totalVisits || 0) + 1;
+          stats.lastVisitAt = nowIso;
+          stats.recentSessions = [
+            { visitorId, path: visitPath, device, visitedAt: nowIso },
+            ...(stats.recentSessions || []),
+          ].slice(0, 50);
+
+          this.addAdminAlert(
+            'Website Visitor',
+            `Visitor viewed ${visitPath} · ${device}`,
+            'visitor',
+          );
+          this.persistKeys('visitorStats', 'adminAlerts');
+        }
+
+        return okJson({ ok: true, totalVisits: stats.totalVisits });
       }
 
       // --- PUBLIC CATALOG ---
@@ -784,8 +890,9 @@ export class SureDealStoreDO {
         db.users.push(newUser);
 
         if (welcomeBonus > 0) {
+          const welcomeTxId = makeId('tx');
           db.transactions.unshift({
-            id: makeId('tx'),
+            id: welcomeTxId,
             userId: newUser.id,
             userName: newUser.name,
             userEmail: newUser.email,
@@ -793,6 +900,19 @@ export class SureDealStoreDO {
             amount: welcomeBonus,
             status: 'completed',
             description: 'Welcome Promo Bonus credited on signup',
+            createdAt: now,
+          });
+          this.recordAccountingEntry({
+            kind: 'transaction',
+            sourceId: welcomeTxId,
+            category: 'welcome_bonus',
+            userId: newUser.id,
+            userName: newUser.name,
+            userEmail: newUser.email,
+            title: 'WELCOME BONUS',
+            detail: 'Welcome Promo Bonus credited on signup',
+            amount: welcomeBonus,
+            status: 'completed',
             createdAt: now,
           });
         }
@@ -970,8 +1090,10 @@ export class SureDealStoreDO {
         }
 
         db.smsOrders.unshift(order);
+        const smsTxId = makeId('tx');
+        const smsNowIso = new Date(now).toISOString();
         db.transactions.unshift({
-          id: makeId('tx'),
+          id: smsTxId,
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
@@ -979,7 +1101,33 @@ export class SureDealStoreDO {
           amount: price,
           status: 'completed',
           description: `SMS Rental: ${service.name} (${country.name})`,
-          createdAt: new Date(now).toISOString(),
+          createdAt: smsNowIso,
+        });
+        this.recordAccountingEntry({
+          kind: 'order',
+          sourceId: order.id,
+          category: 'SMS Verification',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: `${service.name} (${country.name})`,
+          detail: `Number: ${phoneNumber}`,
+          amount: price,
+          status: order.status,
+          createdAt: smsNowIso,
+        });
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: smsTxId,
+          category: 'purchase',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: 'SMS RENTAL',
+          detail: `SMS Rental: ${service.name} (${country.name})`,
+          amount: price,
+          status: 'completed',
+          createdAt: smsNowIso,
         });
         this.addAdminAlert(
           'New SMS Number Rented',
@@ -992,6 +1140,7 @@ export class SureDealStoreDO {
           'smsPool',
           'smsOrders',
           'transactions',
+          'accountingRecords',
           'adminAlerts',
         );
         this.scheduleNextSmsExpiryAlarm();
@@ -1052,8 +1201,10 @@ export class SureDealStoreDO {
           poolItem.used = false;
           poolItem.assignedOrderId = undefined;
         }
+        const cancelNow = new Date().toISOString();
+        const cancelTxId = makeId('tx');
         db.transactions.unshift({
-          id: makeId('tx'),
+          id: cancelTxId,
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
@@ -1061,9 +1212,23 @@ export class SureDealStoreDO {
           amount: order.price,
           status: 'completed',
           description: `Instant SMS Refund: ${order.serviceName} (${order.phoneNumber})`,
-          createdAt: new Date().toISOString(),
+          createdAt: cancelNow,
         });
-        this.persistKeys('smsOrders', 'users', 'smsPool', 'transactions');
+        this.syncAccountingStatus(order.id, 'cancelled');
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: cancelTxId,
+          category: 'refund',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: 'SMS CANCEL REFUND',
+          detail: `Instant SMS Refund: ${order.serviceName} (${order.phoneNumber})`,
+          amount: order.price,
+          status: 'completed',
+          createdAt: cancelNow,
+        });
+        this.persistKeys('smsOrders', 'users', 'smsPool', 'transactions', 'accountingRecords');
         return okJson({ order, balance: currentUser.balance });
       }
 
@@ -1128,8 +1293,9 @@ export class SureDealStoreDO {
         };
 
         db.boostingOrders.unshift(order);
+        const boostTxId = makeId('tx');
         db.transactions.unshift({
-          id: makeId('tx'),
+          id: boostTxId,
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
@@ -1137,6 +1303,32 @@ export class SureDealStoreDO {
           amount,
           status: 'completed',
           description: `Social Boost: ${service.platform} · ${quantity.toLocaleString()} qty`,
+          createdAt: now,
+        });
+        this.recordAccountingEntry({
+          kind: 'order',
+          sourceId: order.id,
+          category: 'Social Boosting',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: `${service.platform} · ${service.name}`,
+          detail: `Qty: ${quantity.toLocaleString()} · Link: ${targetUrl}`,
+          amount,
+          status: order.status,
+          createdAt: now,
+        });
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: boostTxId,
+          category: 'purchase',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: 'SOCIAL BOOST',
+          detail: `Social Boost: ${service.platform} · ${quantity.toLocaleString()} qty`,
+          amount,
+          status: 'completed',
           createdAt: now,
         });
         this.addAdminAlert(
@@ -1152,7 +1344,14 @@ export class SureDealStoreDO {
           sentBy: currentUser.email,
           createdAt: now,
         });
-        this.persistKeys('users', 'boostingOrders', 'transactions', 'adminAlerts', 'emailLogs');
+        this.persistKeys(
+          'users',
+          'boostingOrders',
+          'transactions',
+          'accountingRecords',
+          'adminAlerts',
+          'emailLogs',
+        );
         return okJson({ order, balance: currentUser.balance }, 201);
       }
 
@@ -1283,9 +1482,23 @@ export class SureDealStoreDO {
 
         for (let i = createdVaultItems.length - 1; i >= 0; i--) {
           db.vaultItems.unshift(createdVaultItems[i]);
+          this.recordAccountingEntry({
+            kind: 'order',
+            sourceId: createdVaultItems[i].id,
+            category: 'Marketplace',
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userEmail: currentUser.email,
+            title: createdVaultItems[i].title,
+            detail: `${listing.category} · ${listing.deliveryType}`,
+            amount: createdVaultItems[i].price,
+            status: 'delivered',
+            createdAt: now,
+          });
         }
+        const mktTxId = makeId('tx');
         db.transactions.unshift({
-          id: makeId('tx'),
+          id: mktTxId,
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
@@ -1293,6 +1506,19 @@ export class SureDealStoreDO {
           amount: finalTotal,
           status: 'completed',
           description: `Marketplace Order: ${listing.title}${quantity > 1 ? ` × ${quantity}` : ''}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
+          createdAt: now,
+        });
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: mktTxId,
+          category: 'purchase',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: 'MARKETPLACE PURCHASE',
+          detail: `Marketplace Order: ${listing.title}${quantity > 1 ? ` × ${quantity}` : ''}${appliedPromo ? ` (${appliedPromo.code})` : ''}`,
+          amount: finalTotal,
+          status: 'completed',
           createdAt: now,
         });
         this.addAdminAlert(
@@ -1306,6 +1532,7 @@ export class SureDealStoreDO {
           'promoCodes',
           'vaultItems',
           'transactions',
+          'accountingRecords',
           'adminAlerts',
         );
         return okJson(
@@ -1392,9 +1619,23 @@ export class SureDealStoreDO {
 
         for (let i = createdVaultItems.length - 1; i >= 0; i--) {
           db.vaultItems.unshift(createdVaultItems[i]);
+          this.recordAccountingEntry({
+            kind: 'order',
+            sourceId: createdVaultItems[i].id,
+            category: 'Custom Section',
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userEmail: currentUser.email,
+            title: createdVaultItems[i].title,
+            detail: `${section.name} · Vault Delivery`,
+            amount: createdVaultItems[i].price,
+            status: 'delivered',
+            createdAt: now,
+          });
         }
+        const secTxId = makeId('tx');
         db.transactions.unshift({
-          id: makeId('tx'),
+          id: secTxId,
           userId: currentUser.id,
           userName: currentUser.name,
           userEmail: currentUser.email,
@@ -1404,7 +1645,26 @@ export class SureDealStoreDO {
           description: `${section.name}: ${product.title}${quantity > 1 ? ` × ${quantity}` : ''}`,
           createdAt: now,
         });
-        this.persistKeys('users', 'customSections', 'vaultItems', 'transactions');
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: secTxId,
+          category: 'purchase',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: 'SECTION PURCHASE',
+          detail: `${section.name}: ${product.title}${quantity > 1 ? ` × ${quantity}` : ''}`,
+          amount: totalPrice,
+          status: 'completed',
+          createdAt: now,
+        });
+        this.persistKeys(
+          'users',
+          'customSections',
+          'vaultItems',
+          'transactions',
+          'accountingRecords',
+        );
         return okJson(
           {
             vaultItem: createdVaultItems[0],
@@ -1517,6 +1777,19 @@ export class SureDealStoreDO {
         };
 
         db.transactions.unshift(transaction);
+        this.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: transaction.id,
+          category: 'deposit',
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          title: 'WALLET DEPOSIT',
+          detail: transaction.description,
+          amount,
+          status,
+          createdAt: now,
+        });
         this.addAdminAlert(
           autoVerified
             ? 'Deposit Auto-Verified'
@@ -1527,9 +1800,15 @@ export class SureDealStoreDO {
           'deposit',
         );
         if (referralPayout) {
-          this.persistKeys('users', 'transactions', 'notifications', 'adminAlerts');
+          this.persistKeys(
+            'users',
+            'transactions',
+            'accountingRecords',
+            'notifications',
+            'adminAlerts',
+          );
         } else {
-          this.persistKeys('users', 'transactions', 'adminAlerts');
+          this.persistKeys('users', 'transactions', 'accountingRecords', 'adminAlerts');
         }
         return okJson(
           {
@@ -1804,6 +2083,96 @@ export class SureDealStoreDO {
             adminAlerts: db.adminAlerts,
             promoCodes: db.promoCodes,
             auditLogs: db.auditLogs,
+            accountingRecords: db.accountingRecords || [],
+            visitorStats: db.visitorStats || { totalVisits: 0, recentSessions: [] },
+          });
+        }
+
+        // --- IMMUTABLE ACCOUNTING LEDGER CONTROLS ---
+        const adminAccDelMatch = pathname.match(/^\/api\/admin\/accounting\/([^/]+)$/);
+        if (method === 'DELETE' && adminAccDelMatch && pathname !== '/api/admin/accounting/clear') {
+          const accId = decodeURIComponent(adminAccDelMatch[1]);
+          const before = (db.accountingRecords || []).length;
+          const target = (db.accountingRecords || []).find((r) => r.id === accId);
+          if (!target) return errJson('Accounting record not found', 404);
+          db.accountingRecords = db.accountingRecords.filter((r) => r.id !== accId);
+          this.logAudit(
+            currentUser.email,
+            'DELETE_ACCOUNTING_RECORD',
+            target.sourceId,
+            `Deleted accounting entry ${target.title} (${before} -> ${db.accountingRecords.length})`,
+          );
+          this.persistKeys('accountingRecords', 'auditLogs');
+          return okJson({ ok: true });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/accounting/clear') {
+          const body = await readJsonBody(request);
+          const scope = String(body.scope || 'all');
+          const current = db.accountingRecords || [];
+          let removed = 0;
+          if (scope === 'order' || scope === 'transaction') {
+            db.accountingRecords = current.filter((r) => {
+              if (r.kind === scope) {
+                removed += 1;
+                return false;
+              }
+              return true;
+            });
+          } else {
+            removed = current.length;
+            db.accountingRecords = [];
+          }
+          this.logAudit(
+            currentUser.email,
+            'CLEAR_ACCOUNTING_ARCHIVE',
+            scope,
+            `Cleared ${removed} immutable accounting record(s) from Accounting Console`,
+          );
+          this.persistKeys('accountingRecords', 'auditLogs');
+          return okJson({ ok: true, removed });
+        }
+
+        // --- SOFT REFRESH WEBSITE ---
+        if (method === 'POST' && pathname === '/api/admin/system/refresh-ops') {
+          const counts = {
+            smsOrders: db.smsOrders.length,
+            boostingOrders: db.boostingOrders.length,
+            vaultItems: db.vaultItems.length,
+            transactions: db.transactions.length,
+          };
+          db.smsOrders = [];
+          db.boostingOrders = [];
+          db.vaultItems = [];
+          db.transactions = [];
+          db.pendingSignups = [];
+          db.smsPool.forEach((p) => {
+            p.used = false;
+            p.assignedOrderId = undefined;
+          });
+          this.logAudit(
+            currentUser.email,
+            'REFRESH_WEBSITE_OPS',
+            'System Reset',
+            `Refreshed live queues (cleared ${counts.transactions} tx, ${counts.smsOrders} sms, ${counts.boostingOrders} boost, ${counts.vaultItems} vault); preserved all users, wallet balances, website settings/logo, products & accounting archive`,
+          );
+          this.persistKeys(
+            'smsOrders',
+            'boostingOrders',
+            'vaultItems',
+            'transactions',
+            'pendingSignups',
+            'smsPool',
+            'auditLogs',
+          );
+          return okJson({
+            ok: true,
+            cleared: counts,
+            preserved: {
+              users: db.users.length,
+              accountingRecords: (db.accountingRecords || []).length,
+              marketplaceListings: db.marketplaceListings.length,
+            },
           });
         }
 
@@ -1910,8 +2279,10 @@ export class SureDealStoreDO {
             target.balance += amount;
             txType = 'admin_credit';
           }
+          const balNow = new Date().toISOString();
+          const balTxId = makeId('tx');
           db.transactions.unshift({
-            id: makeId('tx'),
+            id: balTxId,
             userId: target.id,
             userName: target.name,
             userEmail: target.email,
@@ -1919,7 +2290,20 @@ export class SureDealStoreDO {
             amount: Math.abs(delta),
             status: 'completed',
             description: note,
-            createdAt: new Date().toISOString(),
+            createdAt: balNow,
+          });
+          this.recordAccountingEntry({
+            kind: 'transaction',
+            sourceId: balTxId,
+            category: txType,
+            userId: target.id,
+            userName: target.name,
+            userEmail: target.email,
+            title: txType === 'admin_debit' ? 'ADMIN DEBIT' : 'ADMIN CREDIT',
+            detail: note,
+            amount: Math.abs(delta),
+            status: 'completed',
+            createdAt: balNow,
           });
           this.logAudit(
             currentUser.email,
@@ -1927,7 +2311,7 @@ export class SureDealStoreDO {
             target.email,
             `${note} (${amount})`,
           );
-          this.persistKeys('users', 'transactions', 'auditLogs');
+          this.persistKeys('users', 'transactions', 'accountingRecords', 'auditLogs');
           return okJson({ user: toPublicUser(target) });
         }
 
@@ -1943,8 +2327,9 @@ export class SureDealStoreDO {
           const activeUsers = db.users.filter((u) => u.status === 'active' && u.role !== 'admin');
           for (const u of activeUsers) {
             u.balance += amount;
+            const dropTxId = makeId('tx');
             db.transactions.unshift({
-              id: makeId('tx'),
+              id: dropTxId,
               userId: u.id,
               userName: u.name,
               userEmail: u.email,
@@ -1953,6 +2338,19 @@ export class SureDealStoreDO {
               status: 'completed',
               description: title,
               adminNote: `Overwatch Airdrop by ${db.settings.creatorName || 'Creator'}`,
+              createdAt: now,
+            });
+            this.recordAccountingEntry({
+              kind: 'transaction',
+              sourceId: dropTxId,
+              category: 'admin_credit',
+              userId: u.id,
+              userName: u.name,
+              userEmail: u.email,
+              title: 'CREATOR AIRDROP',
+              detail: title,
+              amount,
+              status: 'completed',
               createdAt: now,
             });
           }
@@ -1975,7 +2373,7 @@ export class SureDealStoreDO {
             `${activeUsers.length} active accounts`,
             `Credited ${db.settings.currencySymbol}${amount.toLocaleString()} each (${title})`,
           );
-          this.persistKeys('users', 'transactions', 'notifications', 'auditLogs');
+          this.persistKeys('users', 'transactions', 'accountingRecords', 'notifications', 'auditLogs');
           return okJson({
             creditedCount: activeUsers.length,
             totalDistributed: activeUsers.length * amount,
@@ -2148,13 +2546,20 @@ export class SureDealStoreDO {
             return errJson('Invalid decision', 400);
           }
 
+          this.syncAccountingStatus(tx.id, tx.status);
           this.logAudit(
             currentUser.email,
             `DEPOSIT_${decision.toUpperCase()}`,
             tx.userEmail,
             `Amount: ${tx.amount}`,
           );
-          this.persistKeys('transactions', 'users', 'notifications', 'auditLogs');
+          this.persistKeys(
+            'transactions',
+            'accountingRecords',
+            'users',
+            'notifications',
+            'auditLogs',
+          );
           return okJson({ transaction: tx });
         }
 
@@ -2186,6 +2591,7 @@ export class SureDealStoreDO {
             }
             tx.status = 'verified';
             tx.adminNote = 'Verified by Our Team';
+            this.syncAccountingStatus(tx.id, 'verified');
             totalCredited += tx.amount;
           }
           if (matched.length > 0) {
@@ -2195,7 +2601,13 @@ export class SureDealStoreDO {
               `${matched.length} receipts`,
               `Total credited: ${totalCredited}`,
             );
-            this.persistKeys('transactions', 'users', 'notifications', 'auditLogs');
+            this.persistKeys(
+              'transactions',
+              'accountingRecords',
+              'users',
+              'notifications',
+              'auditLogs',
+            );
           }
           return okJson({ approvedCount: matched.length, totalCredited });
         }
@@ -2305,8 +2717,10 @@ export class SureDealStoreDO {
               const user = db.users.find((u) => u.id === order.userId);
               if (user) {
                 user.balance += order.amount;
+                const refBoostNow = new Date().toISOString();
+                const refBoostTxId = makeId('tx');
                 db.transactions.unshift({
-                  id: makeId('tx'),
+                  id: refBoostTxId,
                   userId: user.id,
                   userName: user.name,
                   userEmail: user.email,
@@ -2314,18 +2728,32 @@ export class SureDealStoreDO {
                   amount: order.amount,
                   status: 'completed',
                   description: `Refund for cancelled boost order ${order.id}`,
-                  createdAt: new Date().toISOString(),
+                  createdAt: refBoostNow,
+                });
+                this.recordAccountingEntry({
+                  kind: 'transaction',
+                  sourceId: refBoostTxId,
+                  category: 'refund',
+                  userId: user.id,
+                  userName: user.name,
+                  userEmail: user.email,
+                  title: 'BOOST CANCEL REFUND',
+                  detail: `Refund for cancelled boost order ${order.id}`,
+                  amount: order.amount,
+                  status: 'completed',
+                  createdAt: refBoostNow,
                 });
               }
             }
             order.status = nextStatus;
+            this.syncAccountingStatus(order.id, nextStatus);
             if (nextStatus === 'completed') order.remains = 0;
           }
           if (typeof body.remains === 'number') {
             order.remains = Math.max(0, body.remains);
           }
           order.updatedAt = new Date().toISOString();
-          this.persistKeys('boostingOrders', 'users', 'transactions');
+          this.persistKeys('boostingOrders', 'users', 'transactions', 'accountingRecords');
           return okJson({ order });
         }
 
@@ -2923,11 +3351,27 @@ export class SureDealStoreDO {
           const computedStock =
             stockKeys.length > 0 ? stockKeys.length : Math.max(0, Number(body.stock ?? 0));
 
+          const rawCat = String(body.category ?? '').trim();
+          const defaultCat = db.marketplaceCategories[0]?.name || 'General';
+          let resolvedCategory = rawCat || defaultCat;
+          const existingCat = db.marketplaceCategories.find(
+            (c) => c.name.trim().toLowerCase() === resolvedCategory.toLowerCase(),
+          );
+          if (existingCat) {
+            resolvedCategory = existingCat.name;
+          } else if (resolvedCategory) {
+            db.marketplaceCategories.push({
+              id: makeId('cat'),
+              name: resolvedCategory,
+              description: `${resolvedCategory} digital products`,
+            });
+          }
+
           const listing: MarketplaceListing = {
             id: makeId('mkt'),
             title: String(body.title || 'New Digital Asset').trim(),
-            category: String(body.category || 'Proxies').trim(),
-            popularTag: String(body.popularTag || 'Proxy').trim(),
+            category: resolvedCategory,
+            popularTag: String(body.popularTag || resolvedCategory).trim(),
             shortSpec: String(body.shortSpec || 'Instant digital delivery').trim(),
             description: String(body.description || '').trim(),
             buyWarning: String(body.buyWarning || db.settings.defaultBuyWarning).trim(),
@@ -2955,9 +3399,9 @@ export class SureDealStoreDO {
             currentUser.email,
             'CREATE_LISTING',
             listing.title,
-            `Price: ${listing.price}, Accounts: ${stockKeys.length}`,
+            `Category: ${listing.category}, Price: ${listing.price}, Accounts: ${stockKeys.length}`,
           );
-          this.persistKeys('marketplaceListings', 'auditLogs');
+          this.persistKeys('marketplaceListings', 'marketplaceCategories', 'auditLogs');
           return okJson({ listing }, 201);
         }
 
@@ -2989,9 +3433,26 @@ export class SureDealStoreDO {
               : typeof body.stock === 'number' && Number.isFinite(body.stock)
                 ? Math.max(0, Math.floor(body.stock))
                 : item.stock;
+          let nextCategory = item.category;
+          if (typeof body.category === 'string' && body.category.trim()) {
+            const trimmed = body.category.trim();
+            const matched = db.marketplaceCategories.find(
+              (c) => c.name.trim().toLowerCase() === trimmed.toLowerCase(),
+            );
+            if (matched) {
+              nextCategory = matched.name;
+            } else {
+              nextCategory = trimmed;
+              db.marketplaceCategories.push({
+                id: makeId('cat'),
+                name: trimmed,
+                description: `${trimmed} digital products`,
+              });
+            }
+          }
           Object.assign(item, {
             title: typeof body.title === 'string' ? body.title : item.title,
-            category: typeof body.category === 'string' ? body.category : item.category,
+            category: nextCategory,
             popularTag: typeof body.popularTag === 'string' ? body.popularTag : item.popularTag,
             shortSpec: typeof body.shortSpec === 'string' ? body.shortSpec : item.shortSpec,
             description: typeof body.description === 'string' ? body.description : item.description,
@@ -3020,9 +3481,9 @@ export class SureDealStoreDO {
             currentUser.email,
             'UPDATE_LISTING',
             item.title,
-            `Price: ${item.price}, Stock: ${item.stock}`,
+            `Category: ${item.category}, Price: ${item.price}, Stock: ${item.stock}`,
           );
-          this.persistKeys('marketplaceListings', 'auditLogs');
+          this.persistKeys('marketplaceListings', 'marketplaceCategories', 'auditLogs');
           return okJson({ listing: item });
         }
 
@@ -3661,7 +4122,41 @@ export class SureDealStoreDO {
           if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
           if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
 
+          if (typeof body.dashboardNoticeEnabled === 'boolean') {
+            s.dashboardNoticeEnabled = body.dashboardNoticeEnabled;
+          }
+          if (typeof body.dashboardNoticeText === 'string') {
+            s.dashboardNoticeText = body.dashboardNoticeText.trim();
+          }
+          if (
+            body.dashboardNoticeTone === 'amber' ||
+            body.dashboardNoticeTone === 'info' ||
+            body.dashboardNoticeTone === 'emerald' ||
+            body.dashboardNoticeTone === 'rose'
+          ) {
+            s.dashboardNoticeTone = body.dashboardNoticeTone;
+          }
+          if (typeof body.dashboardWalletBadge === 'string') {
+            s.dashboardWalletBadge = body.dashboardWalletBadge.trim();
+          }
+          if (typeof body.dashboardWalletTitle === 'string') {
+            s.dashboardWalletTitle = body.dashboardWalletTitle.trim();
+          }
+          if (typeof body.dashboardWalletSubtitle === 'string') {
+            s.dashboardWalletSubtitle = body.dashboardWalletSubtitle.trim();
+          }
+          if (typeof body.dashboardBalanceLabel === 'string') {
+            s.dashboardBalanceLabel = body.dashboardBalanceLabel.trim();
+          }
+          if (typeof body.dashboardFundButtonLabel === 'string') {
+            s.dashboardFundButtonLabel = body.dashboardFundButtonLabel.trim();
+          }
+          if (typeof body.dashboardHistoryButtonLabel === 'string') {
+            s.dashboardHistoryButtonLabel = body.dashboardHistoryButtonLabel.trim();
+          }
+
           s.brandMigratedV2 = true;
+          s.brandMigratedV3 = true;
           this.logAudit(
             currentUser.email,
             'UPDATE_SETTINGS',

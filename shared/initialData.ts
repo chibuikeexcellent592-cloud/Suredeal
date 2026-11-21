@@ -23,7 +23,7 @@ export function createInitialDatabaseState(
 
   return {
     settings: {
-      siteName: 'Ultimate Tech App',
+      siteName: 'SureDeal Store',
       siteTagline: 'Digital solutions for every market',
       siteLogoUrl: '',
       currencyCode: 'NGN',
@@ -31,7 +31,7 @@ export function createInitialDatabaseState(
       announcementBanner: '',
       pinnedTickerEnabled: true,
       pinnedTickerText:
-        'Welcome to Ultimate Tech App — Instant Moniepoint Funding (7031537390), Verified Proxies, Social Boosting & Virtual SMS Numbers Active 24/7.',
+        'Welcome to SureDeal Store — Instant Moniepoint Funding (7031537390), Verified Proxies, Social Boosting & Virtual SMS Numbers Active 24/7.',
       pinnedTickerTheme: 'blue',
       brandColor: '#2563EB',
       accentColor: '#0EA5E9',
@@ -44,13 +44,25 @@ export function createInitialDatabaseState(
       showFloatingWhatsapp: true,
       communityChannelEnabled: true,
       communityChannelPlatform: 'whatsapp',
-      communityChannelTitle: 'Ultimate Tech App News',
+      communityChannelTitle: 'SureDeal Store News',
       communityChannelSubtitle: 'Get exclusive updates & drops',
       communityChannelUrl: 'https://wa.me/2347031537390',
       communityChannelCta: 'Join WhatsApp',
       creatorName: 'Excellent',
       creatorUrl: '',
       brandMigratedV2: true,
+      brandMigratedV3: true,
+      dashboardNoticeEnabled: true,
+      dashboardNoticeText:
+        'This platform provides digital tools for legitimate use only. Users are responsible.',
+      dashboardNoticeTone: 'amber',
+      dashboardWalletBadge: '',
+      dashboardWalletTitle: 'Dashboard Overview, {{NAME}}',
+      dashboardWalletSubtitle:
+        'Rent virtual SMS numbers, launch social campaigns, and manage your digital Vault.',
+      dashboardBalanceLabel: 'Account Balance',
+      dashboardFundButtonLabel: 'Add Funds',
+      dashboardHistoryButtonLabel: 'History',
       allowNewSignups: true,
       enableSmsService: true,
       enableBoostingService: true,
@@ -508,10 +520,15 @@ export function createInitialDatabaseState(
     vaultItems: [],
     customSections: [],
     transactions: [],
+    accountingRecords: [],
+    visitorStats: {
+      totalVisits: 0,
+      recentSessions: [],
+    },
     notifications: [
       {
         id: 'ntf_welcome',
-        title: 'Welcome to Ultimate Tech App',
+        title: 'Welcome to SureDeal Store',
         message:
           'Fund your wallet via Moniepoint (7031537390 · UCHECHI BLESSING OJI) and upload your receipt for rapid verification.',
         type: 'info',
@@ -530,7 +547,7 @@ export function createInitialDatabaseState(
         summary:
           'Step-by-step guide to transferring Naira (₦) to Moniepoint 7031537390 and uploading your receipt for automated AI inspection.',
         content:
-          '1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in Ultimate Tech App and click Submit Deposit.',
+          '1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in SureDeal Store and click Submit Deposit.',
         videoUrl: '',
         createdAt: now,
       },
@@ -579,46 +596,114 @@ export function mergeParsedDatabaseState(
       }
     }
   }
-  if (!parsed.settings?.brandMigratedV2) {
-    if (mergedSettings.siteName === 'SureDeal Store') {
-      mergedSettings.siteName = 'Ultimate Tech App';
+  if (!parsed.settings?.brandMigratedV3) {
+    if (!mergedSettings.siteName || mergedSettings.siteName === 'Ultimate Tech App') {
+      mergedSettings.siteName = 'SureDeal Store';
     }
-    if (!mergedSettings.siteTagline || mergedSettings.siteTagline === 'Trusted Digital Tools') {
-      mergedSettings.siteTagline = 'Digital solutions for every market';
-    }
-    if (mergedSettings.pinnedTickerText?.includes('Welcome to SureDeal Store')) {
+    if (mergedSettings.pinnedTickerText?.includes('Ultimate Tech App')) {
       mergedSettings.pinnedTickerText = mergedSettings.pinnedTickerText.replace(
-        'Welcome to SureDeal Store',
-        'Welcome to Ultimate Tech App',
+        /Ultimate Tech App/g,
+        'SureDeal Store',
       );
     }
-    if (
-      !mergedSettings.communityChannelTitle ||
-      mergedSettings.communityChannelTitle === 'Join WhatsApp' ||
-      mergedSettings.communityChannelTitle === 'Join Our Community'
-    ) {
-      mergedSettings.communityChannelTitle = 'Ultimate Tech App News';
-    }
-    if (
-      !mergedSettings.communityChannelSubtitle ||
-      mergedSettings.communityChannelSubtitle === 'Get latest updates & drops' ||
-      mergedSettings.communityChannelSubtitle === 'Get restock alerts & flash deals'
-    ) {
-      mergedSettings.communityChannelSubtitle = 'Get exclusive updates & drops';
-    }
-    if (
-      !mergedSettings.communityChannelCta ||
-      mergedSettings.communityChannelCta === 'Join' ||
-      mergedSettings.communityChannelCta === 'Join Channel'
-    ) {
-      mergedSettings.communityChannelCta = 'Join WhatsApp';
+    if (mergedSettings.communityChannelTitle === 'Ultimate Tech App News') {
+      mergedSettings.communityChannelTitle = 'SureDeal Store News';
     }
     mergedSettings.brandMigratedV2 = true;
+    mergedSettings.brandMigratedV3 = true;
   }
+
+  const users = parsed.users ?? defaults.users;
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const transactions = parsed.transactions ?? defaults.transactions;
+  const smsOrders = parsed.smsOrders ?? defaults.smsOrders;
+  const boostingOrders = parsed.boostingOrders ?? defaults.boostingOrders;
+  const vaultItems = parsed.vaultItems ?? defaults.vaultItems;
+
+  // Backfill immutable accounting archive once if upgrading from a store without accountingRecords
+  let accountingRecords = Array.isArray(parsed.accountingRecords) ? parsed.accountingRecords : [];
+  if (
+    accountingRecords.length === 0 &&
+    (transactions.length > 0 || smsOrders.length > 0 || boostingOrders.length > 0 || vaultItems.length > 0)
+  ) {
+    const backfilled: DatabaseState['accountingRecords'] = [];
+    for (const t of transactions) {
+      backfilled.push({
+        id: `acc_${t.id}`,
+        kind: 'transaction',
+        sourceId: t.id,
+        category: t.type,
+        userId: t.userId,
+        userName: t.userName,
+        userEmail: t.userEmail,
+        title: `${t.type.replace(/_/g, ' ').toUpperCase()}`,
+        detail: t.description,
+        amount: t.amount,
+        status: t.status,
+        createdAt: t.createdAt,
+      });
+    }
+    for (const v of vaultItems) {
+      const buyer = userById.get(v.userId);
+      backfilled.push({
+        id: `acc_${v.id}`,
+        kind: 'order',
+        sourceId: v.id,
+        category: v.sourceType === 'section' ? 'Custom Section' : 'Marketplace',
+        userId: v.userId,
+        userName: v.buyerName || buyer?.name || 'User',
+        userEmail: v.buyerEmail || buyer?.email || 'Unknown user',
+        title: v.title,
+        detail: `${v.category} · ${v.deliveryType}`,
+        amount: v.price,
+        status: 'delivered',
+        createdAt: v.createdAt,
+      });
+    }
+    for (const s of smsOrders) {
+      const u = userById.get(s.userId);
+      backfilled.push({
+        id: `acc_${s.id}`,
+        kind: 'order',
+        sourceId: s.id,
+        category: 'SMS Verification',
+        userId: s.userId,
+        userName: u?.name || s.userEmail,
+        userEmail: s.userEmail,
+        title: `${s.serviceName} (${s.countryName})`,
+        detail: `Number: ${s.phoneNumber}${s.otpCode ? ` · OTP: ${s.otpCode}` : ''}`,
+        amount: s.price,
+        status: s.status,
+        createdAt: s.createdAt,
+      });
+    }
+    for (const b of boostingOrders) {
+      const u = userById.get(b.userId);
+      backfilled.push({
+        id: `acc_${b.id}`,
+        kind: 'order',
+        sourceId: b.id,
+        category: 'Social Boosting',
+        userId: b.userId,
+        userName: u?.name || b.userEmail,
+        userEmail: b.userEmail,
+        title: `${b.platform} · ${b.serviceName}`,
+        detail: `Qty: ${b.quantity.toLocaleString()} · Link: ${b.targetUrl}`,
+        amount: b.amount,
+        status: b.status,
+        createdAt: b.createdAt,
+      });
+    }
+    backfilled.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    accountingRecords = backfilled;
+  }
+
   return {
     ...defaults,
     ...parsed,
     settings: mergedSettings,
+    accountingRecords,
+    visitorStats: parsed.visitorStats ?? defaults.visitorStats,
     marketplaceListings: (parsed.marketplaceListings ?? defaults.marketplaceListings).map((l) => ({
       ...l,
       buyWarning: l.buyWarning ?? defaults.settings.defaultBuyWarning,

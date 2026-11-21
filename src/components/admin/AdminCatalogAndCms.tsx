@@ -91,9 +91,21 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   // Create Marketplace Listing state
   const [mktTitle, setMktTitle] = useState('');
   const [mktCategory, setMktCategory] = useState(
-    data.marketplaceCategories[0]?.name || 'Proxies',
+    data.marketplaceCategories[0]?.name || 'Facebook',
   );
+  const [useCustomMktCat, setUseCustomMktCat] = useState(false);
   const [mktPopularTag, setMktPopularTag] = useState('Proxy');
+
+  // Keep selected category synced with live Marketplace Categories list so browser <select> never desyncs
+  useEffect(() => {
+    if (useCustomMktCat) return;
+    if (
+      data.marketplaceCategories.length > 0 &&
+      !data.marketplaceCategories.some((c) => c.name === mktCategory)
+    ) {
+      setMktCategory(data.marketplaceCategories[0].name);
+    }
+  }, [data.marketplaceCategories, mktCategory, useCustomMktCat]);
   const [mktPrice, setMktPrice] = useState(3500);
   const [mktStock, setMktStock] = useState(25);
   const [mktSpec, setMktSpec] = useState('');
@@ -119,6 +131,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
 
   // Full Product Edit Modal state
   const [editingListing, setEditingListing] = useState<MarketplaceListing | null>(null);
+  const [useCustomEditCat, setUseCustomEditCat] = useState(false);
   const [editFeaturesText, setEditFeaturesText] = useState('');
   const [editStockKeys, setEditStockKeys] = useState<string[]>([]);
   const [editBulkText, setEditBulkText] = useState('');
@@ -326,6 +339,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
 
   const openEditModal = (item: MarketplaceListing) => {
     setEditingListing({ ...item });
+    setUseCustomEditCat(false);
     setEditFeaturesText((item.features || []).join('\n'));
     setEditStockKeys([...(item.stockKeys || [])]);
     setEditBulkText('');
@@ -516,25 +530,67 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 placeholder="Product Title (e.g. Aged Instagram Account)"
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={mktCategory}
-                  onChange={(e) => setMktCategory(e.target.value)}
-                  className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                >
-                  {data.marketplaceCategories.map((c) => (
-                    <option key={c.id} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  value={mktPopularTag}
-                  onChange={(e) => setMktPopularTag(e.target.value)}
-                  placeholder="Popular Filter Tag (VPN, Proxy, Facebook)"
-                  className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400">
+                      Category
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (useCustomMktCat) {
+                          setUseCustomMktCat(false);
+                          setMktCategory(data.marketplaceCategories[0]?.name || 'Facebook');
+                        } else {
+                          setUseCustomMktCat(true);
+                          setMktCategory('');
+                        }
+                      }}
+                      className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                    >
+                      {useCustomMktCat ? 'Pick Existing' : '+ Custom Category'}
+                    </button>
+                  </div>
+                  {useCustomMktCat ? (
+                    <input
+                      type="text"
+                      required
+                      value={mktCategory}
+                      onChange={(e) => setMktCategory(e.target.value)}
+                      placeholder="Type category (e.g. Facebook)"
+                      className="w-full px-2.5 py-2 text-xs rounded-xl border border-blue-300 dark:border-blue-700 bg-slate-50 dark:bg-slate-950"
+                    />
+                  ) : (
+                    <select
+                      value={mktCategory}
+                      onChange={(e) => setMktCategory(e.target.value)}
+                      className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                    >
+                      {!data.marketplaceCategories.some((c) => c.name === mktCategory) &&
+                        mktCategory && (
+                          <option value={mktCategory}>{mktCategory}</option>
+                        )}
+                      {data.marketplaceCategories.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <span className="block text-[10px] font-bold uppercase text-slate-400">
+                    Popular Chip Tag
+                  </span>
+                  <input
+                    type="text"
+                    value={mktPopularTag}
+                    onChange={(e) => setMktPopularTag(e.target.value)}
+                    placeholder="Popular Filter Tag (VPN, Proxy, Facebook)"
+                    className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input
@@ -1357,22 +1413,52 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                  Category
-                </label>
-                <select
-                  value={editingListing.category}
-                  onChange={(e) =>
-                    setEditingListing({ ...editingListing, category: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                >
-                  {data.marketplaceCategories.map((c) => (
-                    <option key={c.id} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500">
+                    Category
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setUseCustomEditCat((prev) => !prev)}
+                    className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                  >
+                    {useCustomEditCat ? 'Choose From List' : '+ Type New Category'}
+                  </button>
+                </div>
+                {useCustomEditCat ? (
+                  <input
+                    type="text"
+                    required
+                    value={editingListing.category}
+                    onChange={(e) =>
+                      setEditingListing({ ...editingListing, category: e.target.value })
+                    }
+                    placeholder="e.g. Facebook"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-blue-300 dark:border-blue-700 bg-slate-50 dark:bg-slate-950"
+                  />
+                ) : (
+                  <select
+                    value={editingListing.category}
+                    onChange={(e) =>
+                      setEditingListing({ ...editingListing, category: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                  >
+                    {!data.marketplaceCategories.some(
+                      (c) => c.name === editingListing.category,
+                    ) &&
+                      editingListing.category && (
+                        <option value={editingListing.category}>
+                          {editingListing.category}
+                        </option>
+                      )}
+                    {data.marketplaceCategories.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
@@ -3929,6 +4015,17 @@ export function AdminCommsAndSettingsPanel({
     communityChannelUrl: s.communityChannelUrl ?? '',
     communityChannelCta: s.communityChannelCta ?? 'Join Channel',
     defaultBuyWarningLevel: s.defaultBuyWarningLevel ?? 'serious',
+    dashboardNoticeEnabled: s.dashboardNoticeEnabled ?? true,
+    dashboardNoticeText:
+      s.dashboardNoticeText ??
+      'This platform provides digital tools for legitimate use only. Users are responsible.',
+    dashboardNoticeTone: s.dashboardNoticeTone ?? 'amber',
+    dashboardWalletBadge: s.dashboardWalletBadge ?? '',
+    dashboardWalletTitle: s.dashboardWalletTitle ?? 'Dashboard Overview, {{NAME}} 👋',
+    dashboardWalletSubtitle: s.dashboardWalletSubtitle ?? '',
+    dashboardBalanceLabel: s.dashboardBalanceLabel ?? 'Account Balance',
+    dashboardFundButtonLabel: s.dashboardFundButtonLabel ?? 'Add Funds',
+    dashboardHistoryButtonLabel: s.dashboardHistoryButtonLabel ?? 'History',
   });
 
   // Global Settings + CMS state
@@ -3936,6 +4033,8 @@ export function AdminCommsAndSettingsPanel({
     hydrateSettings(data.settings),
   );
   const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [confirmRefreshOps, setConfirmRefreshOps] = useState(false);
+  const [refreshingOps, setRefreshingOps] = useState(false);
 
   useEffect(() => {
     setFormSettings(hydrateSettings(data.settings));
@@ -5572,6 +5671,153 @@ export function AdminCommsAndSettingsPanel({
           )}
         </div>
 
+        {/* User Dashboard Notice Box & Wallet Hero Card Editor */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <div>
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                  User Dashboard Notice Box &amp; Wallet Card Editor
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Customize the disclaimer/notice banner shown at the top of the user dashboard plus the blue Wallet Hero Card headings &amp; button labels.
+                </p>
+              </div>
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formSettings.dashboardNoticeEnabled ?? true}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardNoticeEnabled: e.target.checked })
+                }
+              />
+              {formSettings.dashboardNoticeEnabled ?? true ? 'Notice Box Visible' : 'Notice Hidden'}
+            </label>
+          </div>
+
+          {(formSettings.dashboardNoticeEnabled ?? true) && (
+            <div className="p-3.5 rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 flex items-start gap-3">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-200 leading-relaxed">
+                {formSettings.dashboardNoticeText ||
+                  'This platform provides digital tools for legitimate use only. Users are responsible.'}
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold mb-1">Dashboard Top Notice Text</label>
+              <textarea
+                rows={2}
+                value={formSettings.dashboardNoticeText || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardNoticeText: e.target.value })
+                }
+                placeholder="This platform provides digital tools for legitimate use only. Users are responsible."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Notice Banner Colour Tone</label>
+              <select
+                value={formSettings.dashboardNoticeTone || 'amber'}
+                onChange={(e) =>
+                  setFormSettings({
+                    ...formSettings,
+                    dashboardNoticeTone: e.target.value as 'amber' | 'info' | 'emerald' | 'rose',
+                  })
+                }
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              >
+                <option value="amber">Amber Warning (Recommended)</option>
+                <option value="info">Blue Information</option>
+                <option value="emerald">Emerald Success / Safe</option>
+                <option value="rose">Rose Urgent Alert</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div>
+              <label className="block text-xs font-semibold mb-1">
+                Dashboard Greeting / Title (<code className="font-mono">{'{{NAME}}'}</code>)
+              </label>
+              <input
+                type="text"
+                value={formSettings.dashboardWalletTitle || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardWalletTitle: e.target.value })
+                }
+                placeholder="Dashboard Overview, {{NAME}} 👋"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Wallet Card Subtitle (Optional)</label>
+              <input
+                type="text"
+                value={formSettings.dashboardWalletSubtitle || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardWalletSubtitle: e.target.value })
+                }
+                placeholder="Manage your funds & digital orders"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Wallet Card Top Badge (Optional)</label>
+              <input
+                type="text"
+                value={formSettings.dashboardWalletBadge || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardWalletBadge: e.target.value })
+                }
+                placeholder="e.g. Verified Wallet · Instant Sync"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Balance Heading Label</label>
+              <input
+                type="text"
+                value={formSettings.dashboardBalanceLabel || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardBalanceLabel: e.target.value })
+                }
+                placeholder="Account Balance"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Add Funds Button Label</label>
+              <input
+                type="text"
+                value={formSettings.dashboardFundButtonLabel || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardFundButtonLabel: e.target.value })
+                }
+                placeholder="Add Funds"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">History Button Label</label>
+              <input
+                type="text"
+                value={formSettings.dashboardHistoryButtonLabel || ''}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, dashboardHistoryButtonLabel: e.target.value })
+                }
+                placeholder="History"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+          </div>
+        </div>
+
         <button
           type="submit"
           className="px-6 py-3 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm cursor-pointer"
@@ -6193,6 +6439,143 @@ export function AdminCommsAndSettingsPanel({
         </div>
       </div>
 
+      {/* User Dashboard Notice Box & Wallet Card Text Customizer */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <div>
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Dashboard Notice Box &amp; Wallet Card Editor
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Edit the disclaimer banner shown at the top of User Dashboard and customize every text label on the blue Wallet card.
+              </p>
+            </div>
+          </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formSettings.dashboardNoticeEnabled ?? true}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardNoticeEnabled: e.target.checked })
+              }
+            />
+            {formSettings.dashboardNoticeEnabled ?? true ? 'Notice Visible' : 'Hidden'}
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-semibold mb-1">Dashboard Notice Banner Text</label>
+            <textarea
+              rows={2}
+              value={formSettings.dashboardNoticeText || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardNoticeText: e.target.value })
+              }
+              placeholder="This platform provides digital tools for legitimate use only. Users are responsible."
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Notice Colour Tone</label>
+            <select
+              value={formSettings.dashboardNoticeTone || 'amber'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  dashboardNoticeTone: e.target.value as 'amber' | 'info' | 'emerald' | 'rose',
+                })
+              }
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="amber">Amber (Warning)</option>
+              <option value="info">Blue (Info)</option>
+              <option value="emerald">Emerald (Safe)</option>
+              <option value="rose">Rose (Urgent)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">
+              Dashboard Title (<code className="font-mono">{'{{NAME}}'}</code>)
+            </label>
+            <input
+              type="text"
+              value={formSettings.dashboardWalletTitle || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardWalletTitle: e.target.value })
+              }
+              placeholder="Dashboard Overview, {{NAME}} 👋"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Wallet Card Subtitle</label>
+            <input
+              type="text"
+              value={formSettings.dashboardWalletSubtitle || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardWalletSubtitle: e.target.value })
+              }
+              placeholder="Optional helper text inside blue wallet card"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Wallet Top Badge</label>
+            <input
+              type="text"
+              value={formSettings.dashboardWalletBadge || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardWalletBadge: e.target.value })
+              }
+              placeholder="Optional pill badge inside wallet card"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Balance Label</label>
+            <input
+              type="text"
+              value={formSettings.dashboardBalanceLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardBalanceLabel: e.target.value })
+              }
+              placeholder="Account Balance"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Fund Wallet Button Text</label>
+            <input
+              type="text"
+              value={formSettings.dashboardFundButtonLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardFundButtonLabel: e.target.value })
+              }
+              placeholder="Add Funds"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">History Button Text</label>
+            <input
+              type="text"
+              value={formSettings.dashboardHistoryButtonLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, dashboardHistoryButtonLabel: e.target.value })
+              }
+              placeholder="History"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Funding Bank Account, Thresholds & Alert Routing */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
         <div className="flex items-center gap-2">
@@ -6301,6 +6684,66 @@ export function AdminCommsAndSettingsPanel({
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             />
           </div>
+        </div>
+      </div>
+
+      {/* Refresh Website (Safe Operational Reset) */}
+      <div className="bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 rounded-2xl p-6 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-sm font-bold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              Refresh Website (Reset Live Queues Safely)
+            </h3>
+            <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-1 leading-relaxed">
+              Clears dashboard live queues (Wallet Transaction feed, SMS orders, Boosting orders &amp; Vault logs) while{' '}
+              <strong>strictly preserving</strong> every user account, wallet balance, website logo/settings, all catalog products, and the immutable Accounting Archive.
+            </p>
+          </div>
+          {confirmRefreshOps ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={refreshingOps}
+                onClick={async () => {
+                  setRefreshingOps(true);
+                  try {
+                    await apiFetch('/api/admin/system/refresh-ops', { method: 'POST' });
+                    setConfirmRefreshOps(false);
+                    notify(
+                      'Website queues refreshed! Users, balances, logo, products & Accounting Archive preserved.',
+                      'success',
+                    );
+                    await onRefresh();
+                    await refreshCatalog();
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : 'Refresh failed', 'error');
+                  } finally {
+                    setRefreshingOps(false);
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl cursor-pointer disabled:opacity-60"
+              >
+                {refreshingOps ? 'Refreshing...' : 'Confirm Refresh Website'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmRefreshOps(false)}
+                className="px-3 py-2 text-xs font-semibold rounded-xl border border-amber-300 dark:border-amber-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmRefreshOps(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl cursor-pointer shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Refresh Website Queues
+            </button>
+          )}
         </div>
       </div>
 
