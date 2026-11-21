@@ -103,8 +103,11 @@ interface FullAdminOverview extends AdminOverviewPayload {
 
 const OVERWATCH_CACHE_KEY = 'sd_overwatch_cache_v1';
 
-function stripHeavyMedia<T>(value: T): T {
+function stripHeavyMedia<T>(value: T, fieldKey?: string): T {
   if (typeof value === 'string') {
+    if (fieldKey === 'siteLogoUrl') {
+      return (value.length > 500_000 ? '' : value) as unknown as T;
+    }
     if (value.startsWith('data:image/') || value.startsWith('data:video/') || value.length > 2000) {
       return '' as unknown as T;
     }
@@ -116,7 +119,7 @@ function stripHeavyMedia<T>(value: T): T {
   if (value && typeof value === 'object') {
     const copy: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      copy[k] = stripHeavyMedia(v);
+      copy[k] = stripHeavyMedia(v, k);
     }
     return copy as T;
   }
@@ -758,30 +761,12 @@ export function AdminDashboard({
             onClick={() => selectTab('overview')}
             className="flex items-center gap-3 text-left min-w-0 cursor-pointer"
           >
-            {data.settings.siteLogoUrl ? (
-              <BrandLogo
-                logoUrl={data.settings.siteLogoUrl}
-                siteName={siteName}
-                size="md"
-                shape="rounded"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-blue-500/20">
-                <svg
-                  viewBox="0 0 24 24"
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.1"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M12 3l7 4v5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V7l7-4z" />
-                  <path d="M9.5 12.2l1.8 1.8 3.4-3.6" />
-                </svg>
-              </div>
-            )}
+            <BrandLogo
+              logoUrl={data.settings.siteLogoUrl}
+              siteName={siteName}
+              size="md"
+              shape="rounded"
+            />
             <div className="min-w-0">
               <p className="font-display text-base font-extrabold text-slate-900 dark:text-white leading-tight truncate flex items-center gap-1.5">
                 Overwatch

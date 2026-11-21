@@ -219,3 +219,29 @@ export function applyCachedPalette(): void {
     // ignore cache errors
   }
 }
+
+const SITE_LOGO_CACHE_KEY = 'suredeal_site_logo_cache';
+
+export function getCachedSiteLogo(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.localStorage.getItem(SITE_LOGO_CACHE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setCachedSiteLogo(logoUrl: string | undefined | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const clean = (logoUrl || '').trim();
+    if (clean) {
+      window.localStorage.setItem(SITE_LOGO_CACHE_KEY, clean);
+    } else {
+      window.localStorage.removeItem(SITE_LOGO_CACHE_KEY);
+    }
+  } catch {
+    // ignore storage quota errors safely
+  }
+}
+

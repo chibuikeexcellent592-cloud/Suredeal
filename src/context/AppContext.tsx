@@ -1,6 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ApiError, apiFetch, getStoredToken, setStoredToken } from '../lib/api';
-import { applyCachedPalette, applyWebsitePalette } from '../lib/themeColor';
+import {
+  applyCachedPalette,
+  applyWebsitePalette,
+  setCachedSiteLogo,
+} from '../lib/themeColor';
 import type { PublicCatalogResponse, PublicUser } from '../types';
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -106,6 +110,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (data && typeof data === 'object' && data.settings && typeof data.settings === 'object') {
         setCatalog(data);
         applyWebsitePalette(data.settings);
+        setCachedSiteLogo(data.settings.siteLogoUrl || '');
       }
     } catch (err) {
       console.error('Failed to load catalog:', err);
@@ -147,9 +152,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         maintenanceHeadline: string;
         maintenanceMessage: string;
         siteName?: string;
+        siteLogoUrl?: string;
         supportEmail?: string;
         supportWhatsapp?: string;
       }>('/api/public/maintenance-status');
+
+      if (typeof status.siteLogoUrl === 'string') {
+        setCachedSiteLogo(status.siteLogoUrl);
+      }
 
       setCatalog((prev) =>
         prev
@@ -157,6 +167,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               ...prev,
               settings: {
                 ...prev.settings,
+                siteName: status.siteName ?? prev.settings.siteName,
+                siteLogoUrl:
+                  typeof status.siteLogoUrl === 'string'
+                    ? status.siteLogoUrl
+                    : prev.settings.siteLogoUrl,
                 maintenanceMode: Boolean(status.maintenanceMode),
                 maintenanceHeadline:
                   status.maintenanceHeadline ?? prev.settings.maintenanceHeadline,

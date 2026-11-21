@@ -8,6 +8,7 @@ import { ToastContainer } from './components/ToastContainer';
 import { WorkspaceLayout } from './components/WorkspaceLayout';
 import { AppProvider, useApp } from './context/AppContext';
 import { resolveApiUrl } from './lib/api';
+import { getCachedSiteLogo } from './lib/themeColor';
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -61,6 +62,25 @@ function AppRouter() {
     const tag = catalog?.settings?.siteTagline || 'Digital solutions for every market';
     document.title = `${name} — ${tag}`;
   }, [catalog?.settings?.siteName, catalog?.settings?.siteTagline]);
+
+  useEffect(() => {
+    const rawLogo =
+      catalog?.settings?.siteLogoUrl !== undefined
+        ? catalog.settings.siteLogoUrl.trim()
+        : getCachedSiteLogo().trim();
+    const existing = document.getElementById('dynamic-site-favicon') as HTMLLinkElement | null;
+    if (rawLogo) {
+      const link = existing || document.createElement('link');
+      link.id = 'dynamic-site-favicon';
+      link.rel = 'icon';
+      link.href = resolveApiUrl(rawLogo);
+      if (!existing) {
+        document.head.appendChild(link);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  }, [catalog?.settings?.siteLogoUrl]);
 
   useEffect(() => {
     try {

@@ -44,7 +44,12 @@ import {
   parseAccountCredential,
   resolveApiUrl,
 } from '../../lib/api';
-import { applyWebsitePalette, COLOR_PRESETS, DEFAULT_PALETTE } from '../../lib/themeColor';
+import {
+  applyWebsitePalette,
+  COLOR_PRESETS,
+  DEFAULT_PALETTE,
+  setCachedSiteLogo,
+} from '../../lib/themeColor';
 import type {
   BoostingService,
   CustomSection,
@@ -4033,6 +4038,7 @@ export function AdminCommsAndSettingsPanel({
     hydrateSettings(data.settings),
   );
   const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [savingLogo, setSavingLogo] = useState(false);
   const [confirmRefreshOps, setConfirmRefreshOps] = useState(false);
   const [refreshingOps, setRefreshingOps] = useState(false);
 
@@ -4043,16 +4049,92 @@ export function AdminCommsAndSettingsPanel({
   const saveGlobalSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const trimmedLogo = (formSettings.siteLogoUrl || '').trim();
+      const payload: Record<string, unknown> = { ...formSettings };
+      if (!trimmedLogo) {
+        delete payload.siteLogoUrl;
+      } else {
+        payload.siteLogoUrl = trimmedLogo;
+      }
       await apiFetch('/api/admin/settings', {
         method: 'PATCH',
-        body: JSON.stringify(formSettings),
+        body: JSON.stringify(payload),
       });
       applyWebsitePalette(formSettings);
+      if (trimmedLogo) {
+        setCachedSiteLogo(trimmedLogo);
+      }
       notify('Overwatch settings, website colours & customizations saved permanently!', 'success');
       await onRefresh();
       await refreshCatalog();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to save settings', 'error');
+    }
+  };
+
+  const handleUploadSiteLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      notify('Logo image must be under 4MB.', 'error');
+      return;
+    }
+    setSavingLogo(true);
+    try {
+      const url = await fileToDataUrl(file);
+      setFormSettings((prev) => ({ ...prev, siteLogoUrl: url }));
+      setCachedSiteLogo(url);
+      await apiFetch('/api/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ siteLogoUrl: url }),
+      });
+      await Promise.all([onRefresh(), refreshCatalog()]);
+      notify('Website logo uploaded and saved permanently!', 'success');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to upload logo', 'error');
+    } finally {
+      setSavingLogo(false);
+    }
+  };
+
+  const handleSaveSiteLogoUrl = async () => {
+    const trimmed = (formSettings.siteLogoUrl || '').trim();
+    if (!trimmed) {
+      notify('Paste a logo URL or upload an image file first.', 'info');
+      return;
+    }
+    setSavingLogo(true);
+    try {
+      setCachedSiteLogo(trimmed);
+      await apiFetch('/api/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ siteLogoUrl: trimmed }),
+      });
+      await Promise.all([onRefresh(), refreshCatalog()]);
+      notify('Website logo saved permanently!', 'success');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to save logo URL', 'error');
+    } finally {
+      setSavingLogo(false);
+    }
+  };
+
+  const handleClearSiteLogo = async () => {
+    setSavingLogo(true);
+    try {
+      setFormSettings((prev) => ({ ...prev, siteLogoUrl: '' }));
+      setCachedSiteLogo('');
+      await apiFetch('/api/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ siteLogoUrl: '', clearSiteLogo: true }),
+      });
+      await Promise.all([onRefresh(), refreshCatalog()]);
+      notify('Website logo removed.', 'info');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to remove logo', 'error');
+    } finally {
+      setSavingLogo(false);
     }
   };
 
@@ -4893,6 +4975,95 @@ export function AdminCommsAndSettingsPanel({
               Publish All Landing Changes
             </button>
           </div>
+        </div>
+
+        {/* Permanent Website Logo */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-blue-600" />
+              <div>
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                  Permanent Website Logo
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Any logo uploaded here saves permanently across the entire platform unless Admin changes or removes it.
+                </p>
+              </div>
+            </div>
+            {formSettings.siteLogoUrl && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                <Check className="w-3 h-3" />
+                Permanent Logo Active
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={formSettings.siteLogoUrl}
+              onChange={(e) => setFormSettings({ ...formSettings, siteLogoUrl: e.target.value })}
+              placeholder="https://... or upload logo image"
+              className="flex-1 min-w-[200px] px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <label className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer shrink-0">
+              <Upload className="w-3.5 h-3.5" />
+              {savingLogo ? 'Saving...' : 'Upload Logo'}
+              <input
+                type="file"
+                accept="image/*"
+                disabled={savingLogo}
+                onChange={handleUploadSiteLogo}
+                className="hidden"
+              />
+            </label>
+            {formSettings.siteLogoUrl.trim() && (
+              <button
+                type="button"
+                disabled={savingLogo}
+                onClick={handleSaveSiteLogoUrl}
+                className="px-3 py-2 text-xs font-semibold rounded-xl border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer shrink-0"
+              >
+                Save URL
+              </button>
+            )}
+            {formSettings.siteLogoUrl.trim() && (
+              <button
+                type="button"
+                disabled={savingLogo}
+                onClick={handleClearSiteLogo}
+                className="px-3 py-2 text-xs font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer shrink-0"
+              >
+                Remove Logo
+              </button>
+            )}
+          </div>
+          {formSettings.siteLogoUrl.trim() ? (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 flex items-center gap-3">
+              <BrandLogo
+                logoUrl={formSettings.siteLogoUrl}
+                siteName={formSettings.siteName}
+                size="md"
+                shape="circle"
+              />
+              <BrandLogo
+                logoUrl={formSettings.siteLogoUrl}
+                siteName={formSettings.siteName}
+                size="md"
+                shape="rounded"
+              />
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                <p className="font-semibold text-slate-700 dark:text-slate-200">
+                  Live Storefront Preview
+                </p>
+                <p>Displayed everywhere (header, workspace, login, favicon) until changed.</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-400">
+              No logo uploaded yet — only your store name is displayed with no fallback emblem.
+            </p>
+          )}
         </div>
 
         {/* Showcase Pictures & Feature Cards */}
@@ -5897,66 +6068,75 @@ export function AdminCommsAndSettingsPanel({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold mb-1">Site Logo URL (or Upload)</label>
-            <div className="flex gap-2">
+            <label className="block text-xs font-semibold mb-1">
+              Permanent Site Logo URL (or Upload)
+            </label>
+            <div className="flex flex-wrap gap-2">
               <input
                 type="text"
                 value={formSettings.siteLogoUrl}
                 onChange={(e) => setFormSettings({ ...formSettings, siteLogoUrl: e.target.value })}
                 placeholder="https://... or upload any size logo"
-                className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                className="flex-1 min-w-[160px] px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
-              <label className="px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer shrink-0">
-                Upload
+              <label className="px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer shrink-0">
+                {savingLogo ? 'Saving...' : 'Upload'}
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      try {
-                        const url = await fileToDataUrl(file);
-                        setFormSettings({ ...formSettings, siteLogoUrl: url });
-                        notify('Logo loaded! Click Save All Overwatch Controls to publish.', 'success');
-                      } catch (err) {
-                        notify(err instanceof Error ? err.message : 'Failed to load logo', 'error');
-                      }
-                    }
-                  }}
+                  disabled={savingLogo}
+                  onChange={handleUploadSiteLogo}
                   className="hidden"
                 />
               </label>
-              {formSettings.siteLogoUrl && (
+              {formSettings.siteLogoUrl.trim() && (
                 <button
                   type="button"
-                  onClick={() => setFormSettings({ ...formSettings, siteLogoUrl: '' })}
+                  disabled={savingLogo}
+                  onClick={handleSaveSiteLogoUrl}
+                  className="px-2.5 py-2 text-xs font-semibold text-blue-600 border border-blue-200 dark:border-blue-800 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer shrink-0"
+                >
+                  Save URL
+                </button>
+              )}
+              {formSettings.siteLogoUrl.trim() && (
+                <button
+                  type="button"
+                  disabled={savingLogo}
+                  onClick={handleClearSiteLogo}
                   className="px-2.5 py-2 text-xs font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer shrink-0"
                 >
-                  Clear
+                  Remove
                 </button>
               )}
             </div>
             <div className="mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <BrandLogo
-                  logoUrl={formSettings.siteLogoUrl}
-                  siteName={formSettings.siteName}
-                  size="md"
-                  shape="circle"
-                />
-                <BrandLogo
-                  logoUrl={formSettings.siteLogoUrl}
-                  siteName={formSettings.siteName}
-                  size="md"
-                  shape="rounded"
-                />
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  <p className="font-semibold text-slate-700 dark:text-slate-200">
-                    System Frame Fit Preview
-                  </p>
-                  <p>Any uploaded image fills the exact system logo size and shape.</p>
+              {formSettings.siteLogoUrl.trim() ? (
+                <div className="flex items-center gap-3">
+                  <BrandLogo
+                    logoUrl={formSettings.siteLogoUrl}
+                    siteName={formSettings.siteName}
+                    size="md"
+                    shape="circle"
+                  />
+                  <BrandLogo
+                    logoUrl={formSettings.siteLogoUrl}
+                    siteName={formSettings.siteName}
+                    size="md"
+                    shape="rounded"
+                  />
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <p className="font-semibold text-slate-700 dark:text-slate-200">
+                      Permanent Admin Logo Active
+                    </p>
+                    <p>Saved permanently across resets and reloads until changed or removed.</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  No website logo set. No default/fallback emblem is shown until Admin uploads one.
+                </p>
+              )}
             </div>
           </div>
 

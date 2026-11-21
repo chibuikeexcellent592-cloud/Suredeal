@@ -1,13 +1,13 @@
 {
   "settings": {
-    "siteName": "Ultimate Tech App",
+    "siteName": "SureDeal Store",
     "siteTagline": "Digital solutions for every market",
     "siteLogoUrl": "",
     "currencyCode": "NGN",
     "currencySymbol": "₦",
     "announcementBanner": "",
     "pinnedTickerEnabled": true,
-    "pinnedTickerText": "Welcome to Ultimate Tech App — Instant Moniepoint Funding (7031537390), Verified Proxies, Social Boosting & Virtual SMS Numbers Active 24/7.",
+    "pinnedTickerText": "Welcome to SureDeal Store — Instant Moniepoint Funding (7031537390), Verified Proxies, Social Boosting & Virtual SMS Numbers Active 24/7.",
     "pinnedTickerTheme": "blue",
     "brandColor": "#2563EB",
     "accentColor": "#0EA5E9",
@@ -20,13 +20,23 @@
     "showFloatingWhatsapp": true,
     "communityChannelEnabled": true,
     "communityChannelPlatform": "whatsapp",
-    "communityChannelTitle": "Ultimate Tech App News",
+    "communityChannelTitle": "SureDeal Store News",
     "communityChannelSubtitle": "Get exclusive updates & drops",
     "communityChannelUrl": "https://wa.me/2347031537390",
     "communityChannelCta": "Join WhatsApp",
     "creatorName": "Excellent",
     "creatorUrl": "",
     "brandMigratedV2": true,
+    "brandMigratedV3": true,
+    "dashboardNoticeEnabled": true,
+    "dashboardNoticeText": "Smoke Notice Test",
+    "dashboardNoticeTone": "amber",
+    "dashboardWalletBadge": "",
+    "dashboardWalletTitle": "Hello, {{NAME}}",
+    "dashboardWalletSubtitle": "Rent virtual SMS numbers, launch social campaigns, and manage your digital Vault.",
+    "dashboardBalanceLabel": "My Wallet",
+    "dashboardFundButtonLabel": "Add Funds",
+    "dashboardHistoryButtonLabel": "History",
     "allowNewSignups": true,
     "enableSmsService": true,
     "enableBoostingService": true,
@@ -150,7 +160,20 @@
       "balance": 250000,
       "status": "active",
       "referralCode": "SUREADMIN",
-      "createdAt": "2026-11-21T08:46:22.536Z"
+      "createdAt": "2026-11-21T08:46:22.536Z",
+      "lastLoginAt": "2026-11-21T09:30:17.819Z"
+    },
+    {
+      "id": "usr_92da6c210a27",
+      "name": "Smoke User",
+      "email": "smoke_1795252120361@example.com",
+      "passwordHash": "283c1b7a2e39aab59bf0fe0d0528e935:19b94b6b571508861fc53f749965f1476fe13b4f12e04fe8802fba042b8f0d4a9312f1a3476237b998b7605b8413abc933dd474056ca06e91d423f076dcd5131",
+      "role": "user",
+      "balance": 6500,
+      "status": "active",
+      "referralCode": "SD2BCE50",
+      "createdAt": "2026-11-21T09:08:40.481Z",
+      "lastLoginAt": "2026-11-21T09:08:40.588Z"
     }
   ],
   "pendingSignups": [],
@@ -415,9 +438,86 @@
       "id": "cat_bots",
       "name": "Automation Bots",
       "description": "Growth & workflow automation tools"
+    },
+    {
+      "id": "cat_ec9e35eaac05",
+      "name": "Facebook",
+      "description": "Facebook digital products"
     }
   ],
   "marketplaceListings": [
+    {
+      "id": "mkt_b80a81df56db",
+      "title": "Facebook Page Smoke Test",
+      "category": "Facebook",
+      "popularTag": "Facebook",
+      "shortSpec": "Instant digital delivery",
+      "description": "",
+      "buyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
+      "buyWarningLevel": "serious",
+      "features": [
+        "Instant Vault Key Delivery",
+        "Verified Quality"
+      ],
+      "price": 3500,
+      "stock": 9,
+      "deliveryType": "Login, Password & 2FA",
+      "imageUrl": "/src/assets/images/marketplace_digital_vault_1794869408342.jpg",
+      "logoUrl": "",
+      "bounceLogo": false,
+      "credentialTemplate": "LICENSE-{{KEY4}}-{{KEY4}}-{{RAND4}}",
+      "stockKeys": [],
+      "soldCount": 1,
+      "active": true
+    },
+    {
+      "id": "mkt_535af3cfbfe5",
+      "title": "Facebook Page Smoke Test",
+      "category": "Facebook",
+      "popularTag": "Facebook",
+      "shortSpec": "Instant digital delivery",
+      "description": "",
+      "buyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
+      "buyWarningLevel": "serious",
+      "features": [
+        "Instant Vault Key Delivery",
+        "Verified Quality"
+      ],
+      "price": 3500,
+      "stock": 10,
+      "deliveryType": "Login, Password & 2FA",
+      "imageUrl": "/src/assets/images/marketplace_digital_vault_1794869408342.jpg",
+      "logoUrl": "",
+      "bounceLogo": false,
+      "credentialTemplate": "LICENSE-{{KEY4}}-{{KEY4}}-{{RAND4}}",
+      "stockKeys": [],
+      "soldCount": 0,
+      "active": true
+    },
+    {
+      "id": "mkt_f45e10e52fe9",
+      "title": "Facebook Page Smoke Test",
+      "category": "Facebook",
+      "popularTag": "Facebook",
+      "shortSpec": "Instant digital delivery",
+      "description": "",
+      "buyWarning": "Important Notice: Verify your target details before confirming. Digital keys, proxies, and accounts delivered to your Vault cannot be refunded once revealed.",
+      "buyWarningLevel": "serious",
+      "features": [
+        "Instant Vault Key Delivery",
+        "Verified Quality"
+      ],
+      "price": 3500,
+      "stock": 10,
+      "deliveryType": "Login, Password & 2FA",
+      "imageUrl": "/src/assets/images/marketplace_digital_vault_1794869408342.jpg",
+      "logoUrl": "",
+      "bounceLogo": false,
+      "credentialTemplate": "LICENSE-{{KEY4}}-{{KEY4}}-{{RAND4}}",
+      "stockKeys": [],
+      "soldCount": 0,
+      "active": true
+    },
     {
       "id": "mkt_cliproxy_30",
       "title": "30IPS CLIPROXY",
@@ -572,6 +672,19 @@
   "vaultItems": [],
   "customSections": [],
   "transactions": [],
+  "accountingRecords": [],
+  "visitorStats": {
+    "totalVisits": 1,
+    "recentSessions": [
+      {
+        "visitorId": "vis_smoke_01",
+        "path": "/",
+        "device": "Safari iOS",
+        "visitedAt": "2026-11-21T09:08:00.332Z"
+      }
+    ],
+    "lastVisitAt": "2026-11-21T09:08:00.332Z"
+  },
   "notifications": [
     {
       "id": "ntf_welcome",
@@ -607,7 +720,24 @@
     }
   ],
   "tickets": [],
-  "adminAlerts": [],
+  "adminAlerts": [
+    {
+      "id": "alrt_d032156e3591",
+      "title": "Marketplace Asset Sold",
+      "detail": "smoke_1795252120361@example.com purchased 1× Facebook Page Smoke Test for ₦3,500",
+      "category": "order",
+      "read": false,
+      "createdAt": "2026-11-21T09:08:40.629Z"
+    },
+    {
+      "id": "alrt_2c40a0dd00f3",
+      "title": "Website Visitor",
+      "detail": "Visitor viewed / · Safari iOS",
+      "category": "visitor",
+      "read": false,
+      "createdAt": "2026-11-21T09:08:00.332Z"
+    }
+  ],
   "adminPhoneAlerts": [],
   "promoCodes": [
     {
@@ -621,5 +751,102 @@
       "createdAt": "2026-11-21T08:46:22.536Z"
     }
   ],
-  "auditLogs": []
+  "auditLogs": [
+    {
+      "id": "aud_3bdd0cad809d",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-21T09:30:17.859Z"
+    },
+    {
+      "id": "aud_59284db99ede",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-21T09:30:17.834Z"
+    },
+    {
+      "id": "aud_ebabfa4456ff",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "CLEAR_ACCOUNTING_ARCHIVE",
+      "target": "all",
+      "detail": "Cleared 1 immutable accounting record(s) from Accounting Console",
+      "createdAt": "2026-11-21T09:08:40.670Z"
+    },
+    {
+      "id": "aud_bfb3ccd613e3",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "DELETE_ACCOUNTING_RECORD",
+      "target": "tx_23b1ae528803",
+      "detail": "Deleted accounting entry MARKETPLACE PURCHASE (2 -> 1)",
+      "createdAt": "2026-11-21T09:08:40.659Z"
+    },
+    {
+      "id": "aud_d95ec2515b11",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "REFRESH_WEBSITE_OPS",
+      "target": "System Reset",
+      "detail": "Refreshed live queues (cleared 1 tx, 0 sms, 0 boost, 1 vault); preserved all users, wallet balances, website settings/logo, products & accounting archive",
+      "createdAt": "2026-11-21T09:08:40.651Z"
+    },
+    {
+      "id": "aud_70f5cbef1f90",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "CLEAR_TRANSACTIONS",
+      "target": "all",
+      "detail": "Cleared 1 transaction record(s) from Overwatch (user history preserved)",
+      "createdAt": "2026-11-21T09:08:40.646Z"
+    },
+    {
+      "id": "aud_26cd85481f53",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "CREATE_USER",
+      "target": "smoke_1795252120361@example.com",
+      "detail": "Role: user, Initial Bal: 10000",
+      "createdAt": "2026-11-21T09:08:40.481Z"
+    },
+    {
+      "id": "aud_6c39bd5e9c48",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-21T09:08:40.357Z"
+    },
+    {
+      "id": "aud_d922abb9458f",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "CREATE_LISTING",
+      "target": "Facebook Page Smoke Test",
+      "detail": "Category: Facebook, Price: 3500, Accounts: 0",
+      "createdAt": "2026-11-21T09:08:40.348Z"
+    },
+    {
+      "id": "aud_3ccf7305be03",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-21T09:08:26.648Z"
+    },
+    {
+      "id": "aud_f0774653aa77",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "CREATE_LISTING",
+      "target": "Facebook Page Smoke Test",
+      "detail": "Category: Facebook, Price: 3500, Accounts: 0",
+      "createdAt": "2026-11-21T09:08:26.603Z"
+    },
+    {
+      "id": "aud_48915c0c1569",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "CREATE_LISTING",
+      "target": "Facebook Page Smoke Test",
+      "detail": "Category: Facebook, Price: 3500, Accounts: 0",
+      "createdAt": "2026-11-21T09:08:00.439Z"
+    }
+  ]
 }

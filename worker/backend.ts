@@ -3910,7 +3910,11 @@ export class SureDealStoreDO {
           if (typeof body.siteTagline === 'string') {
             s.siteTagline = body.siteTagline.trim();
           }
-          if (typeof body.siteLogoUrl === 'string') s.siteLogoUrl = body.siteLogoUrl.trim();
+          if (body.clearSiteLogo === true) {
+            s.siteLogoUrl = '';
+          } else if (typeof body.siteLogoUrl === 'string' && body.siteLogoUrl.trim()) {
+            s.siteLogoUrl = body.siteLogoUrl.trim();
+          }
           if (typeof body.currencyCode === 'string' && body.currencyCode.trim()) {
             s.currencyCode = body.currencyCode.trim().toUpperCase();
           }
