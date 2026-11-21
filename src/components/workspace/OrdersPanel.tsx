@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   CheckCircle2,
   Clock,
   Copy,
-  Info,
+  Eye,
+  EyeOff,
   KeyRound,
   PackageCheck,
   Phone,
@@ -34,6 +34,7 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [revealedAccountIds, setRevealedAccountIds] = useState<Record<string, boolean>>({});
   const [nowMs, setNowMs] = useState(() => Date.now());
   const lastExpirySyncRef = useRef(0);
 
@@ -91,9 +92,9 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
       vaultItems.filter(
         (v) =>
           !query ||
+          v.id.toLowerCase().includes(query) ||
           v.title.toLowerCase().includes(query) ||
-          v.category.toLowerCase().includes(query) ||
-          v.deliveredCredential.toLowerCase().includes(query),
+          v.category.toLowerCase().includes(query),
       ),
     [vaultItems, query],
   );
@@ -123,6 +124,10 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
   );
 
   const totalOrdersCount = vaultItems.length + smsOrders.length + boostingOrders.length;
+
+  const toggleRevealAccount = (id: string) => {
+    setRevealedAccountIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const handleCheckOtp = async (orderId: string) => {
     setBusyId(orderId);
@@ -240,7 +245,7 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search order, key, number, or link..."
+            placeholder="Search order ID, product, number, or link..."
             className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
           />
         </div>
@@ -296,6 +301,7 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
               </div>
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredVault.map((item) => {
+                  const isRevealed = Boolean(revealedAccountIds[item.id]);
                   const parsedCred = parseAccountCredential(item.deliveredCredential);
                   return (
                     <div key={item.id} className="p-5 space-y-3">
@@ -318,79 +324,86 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono text-base font-bold text-blue-600 dark:text-blue-400 tabular-nums">
                             {formatNaira(item.price, symbol)}
                           </span>
                           <button
                             type="button"
-                            onClick={async () => {
-                              await copyText(item.deliveredCredential);
-                              notify('Credential copied to clipboard', 'success');
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
+                            onClick={() => toggleRevealAccount(item.id)}
+                            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg cursor-pointer transition-colors ${
+                              isRevealed
+                                ? 'border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-700'
+                                : 'text-white bg-blue-600 hover:bg-blue-700'
+                            }`}
                           >
-                            <Copy className="w-3.5 h-3.5" />
-                            {parsedCred ? 'Copy All' : 'Copy Key'}
+                            {isRevealed ? (
+                              <>
+                                <EyeOff className="w-3.5 h-3.5" />
+                                Hide Account
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="w-3.5 h-3.5" />
+                                View Account
+                              </>
+                            )}
                           </button>
+                          {isRevealed && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await copyText(item.deliveredCredential);
+                                notify('Credential copied to clipboard', 'success');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                              {parsedCred ? 'Copy All' : 'Copy Key'}
+                            </button>
+                          )}
                         </div>
                       </div>
 
-                      {parsedCred ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                          {[
-                            { label: 'Login', value: parsedCred.login },
-                            { label: 'Password', value: parsedCred.password },
-                            { label: '2FA', value: parsedCred.twoFactor },
-                          ].map((field) => (
-                            <div
-                              key={field.label}
-                              className="flex items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
-                            >
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-bold uppercase text-slate-400">
-                                  {field.label}
-                                </p>
-                                <p className="font-mono text-xs text-slate-800 dark:text-slate-200 truncate">
-                                  {field.value}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  await copyText(field.value);
-                                  notify(`${field.label} copied`, 'success');
-                                }}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/60 shrink-0 cursor-pointer"
-                                aria-label={`Copy ${field.label}`}
+                      {isRevealed &&
+                        (parsedCred ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            {[
+                              { label: 'Login', value: parsedCred.login },
+                              { label: 'Password', value: parsedCred.password },
+                              { label: '2FA', value: parsedCred.twoFactor },
+                            ].map((field) => (
+                              <div
+                                key={field.label}
+                                className="flex items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
                               >
-                                <Copy className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all">
-                          {item.deliveredCredential}
-                        </div>
-                      )}
-
-                      {item.buyWarningShown && (
-                        <div
-                          className={`p-3 rounded-xl border flex items-start gap-2 text-xs ${
-                            item.buyWarningLevel === 'info'
-                              ? 'bg-sky-50/80 dark:bg-sky-950/30 border-sky-200 dark:border-sky-900/60 text-sky-900 dark:text-sky-200'
-                              : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200'
-                          }`}
-                        >
-                          {item.buyWarningLevel === 'info' ? (
-                            <Info className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
-                          ) : (
-                            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                          )}
-                          <span>{item.buyWarningShown}</span>
-                        </div>
-                      )}
+                                <div className="min-w-0">
+                                  <p className="text-[10px] font-bold uppercase text-slate-400">
+                                    {field.label}
+                                  </p>
+                                  <p className="font-mono text-xs text-slate-800 dark:text-slate-200 truncate">
+                                    {field.value}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await copyText(field.value);
+                                    notify(`${field.label} copied`, 'success');
+                                  }}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/60 shrink-0 cursor-pointer"
+                                  aria-label={`Copy ${field.label}`}
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all">
+                            {item.deliveredCredential}
+                          </div>
+                        ))}
                     </div>
                   );
                 })}
