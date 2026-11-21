@@ -1174,7 +1174,13 @@ export function LandingPage({
 
                 <button
                   type="button"
-                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                  onClick={() => {
+                    try {
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    } catch {
+                      window.scrollTo(0, 0);
+                    }
+                  }}
                   aria-label="Back to top"
                   className="w-11 h-11 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/25 flex items-center justify-center shrink-0 transition-transform hover:-translate-y-0.5 cursor-pointer"
                 >

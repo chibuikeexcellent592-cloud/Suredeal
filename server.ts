@@ -3759,19 +3759,26 @@ async function startServer() {
     if (disableHmr) {
       app.get('/@vite/client', (_req, res) => {
         res.type('application/javascript').send(`
-const sheetsMap = new Map();
-const linkSheetsMap = new Map();
+var sheetsMap = {};
+var linkSheetsMap = {};
+function forEachNode(list, fn) {
+  if (!list) return;
+  for (var i = 0; i < list.length; i++) fn(list[i]);
+}
+function escapeAttr(val) {
+  return String(val).replace(/["\\\\]/g, '\\\\$&');
+}
 if (typeof document !== 'undefined') {
-  document.querySelectorAll('style[data-vite-dev-id]').forEach((el) => {
-    sheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  forEachNode(document.querySelectorAll('style[data-vite-dev-id]'), function (el) {
+    sheetsMap[el.getAttribute('data-vite-dev-id')] = el;
   });
-  document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]').forEach((el) => {
-    linkSheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  forEachNode(document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]'), function (el) {
+    linkSheetsMap[el.getAttribute('data-vite-dev-id')] = el;
   });
 }
 export function updateStyle(id, content) {
-  if (linkSheetsMap.has(id)) return;
-  let style = sheetsMap.get(id);
+  if (linkSheetsMap[id]) return;
+  var style = sheetsMap[id];
   if (!style) {
     style = document.createElement('style');
     style.setAttribute('type', 'text/css');
@@ -3781,17 +3788,19 @@ export function updateStyle(id, content) {
   } else if (style.textContent !== content) {
     style.textContent = content;
   }
-  sheetsMap.set(id, style);
+  sheetsMap[id] = style;
 }
 export function removeStyle(id) {
-  if (linkSheetsMap.has(id)) {
-    document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id="' + CSS.escape(id) + '"]').forEach((el) => el.remove());
-    linkSheetsMap.delete(id);
+  if (linkSheetsMap[id]) {
+    forEachNode(document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id="' + escapeAttr(id) + '"]'), function (el) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
+    delete linkSheetsMap[id];
   }
-  const style = sheetsMap.get(id);
-  if (style) {
-    style.remove();
-    sheetsMap.delete(id);
+  var style = sheetsMap[id];
+  if (style && style.parentNode) {
+    style.parentNode.removeChild(style);
+    delete sheetsMap[id];
   }
 }
 export function createHotContext() {

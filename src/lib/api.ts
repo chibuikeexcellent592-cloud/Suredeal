@@ -90,7 +90,11 @@ export async function apiFetch<T>(
       typeof window !== 'undefined' &&
       !url.includes('/api/public/maintenance-status')
     ) {
-      window.dispatchEvent(new CustomEvent('suredeal:maintenance'));
+      try {
+        window.dispatchEvent(new CustomEvent('suredeal:maintenance'));
+      } catch {
+        // ignore event dispatch errors on ultra-legacy WebViews
+      }
     }
     const errMsg =
       jsonValid && typeof data === 'object' && data !== null && 'error' in data
@@ -114,7 +118,15 @@ export async function fetchMaintenanceStatus(): Promise<MaintenanceStatusRespons
 
 export function formatNaira(amount: number, symbol = '₦'): string {
   const safe = Number.isFinite(amount) ? amount : 0;
-  return `${symbol}${safe.toLocaleString('en-NG')}`;
+  try {
+    return `${symbol}${safe.toLocaleString('en-NG')}`;
+  } catch {
+    try {
+      return `${symbol}${safe.toLocaleString()}`;
+    } catch {
+      return `${symbol}${Math.round(safe)}`;
+    }
+  }
 }
 
 export function fileToDataUrl(file: File): Promise<string> {
@@ -194,7 +206,8 @@ export function formatCountdown(
   const totalSeconds = Math.ceil(remainingMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  const label = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  const pad2 = (n: number) => (n < 10 ? `0${n}` : String(n));
+  const label = `${pad2(minutes)}:${pad2(seconds)}`;
   return {
     label,
     remainingMs,
