@@ -35,23 +35,26 @@ interface MarketplacePanelProps {
   onOpenOrders?: () => void;
 }
 
-const DEFAULT_POPULAR_CHIPS = ['VPN', 'Proxy', 'Bots', 'Facebook'];
-
 function ProductCoverBanner({
   title,
   imageUrl,
+  variant = 'card',
 }: {
   title: string;
   imageUrl?: string;
+  variant?: 'card' | 'modal';
 }) {
   return (
-    <div className="relative h-36 sm:h-40 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+    <div
+      className={`relative w-full bg-slate-100 dark:bg-slate-800 overflow-hidden ${
+        variant === 'modal' ? 'h-44 sm:h-52' : 'h-36 sm:h-40'
+      }`}
+    >
       <SafeImage
         src={imageUrl || ''}
         alt={title}
         fallbackTitle={title}
-        smartFit
-        className="w-full h-full object-cover"
+        className="w-full h-full object-cover object-center block"
       />
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/15 via-transparent to-transparent pointer-events-none" />
     </div>
@@ -204,12 +207,33 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
   }, [checkoutItem]);
 
   const popularChips = useMemo(() => {
-    const tags = new Set(DEFAULT_POPULAR_CHIPS);
+    const seen = new Set<string>();
+    const list: string[] = [];
+    const addTag = (raw?: string) => {
+      const clean = (raw || '').trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (key === 'all' || seen.has(key)) return;
+      seen.add(key);
+      list.push(clean);
+    };
     listings.forEach((l) => {
-      if (l.popularTag) tags.add(l.popularTag);
+      addTag(l.popularTag || l.category);
     });
-    return Array.from(tags).slice(0, 6);
-  }, [listings]);
+    categories.forEach((c) => {
+      addTag(c.name);
+    });
+    return list.slice(0, 12);
+  }, [listings, categories]);
+
+  useEffect(() => {
+    if (
+      selectedChip !== 'All' &&
+      !popularChips.some((c) => c.toLowerCase() === selectedChip.toLowerCase())
+    ) {
+      setSelectedChip('All');
+    }
+  }, [popularChips, selectedChip]);
 
   const filteredListings = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -670,6 +694,7 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
               <ProductCoverBanner
                 title={checkoutItem.title}
                 imageUrl={checkoutItem.imageUrl}
+                variant="modal"
               />
               <button
                 type="button"
@@ -1036,7 +1061,11 @@ export function CustomSectionPanel({ sectionId }: { sectionId: string }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative">
-              <ProductCoverBanner title={selectedProd.title} imageUrl={selectedProd.imageUrl} />
+              <ProductCoverBanner
+                title={selectedProd.title}
+                imageUrl={selectedProd.imageUrl}
+                variant="modal"
+              />
               <button
                 type="button"
                 onClick={() => setSelectedProd(null)}

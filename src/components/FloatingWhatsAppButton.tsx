@@ -20,7 +20,7 @@ export function FloatingWhatsAppButton() {
       rel="noopener noreferrer"
       aria-label={`Chat on WhatsApp Support (${displayPhone})`}
       title={`WhatsApp Support (${displayPhone})`}
-      className="fixed bottom-5 right-5 z-50 w-14 h-14 rounded-full bg-[#25D366] hover:bg-[#1EB856] text-white shadow-lg shadow-emerald-600/30 flex items-center justify-center transition-transform duration-200 hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/50"
+      className="fixed bottom-5 right-5 z-30 w-14 h-14 rounded-full bg-[#25D366] hover:bg-[#1EB856] text-white shadow-lg shadow-emerald-600/30 flex items-center justify-center transition-transform duration-200 hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/50"
     >
       <svg
         viewBox="0 0 32 32"

@@ -99,7 +99,10 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
     data.marketplaceCategories[0]?.name || 'Facebook',
   );
   const [useCustomMktCat, setUseCustomMktCat] = useState(false);
-  const [mktPopularTag, setMktPopularTag] = useState('Proxy');
+  const [mktPopularTag, setMktPopularTag] = useState(
+    data.marketplaceCategories[0]?.name || 'Facebook',
+  );
+  const [mktPopularTagTouched, setMktPopularTagTouched] = useState(false);
 
   // Keep selected category synced with live Marketplace Categories list so browser <select> never desyncs
   useEffect(() => {
@@ -108,9 +111,13 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
       data.marketplaceCategories.length > 0 &&
       !data.marketplaceCategories.some((c) => c.name === mktCategory)
     ) {
-      setMktCategory(data.marketplaceCategories[0].name);
+      const nextCat = data.marketplaceCategories[0].name;
+      setMktCategory(nextCat);
+      if (!mktPopularTagTouched) {
+        setMktPopularTag(nextCat);
+      }
     }
-  }, [data.marketplaceCategories, mktCategory, useCustomMktCat]);
+  }, [data.marketplaceCategories, mktCategory, useCustomMktCat, mktPopularTagTouched]);
   const [mktPrice, setMktPrice] = useState(3500);
   const [mktStock, setMktStock] = useState(25);
   const [mktSpec, setMktSpec] = useState('');
@@ -509,6 +516,8 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   setAcctPassword('');
                   setAcct2fa('');
                   setMktStock(25);
+                  setMktPopularTagTouched(false);
+                  setMktPopularTag(mktCategory);
                   notify(
                     finalAccounts.length > 0
                       ? `Product published with ${finalAccounts.length} account(s) ready for delivery!`
@@ -545,11 +554,14 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       type="button"
                       onClick={() => {
                         if (useCustomMktCat) {
+                          const nextCat = data.marketplaceCategories[0]?.name || 'Facebook';
                           setUseCustomMktCat(false);
-                          setMktCategory(data.marketplaceCategories[0]?.name || 'Facebook');
+                          setMktCategory(nextCat);
+                          if (!mktPopularTagTouched) setMktPopularTag(nextCat);
                         } else {
                           setUseCustomMktCat(true);
                           setMktCategory('');
+                          if (!mktPopularTagTouched) setMktPopularTag('');
                         }
                       }}
                       className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
@@ -562,14 +574,22 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                       type="text"
                       required
                       value={mktCategory}
-                      onChange={(e) => setMktCategory(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setMktCategory(val);
+                        if (!mktPopularTagTouched) setMktPopularTag(val);
+                      }}
                       placeholder="Type category (e.g. Facebook)"
                       className="w-full px-2.5 py-2 text-xs rounded-xl border border-blue-300 dark:border-blue-700 bg-slate-50 dark:bg-slate-950"
                     />
                   ) : (
                     <select
                       value={mktCategory}
-                      onChange={(e) => setMktCategory(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setMktCategory(val);
+                        if (!mktPopularTagTouched) setMktPopularTag(val);
+                      }}
                       className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                     >
                       {!data.marketplaceCategories.some((c) => c.name === mktCategory) &&
@@ -591,8 +611,12 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                   <input
                     type="text"
                     value={mktPopularTag}
-                    onChange={(e) => setMktPopularTag(e.target.value)}
-                    placeholder="Popular Filter Tag (VPN, Proxy, Facebook)"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setMktPopularTag(val);
+                      setMktPopularTagTouched(val.trim().length > 0);
+                    }}
+                    placeholder="Popular Filter Tag (auto from category)"
                     className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                   />
                 </div>
