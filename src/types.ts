@@ -109,6 +109,55 @@ export interface PlatformSettings {
   dashboardBalanceLabel?: string;
   dashboardFundButtonLabel?: string;
   dashboardHistoryButtonLabel?: string;
+
+  // Dedicated Section Write-Ups (Wallet & Workspace Sections)
+  walletPageTitle?: string;
+  walletPageSubtitle?: string;
+  walletNoticeText?: string;
+  walletCardHeader?: string;
+  walletFormTitle?: string;
+  walletUploadHint?: string;
+  walletSubmitButtonLabel?: string;
+  walletActivityTitle?: string;
+  walletEmptyActivityText?: string;
+
+  marketplaceTitle?: string;
+  marketplaceSubtitle?: string;
+  marketplacePausedText?: string;
+
+  smsTitle?: string;
+  smsSubtitle?: string;
+  smsSessionNote?: string;
+  smsInboxTitle?: string;
+  smsRentButtonLabel?: string;
+  smsPausedText?: string;
+
+  boostingTitle?: string;
+  boostingSubtitle?: string;
+  boostingHistoryTitle?: string;
+  boostingEmptyText?: string;
+  boostingPausedText?: string;
+
+  ordersTitle?: string;
+  ordersSubtitle?: string;
+
+  transactionsTitle?: string;
+  transactionsSubtitle?: string;
+
+  referralTitle?: string;
+  referralSubtitle?: string;
+  referralCardBadge?: string;
+  referralCardHeadline?: string;
+  referralCardDesc?: string;
+
+  tutorialsTitle?: string;
+  tutorialsSubtitle?: string;
+  supportTitle?: string;
+  supportSubtitle?: string;
+  notificationsTitle?: string;
+  notificationsSubtitle?: string;
+  settingsTitle?: string;
+  settingsSubtitle?: string;
 }
 
 export interface MaintenanceStatusResponse {

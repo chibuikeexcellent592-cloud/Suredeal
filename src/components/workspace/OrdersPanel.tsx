@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatCountdown, formatNaira, parseAccountCredential } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import type { BoostingOrder, SmsOrder, VaultItem } from '../../types';
 
 interface OrdersPanelProps {
@@ -195,11 +196,10 @@ export function OrdersPanel({ onNavigate }: OrdersPanelProps) {
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
             <PackageCheck className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            My Orders &amp; Delivery History
+            {getSectionCopy(catalog?.settings, 'ordersTitle', { symbol })}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            All marketplace credentials, virtual SMS rentals, and social boosting campaigns in one
-            place.
+            {getSectionCopy(catalog?.settings, 'ordersSubtitle', { symbol })}
           </p>
         </div>
 

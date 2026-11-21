@@ -17,6 +17,7 @@ import {
   Eye,
   FileClock,
   FileSpreadsheet,
+  FileText,
   Gift,
   Globe,
   Home,
@@ -76,6 +77,7 @@ import {
   AdminCommsAndSettingsPanel,
   type AdminOverviewPayload,
 } from './admin/AdminCatalogAndCms';
+import { AdminSectionCopyPanel } from './admin/AdminSectionCopyPanel';
 
 interface FullAdminOverview extends AdminOverviewPayload {
   metrics: {
@@ -154,6 +156,7 @@ type AdminTab =
   | 'accounting'
   | 'catalog'
   | 'cms'
+  | 'copy'
   | 'promos'
   | 'notifications'
   | 'tutorials'
@@ -726,6 +729,7 @@ export function AdminDashboard({
     { id: 'users', label: `Users (${data.users.length})`, icon: Users },
     { id: 'catalog', label: 'Products', icon: Package, badge: lowStockItems.length },
     { id: 'cms', label: 'Landing Studio', icon: Sparkles },
+    { id: 'copy', label: 'Wallet & Sections Copy', icon: FileText },
     { id: 'promos', label: `Promo Codes (${data.promoCodes.length})`, icon: Tag },
   ];
 
@@ -1182,13 +1186,14 @@ export function AdminDashboard({
                     Full edit, reorder, duplicate &amp; delete access across every module
                   </span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5">
                   {[
                     { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
                     { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
                     { label: 'Accounting', sub: `${accountingRecordsList.length} archived`, tab: 'accounting' as AdminTab, icon: Archive, tint: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60' },
                     { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
                     { label: 'Landing Studio', sub: 'Notice, wallet & hero', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
+                    { label: 'Wallet & Copy', sub: 'Edit all write-ups', tab: 'copy' as AdminTab, icon: FileText, tint: 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/60' },
                     { label: 'Broadcasts & Mail', sub: `${data.notifications.length} notices`, tab: 'notifications' as AdminTab, icon: Bell, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
                     { label: 'Master Controls', sub: data.settings.maintenanceMode ? 'Maintenance ON' : 'Live & online', tab: 'settings' as AdminTab, icon: Sliders, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' },
                   ].map((tool) => {
@@ -3852,6 +3857,11 @@ export function AdminDashboard({
 
           {/* CATALOG, SECTIONS & LOGOS */}
           {tab === 'catalog' && <AdminCatalogPanel data={data} onRefresh={loadAdmin} />}
+
+          {/* WALLET & SECTIONS COPY */}
+          {tab === 'copy' && (
+            <AdminSectionCopyPanel settings={data.settings} onRefresh={loadAdmin} />
+          )}
 
           {/* CMS, ALERTS, TUTORIALS, SUPPORT, SETTINGS */}
           {(tab === 'cms' ||

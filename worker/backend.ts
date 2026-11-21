@@ -4159,6 +4159,54 @@ export class SureDealStoreDO {
             s.dashboardHistoryButtonLabel = body.dashboardHistoryButtonLabel.trim();
           }
 
+          const sectionCopyKeys = [
+            'walletPageTitle',
+            'walletPageSubtitle',
+            'walletNoticeText',
+            'walletCardHeader',
+            'walletFormTitle',
+            'walletUploadHint',
+            'walletSubmitButtonLabel',
+            'walletActivityTitle',
+            'walletEmptyActivityText',
+            'marketplaceTitle',
+            'marketplaceSubtitle',
+            'marketplacePausedText',
+            'smsTitle',
+            'smsSubtitle',
+            'smsSessionNote',
+            'smsInboxTitle',
+            'smsRentButtonLabel',
+            'smsPausedText',
+            'boostingTitle',
+            'boostingSubtitle',
+            'boostingHistoryTitle',
+            'boostingEmptyText',
+            'boostingPausedText',
+            'ordersTitle',
+            'ordersSubtitle',
+            'transactionsTitle',
+            'transactionsSubtitle',
+            'referralTitle',
+            'referralSubtitle',
+            'referralCardBadge',
+            'referralCardHeadline',
+            'referralCardDesc',
+            'tutorialsTitle',
+            'tutorialsSubtitle',
+            'supportTitle',
+            'supportSubtitle',
+            'notificationsTitle',
+            'notificationsSubtitle',
+            'settingsTitle',
+            'settingsSubtitle',
+          ] as const;
+          for (const key of sectionCopyKeys) {
+            if (typeof body[key] === 'string') {
+              s[key] = (body[key] as string).trim();
+            }
+          }
+
           s.brandMigratedV2 = true;
           s.brandMigratedV3 = true;
           this.logAudit(

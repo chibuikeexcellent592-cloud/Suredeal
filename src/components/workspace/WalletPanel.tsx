@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Copy, Landmark, UploadCloud, XCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, fileToDataUrl, formatNaira } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import type { WalletTransaction } from '../../types';
 
 interface WalletResponse {
@@ -21,7 +22,8 @@ interface WalletPanelProps {
 
 export function WalletPanel({ onViewHistory }: WalletPanelProps) {
   const { user, catalog, updateLocalBalance, refreshUser, notify } = useApp();
-  const symbol = catalog?.settings?.currencySymbol || '₦';
+  const settings = catalog?.settings;
+  const symbol = settings?.currencySymbol || '₦';
 
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [minDeposit, setMinDeposit] = useState(500);
@@ -137,27 +139,40 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
   };
 
   const filteredTx = transactions.filter((t) => filter === 'all' || t.type === filter);
+  const copyVars = {
+    bank: bankDetails.bankName,
+    symbol,
+    site: settings?.siteName || 'SureDeal Store',
+  };
+  const walletNoticeText = (settings?.walletNoticeText || '').trim();
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-            Wallet &amp; {bankDetails.bankName} Funding
+            {getSectionCopy(settings, 'walletPageTitle', copyVars)}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            Transfer Naira ({symbol}) to our official {bankDetails.bankName} account and upload your
-            receipt for instant AI &amp; Team verification.
+            {getSectionCopy(settings, 'walletPageSubtitle', copyVars)}
           </p>
         </div>
 
         <div className="px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">Available Balance</p>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            {settings?.dashboardBalanceLabel?.trim() || 'Available Balance'}
+          </p>
           <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
             {formatNaira(user?.balance || 0, symbol)}
           </p>
         </div>
       </div>
+
+      {walletNoticeText && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800/70 bg-amber-50 dark:bg-amber-950/35 px-4 py-3 text-xs sm:text-sm font-medium text-amber-900 dark:text-amber-200 whitespace-pre-line">
+          {walletNoticeText}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Moniepoint Bank Card + Upload Form */}
@@ -166,7 +181,7 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-semibold text-blue-400">
                 <Landmark className="w-4 h-4" />
-                Official Funding Account
+                {getSectionCopy(settings, 'walletCardHeader', copyVars)}
               </div>
               <span className="text-xs font-mono text-slate-300">
                 Min: {formatNaira(minDeposit, symbol)}
@@ -209,7 +224,7 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
           >
             <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-              Submit Transfer Receipt
+              {getSectionCopy(settings, 'walletFormTitle', copyVars)}
             </h2>
 
             {lastResult && (
@@ -275,7 +290,7 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
               <label className="flex flex-col items-center justify-center gap-2 p-5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 cursor-pointer bg-slate-50 dark:bg-slate-950 transition-colors">
                 <UploadCloud className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300 text-center">
-                  {receiptName || 'Click to select PNG / JPG transfer receipt'}
+                  {receiptName || getSectionCopy(settings, 'walletUploadHint', copyVars)}
                 </span>
                 <input
                   type="file"
@@ -298,7 +313,9 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
               disabled={submitting}
               className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
             >
-              {submitting ? 'Inspecting Receipt & Submitting...' : 'Submit Deposit for Verification'}
+              {submitting
+                ? 'Inspecting Receipt & Submitting...'
+                : getSectionCopy(settings, 'walletSubmitButtonLabel', copyVars)}
             </button>
           </form>
         </div>
@@ -308,7 +325,7 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-3">
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                Recent Wallet Activity
+                {getSectionCopy(settings, 'walletActivityTitle', copyVars)}
               </h2>
               {onViewHistory && (
                 <button
@@ -347,7 +364,7 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
             <div className="py-10 text-center text-sm text-slate-500">Loading ledger...</div>
           ) : filteredTx.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
-              No transactions matching this filter.
+              {getSectionCopy(settings, 'walletEmptyActivityText', copyVars)}
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">

@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Bell, BookOpen, Check, Copy, LifeBuoy, Send, Share2, Shield, Upload } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, fileToDataUrl, formatNaira } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import { UserAvatar } from '../UserAvatar';
 import type { NotificationItem, SupportTicket, TutorialItem } from '../../types';
 
 export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
-  const { user, notify } = useApp();
+  const { user, catalog, notify } = useApp();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -37,10 +38,10 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          Notifications &amp; Broadcasts
+          {getSectionCopy(catalog?.settings, 'notificationsTitle')}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Direct messages, deposit approvals, and platform announcements.
+          {getSectionCopy(catalog?.settings, 'notificationsSubtitle')}
         </p>
       </div>
 
@@ -90,7 +91,7 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
 }
 
 export function TutorialsPanel() {
-  const { notify } = useApp();
+  const { catalog, notify } = useApp();
   const [tutorials, setTutorials] = useState<TutorialItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -105,10 +106,14 @@ export function TutorialsPanel() {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          Tutorials &amp; Guides
+          {getSectionCopy(catalog?.settings, 'tutorialsTitle', {
+            bank: catalog?.settings?.bankName,
+          })}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Learn how to fund via Moniepoint, rent OTP numbers, and activate Vault tools.
+          {getSectionCopy(catalog?.settings, 'tutorialsSubtitle', {
+            bank: catalog?.settings?.bankName,
+          })}
         </p>
       </div>
 
@@ -155,7 +160,7 @@ export function TutorialsPanel() {
 }
 
 export function SupportPanel() {
-  const { notify } = useApp();
+  const { catalog, notify } = useApp();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [subject, setSubject] = useState('');
@@ -220,10 +225,10 @@ export function SupportPanel() {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          Support Desk
+          {getSectionCopy(catalog?.settings, 'supportTitle')}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Open a ticket for receipt audits, order assistance, or custom asset requests.
+          {getSectionCopy(catalog?.settings, 'supportSubtitle')}
         </p>
       </div>
 
@@ -471,10 +476,10 @@ export function SettingsPanel({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-            Account Settings
+            {getSectionCopy(catalog?.settings, 'settingsTitle')}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            Manage your profile details and account password.
+            {getSectionCopy(catalog?.settings, 'settingsSubtitle')}
           </p>
         </div>
         {onOpenReferral && (

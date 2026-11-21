@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, RefreshCw, RotateCcw, TrendingUp } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, formatNaira } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import type { BoostingOrder, BoostingService } from '../../types';
 
 export function BoostingPanel() {
@@ -98,17 +99,16 @@ export function BoostingPanel() {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          Social Media Boosting
+          {getSectionCopy(catalog?.settings, 'boostingTitle', { symbol })}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Configure growth campaigns priced in Nigerian Naira ({symbol}). Orders send directly to
-          our Team fulfillment desk.
+          {getSectionCopy(catalog?.settings, 'boostingSubtitle', { symbol })}
         </p>
       </div>
 
       {boostingPaused && (
         <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
-          Social Media Boosting orders are temporarily paused by our team. Existing orders continue updating below.
+          {getSectionCopy(catalog?.settings, 'boostingPausedText', { symbol })}
         </div>
       )}
 
@@ -253,7 +253,7 @@ export function BoostingPanel() {
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                Campaign History
+                {getSectionCopy(catalog?.settings, 'boostingHistoryTitle', { symbol })}
               </h2>
             </div>
             <button
@@ -268,7 +268,7 @@ export function BoostingPanel() {
 
           {orders.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
-              No boosting campaigns placed yet.
+              {getSectionCopy(catalog?.settings, 'boostingEmptyText', { symbol })}
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatNaira, parseAccountCredential } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import type {
   CustomSection,
   CustomSectionProduct,
@@ -310,10 +311,10 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-            Marketplace
+            {getSectionCopy(catalog?.settings, 'marketplaceTitle', { symbol })}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            Instant proxies, VPN licenses, and verified social accounts.
+            {getSectionCopy(catalog?.settings, 'marketplaceSubtitle', { symbol })}
           </p>
         </div>
 
@@ -347,7 +348,7 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
 
       {marketplacePaused && (
         <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
-          Marketplace &amp; Vault purchases are temporarily paused by our team. Previously purchased Vault items remain accessible.
+          {getSectionCopy(catalog?.settings, 'marketplacePausedText', { symbol })}
         </div>
       )}
 

@@ -251,7 +251,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
         <div className="px-4 py-2">
           <div className="rounded-2xl bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 p-5 text-white shadow-md shadow-blue-500/20">
             <p className="text-[11px] font-semibold tracking-wider uppercase text-blue-100">
-              Account Balance
+              {settings?.dashboardBalanceLabel?.trim() || 'Account Balance'}
             </p>
             <p className="font-display text-2xl sm:text-3xl font-bold mt-1 tabular-nums">
               {formatNaira(user?.balance || 0, symbol)}

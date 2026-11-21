@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, Copy, RefreshCw, RotateCcw, Search, Smartphone, XCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatCountdown, formatNaira } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import type { SmsCountry, SmsOrder, SmsService } from '../../types';
 
 export function SmsPanel() {
@@ -186,17 +187,16 @@ export function SmsPanel() {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          Virtual SMS Verification
+          {getSectionCopy(catalog?.settings, 'smsTitle', { symbol })}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Rent dedicated 15-minute numbers for OTP verification with automatic instant refund if
-          cancelled before delivery.
+          {getSectionCopy(catalog?.settings, 'smsSubtitle', { symbol })}
         </p>
       </div>
 
       {smsPaused && (
         <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
-          Virtual SMS verification orders are temporarily paused by our team. You can still view active numbers and refunds below.
+          {getSectionCopy(catalog?.settings, 'smsPausedText', { symbol })}
         </div>
       )}
 
@@ -287,12 +287,16 @@ export function SmsPanel() {
               disabled={renting || smsPaused || !activeService || !activeCountry}
               className="px-5 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              {smsPaused ? 'Paused' : renting ? 'Placing Order...' : 'Rent Virtual Number'}
+              {smsPaused
+                ? 'Paused'
+                : renting
+                  ? 'Placing Order...'
+                  : getSectionCopy(catalog?.settings, 'smsRentButtonLabel', { symbol })}
             </button>
           </div>
 
           <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
-            15-minute active session · Automatic instant refund if cancelled before OTP arrival
+            {getSectionCopy(catalog?.settings, 'smsSessionNote', { symbol })}
           </p>
         </div>
 
@@ -302,7 +306,7 @@ export function SmsPanel() {
             <div className="flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                Active Numbers &amp; OTP Inbox
+                {getSectionCopy(catalog?.settings, 'smsInboxTitle', { symbol })}
               </h2>
             </div>
             <button

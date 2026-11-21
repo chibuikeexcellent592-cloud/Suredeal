@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatNaira, resolveApiUrl } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 import type { WalletTransaction } from '../../types';
 
 interface WalletResponse {
@@ -103,10 +104,10 @@ export function TransactionsPanel({ onFundWallet }: TransactionsPanelProps) {
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
             <Receipt className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            Transaction History
+            {getSectionCopy(catalog?.settings, 'transactionsTitle', { symbol })}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            Complete audit log of deposits, marketplace purchases, SMS rentals, refunds, and referral credits.
+            {getSectionCopy(catalog?.settings, 'transactionsSubtitle', { symbol })}
           </p>
         </div>
 

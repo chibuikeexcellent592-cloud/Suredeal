@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatNaira } from '../../lib/api';
+import { getSectionCopy } from '../../lib/sectionCopy';
 
 interface InvitedFriend {
   id: string;
@@ -57,17 +58,22 @@ export function ReferralPanel() {
   const rewardedCount =
     data?.rewardedCount ?? (data?.invited || []).filter((i) => i.rewarded || i.deposited).length;
 
+  const copyVars = {
+    symbol,
+    site: catalog?.settings?.siteName || 'SureDeal Store',
+    bonus: formatNaira(bonusAmount, symbol),
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
             <Gift className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            Refer &amp; Earn
+            {getSectionCopy(catalog?.settings, 'referralTitle', copyVars)}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            Invite friends to {catalog?.settings?.siteName || 'SureDeal Store'} and earn{' '}
-            {formatNaira(bonusAmount, symbol)} when they complete their first verified deposit.
+            {getSectionCopy(catalog?.settings, 'referralSubtitle', copyVars)}
           </p>
         </div>
 
@@ -87,14 +93,13 @@ export function ReferralPanel() {
           <div className="space-y-1.5 max-w-xl">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/15 text-[11px] font-bold uppercase tracking-wider">
               <Share2 className="w-3.5 h-3.5" />
-              Deposit-Gated Referral Bonus
+              {getSectionCopy(catalog?.settings, 'referralCardBadge', copyVars)}
             </span>
             <h2 className="font-display text-xl sm:text-2xl font-extrabold">
-              Earn {formatNaira(bonusAmount, symbol)} per Verified Friend
+              {getSectionCopy(catalog?.settings, 'referralCardHeadline', copyVars)}
             </h2>
             <p className="text-xs sm:text-sm text-blue-100 leading-relaxed">
-              Your bonus is automatically credited to your wallet the moment your invited friend
-              completes their first verified deposit.
+              {getSectionCopy(catalog?.settings, 'referralCardDesc', copyVars)}
             </p>
           </div>
           <div className="px-4 py-2.5 rounded-2xl bg-white/15 backdrop-blur-xs text-right">
