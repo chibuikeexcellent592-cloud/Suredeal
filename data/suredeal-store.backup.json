@@ -3,6 +3,10 @@
     "siteName": "SureDeal Store",
     "siteTagline": "Digital solutions for every market",
     "siteLogoUrl": "",
+    "siteNameColorMode": "split",
+    "siteNameColor1": "#0F172A",
+    "siteNameColor2": "#2563EB",
+    "mainAdminEmail": "chibuikeexcellent592@gmail.com",
     "currencyCode": "NGN",
     "currencySymbol": "₦",
     "announcementBanner": "",
@@ -17,6 +21,13 @@
     "maintenanceMode": false,
     "supportEmail": "chibuikeexcellent592@gmail.com",
     "supportWhatsapp": "+2347031537390",
+    "supportTelegram": "",
+    "supportPrimaryChannel": "whatsapp",
+    "supportGroupPlatform": "whatsapp",
+    "supportGroupName": "SureDeal Store Official Group",
+    "supportGroupUrl": "https://wa.me/2347031537390",
+    "supportDeskNote": "Reach our support team anytime on WhatsApp, Telegram, or join our official group below.",
+    "supportAllowTickets": true,
     "showFloatingWhatsapp": true,
     "communityChannelEnabled": true,
     "communityChannelPlatform": "whatsapp",
@@ -37,7 +48,17 @@
     "dashboardBalanceLabel": "Account Balance",
     "dashboardFundButtonLabel": "Add Funds",
     "dashboardHistoryButtonLabel": "History",
+    "dashboardBanners": [],
+    "smsPrimeLabel": "Prime",
+    "smsAlternateLabel": "Alternate",
+    "smsAlternateDiscountPct": 15,
+    "profitCostPercentMarketplace": 45,
+    "profitCostPercentSms": 55,
+    "profitCostPercentBoosting": 50,
     "allowNewSignups": true,
+    "requireEmailVerification": true,
+    "googleAuthEnabled": false,
+    "googleClientId": "",
     "enableSmsService": true,
     "enableBoostingService": true,
     "enableMarketplace": true,
@@ -148,17 +169,7 @@
     "smtpUser": "",
     "smtpPass": "",
     "smtpFrom": "",
-    "resendApiKey": "",
-    "walletPageTitle": "SureDeal Treasury & Funding",
-    "walletPageSubtitle": "Fund fast with {{BANK}} or automatic checkout.",
-    "walletNoticeText": "Custom wallet alert notice for users.",
-    "marketplaceTitle": "Verified Accounts Hub",
-    "smsTitle": "Instant OTP Numbers",
-    "boostingTitle": "Creator Growth Studio",
-    "ordersTitle": "My Vault & Orders",
-    "transactionsTitle": "Full Wallet Ledger",
-    "referralTitle": "Partner Rewards Desk",
-    "marketplaceSubtitle": "Browse vetted profiles with instant delivery."
+    "resendApiKey": ""
   },
   "users": [
     {
@@ -171,7 +182,8 @@
       "status": "active",
       "referralCode": "SUREADMIN",
       "createdAt": "2026-11-21T08:46:22.536Z",
-      "lastLoginAt": "2026-11-21T09:54:42.653Z"
+      "isMainAdmin": true,
+      "emailVerified": true
     }
   ],
   "pendingSignups": [],
@@ -647,30 +659,5 @@
       "createdAt": "2026-11-21T08:46:22.536Z"
     }
   ],
-  "auditLogs": [
-    {
-      "id": "aud_bd4005cbf9a6",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-21T09:54:42.697Z"
-    },
-    {
-      "id": "aud_fdd59f38d2bd",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-21T09:54:42.686Z"
-    },
-    {
-      "id": "aud_5ddab6d23f91",
-      "actorEmail": "chibuikeexcellent592@gmail.com",
-      "action": "UPDATE_SETTINGS",
-      "target": "Overwatch Settings",
-      "detail": "Saved global configuration",
-      "createdAt": "2026-11-21T09:54:42.669Z"
-    }
-  ]
+  "auditLogs": []
 }

@@ -21,6 +21,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { formatNaira, resolveApiUrl } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
+import { BrandNameText } from './BrandNameText';
 import { SafeImage } from './SafeImage';
 
 interface LandingPageProps {
@@ -306,7 +307,7 @@ export function LandingPage({
               shape="circle"
             />
             <span className="font-display text-sm sm:text-base font-extrabold tracking-wide uppercase text-slate-900 dark:text-white">
-              {siteName}
+              <BrandNameText settings={settings} />
             </span>
           </a>
 
@@ -1029,7 +1030,7 @@ export function LandingPage({
                   shape="circle"
                 />
                 <span className="font-display text-base font-extrabold uppercase tracking-wide text-slate-900 dark:text-white">
-                  {siteName}
+                  <BrandNameText settings={settings} />
                 </span>
               </div>
               <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed max-w-sm">

@@ -58,10 +58,12 @@ import {
 import { useApp } from '../context/AppContext';
 import { apiFetch, copyText, formatCountdown, formatNaira, resolveApiUrl } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
+import { BrandNameText } from './BrandNameText';
 import { UserAvatar } from './UserAvatar';
 import type {
   AccountingRecord,
   AdminAlert,
+  AdminFeatureTab,
   AuditLogEntry,
   BoostingOrder,
   PromoCode,
@@ -77,6 +79,11 @@ import {
   AdminCommsAndSettingsPanel,
   type AdminOverviewPayload,
 } from './admin/AdminCatalogAndCms';
+import {
+  AdminLiveMonitorPanel,
+  AdminRevenueProfitPanel,
+  AdminSubAdminsPanel,
+} from './admin/AdminOpsPanels';
 import { AdminSectionCopyPanel } from './admin/AdminSectionCopyPanel';
 
 interface FullAdminOverview extends AdminOverviewPayload {
@@ -149,20 +156,7 @@ function writeOverwatchCache(payload: FullAdminOverview): void {
   }
 }
 
-type AdminTab =
-  | 'overview'
-  | 'users'
-  | 'orders'
-  | 'accounting'
-  | 'catalog'
-  | 'cms'
-  | 'copy'
-  | 'promos'
-  | 'notifications'
-  | 'tutorials'
-  | 'support'
-  | 'audit'
-  | 'settings';
+type AdminTab = AdminFeatureTab;
 
 interface AdminDashboardProps {
   onBackHome?: () => void;
@@ -175,7 +169,7 @@ export function AdminDashboard({
   onOpenWorkspace,
   onPreviewMaintenance,
 }: AdminDashboardProps) {
-  const { user, theme, toggleTheme, logout, notify, refreshCatalog } = useApp();
+  const { user, theme, toggleTheme, logout, notify, refreshCatalog, refreshUser } = useApp();
   const [cachedInitial] = useState<FullAdminOverview | null>(() => readOverwatchCache());
   const [data, setData] = useState<FullAdminOverview | null>(cachedInitial);
   const [loading, setLoading] = useState(!cachedInitial);
@@ -286,6 +280,25 @@ export function AdminDashboard({
     const tick = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(tick);
   }, [hasWaitingSmsOrders]);
+
+  const mainAdminEmail = (
+    data?.settings?.mainAdminEmail || 'chibuikeexcellent592@gmail.com'
+  ).toLowerCase();
+  const isMainAdmin = Boolean(
+    user?.isMainAdmin ||
+      user?.id === 'usr_head_admin' ||
+      user?.email?.toLowerCase() === mainAdminEmail,
+  );
+  const allowedScopedTab: AdminTab | null =
+    !isMainAdmin && user?.allowedAdminTab && user.allowedAdminTab !== 'team'
+      ? user.allowedAdminTab
+      : null;
+
+  useEffect(() => {
+    if (allowedScopedTab && tab !== allowedScopedTab) {
+      setTab(allowedScopedTab);
+    }
+  }, [allowedScopedTab, tab]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -405,7 +418,18 @@ export function AdminDashboard({
     return matchesFilter && matchesSearch;
   });
 
+  const isUserMainAdmin = (target: PublicUser) =>
+    Boolean(
+      target.isMainAdmin ||
+        target.id === 'usr_head_admin' ||
+        target.email.toLowerCase() === mainAdminEmail,
+    );
+
   const openEditUser = (target: PublicUser) => {
+    if (isUserMainAdmin(target) && !isMainAdmin) {
+      notify('Main Admin account is protected and cannot be modified by another admin.', 'error');
+      return;
+    }
     setEditingUser(target);
     setEditUserName(target.name);
     setEditUserEmail(target.email);
@@ -704,13 +728,15 @@ export function AdminDashboard({
     notify('Full Overwatch JSON backup exported', 'success');
   };
 
-  const primaryMenu: {
+  const rawPrimaryMenu: {
     id: AdminTab;
     label: string;
     icon: React.ComponentType<{ className?: string }>;
     badge?: number;
   }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart3, badge: data.metrics.unreadAlerts },
+    { id: 'revenue', label: 'Revenue & Profit', icon: TrendingUp },
+    { id: 'live', label: 'Live Monitor', icon: Activity },
     {
       id: 'orders',
       label: 'Orders & Receipts',
@@ -733,7 +759,7 @@ export function AdminDashboard({
     { id: 'promos', label: `Promo Codes (${data.promoCodes.length})`, icon: Tag },
   ];
 
-  const operationsMenu: {
+  const rawOperationsMenu: {
     id: AdminTab;
     label: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -743,14 +769,33 @@ export function AdminDashboard({
     { id: 'tutorials', label: 'Tutorials', icon: BookOpen },
     { id: 'support', label: 'Support Desk', icon: LifeBuoy, badge: data.metrics.openTickets },
     { id: 'settings', label: 'Master Controls', icon: Sliders },
+    ...(isMainAdmin ? [{ id: 'team' as AdminTab, label: 'Sub-Admins', icon: ShieldCheck }] : []),
     { id: 'audit', label: 'Audit Trail', icon: FileClock },
   ];
+
+  const primaryMenu = allowedScopedTab
+    ? rawPrimaryMenu.filter((item) => item.id === allowedScopedTab)
+    : rawPrimaryMenu;
+  const operationsMenu = allowedScopedTab
+    ? rawOperationsMenu.filter((item) => item.id === allowedScopedTab)
+    : rawOperationsMenu;
 
   const allTabs = [...primaryMenu, ...operationsMenu];
   const activeTabLabel = allTabs.find((t) => t.id === tab)?.label || 'Overview';
   const siteName = data.settings.siteName || 'SureDeal Store';
 
   const selectTab = (next: AdminTab) => {
+    if (allowedScopedTab && next !== allowedScopedTab) {
+      notify(
+        `Your sub-admin scope is restricted exclusively to ${allTabs[0]?.label || allowedScopedTab}.`,
+        'info',
+      );
+      return;
+    }
+    if (next === 'team' && !isMainAdmin) {
+      notify('Only the Main Admin can manage Sub-Admins.', 'error');
+      return;
+    }
     setTab(next);
     setMobileMenuOpen(false);
   };
@@ -762,7 +807,7 @@ export function AdminDashboard({
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={() => selectTab('overview')}
+            onClick={() => selectTab(allowedScopedTab || 'overview')}
             className="flex items-center gap-3 text-left min-w-0 cursor-pointer"
           >
             <BrandLogo
@@ -777,7 +822,7 @@ export function AdminDashboard({
                 <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                {siteName} · Creator Desk
+                <BrandNameText settings={data.settings} /> · {isMainAdmin ? 'Creator Desk' : 'Sub-Admin'}
               </p>
             </div>
           </button>
@@ -991,6 +1036,8 @@ export function AdminDashboard({
                   <span className="font-display font-bold text-slate-900 dark:text-white">
                     Overwatch
                   </span>
+                  <span className="hidden sm:inline">·</span>
+                  <BrandNameText settings={data.settings} className="hidden sm:inline font-bold" />
                   <span>·</span>
                   <span className="truncate">{activeTabLabel}</span>
                 </p>
@@ -1020,29 +1067,46 @@ export function AdminDashboard({
                 </span>
               )}
 
-              <button
-                type="button"
-                onClick={() => setCmdOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 hover:border-blue-400 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
-                title="Open Overwatch Command Palette (Ctrl+K / ⌘K)"
-              >
-                <Command className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400" />
-                <span className="hidden sm:inline">Quick Jump</span>
-                <kbd className="hidden md:inline text-[10px] font-mono px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400">
-                  ⌘K
-                </kbd>
-              </button>
+              {onOpenWorkspace && (
+                <button
+                  type="button"
+                  onClick={onOpenWorkspace}
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-xs font-bold text-white shadow-xs cursor-pointer"
+                  title="Switch to Full User View across the whole website"
+                >
+                  <LayoutDashboard className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Full User View</span>
+                  <span className="sm:hidden">User View</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => selectTab('cms')}
-                className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Landing Studio
-              </button>
+              {!allowedScopedTab && (
+                <button
+                  type="button"
+                  onClick={() => setCmdOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 hover:border-blue-400 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  title="Open Overwatch Command Palette (Ctrl+K / ⌘K)"
+                >
+                  <Command className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400" />
+                  <span className="hidden sm:inline">Quick Jump</span>
+                  <kbd className="hidden md:inline text-[10px] font-mono px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400">
+                    ⌘K
+                  </kbd>
+                </button>
+              )}
 
-              {confirmRefreshOpsHeader ? (
+              {(!allowedScopedTab || allowedScopedTab === 'cms') && (
+                <button
+                  type="button"
+                  onClick={() => selectTab('cms')}
+                  className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Landing Studio
+                </button>
+              )}
+
+              {!allowedScopedTab && (confirmRefreshOpsHeader ? (
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
@@ -1070,7 +1134,7 @@ export function AdminDashboard({
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span className="hidden lg:inline">Refresh Website</span>
                 </button>
-              )}
+              ))}
 
               <button
                 type="button"
@@ -1180,22 +1244,53 @@ export function AdminDashboard({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <Crown className="w-4 h-4 text-amber-500" />
-                    Creator Console Quick-Launch Tools
+                    Creator Console Quick-Launch Toolbox
                   </h2>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Full edit, reorder, duplicate &amp; delete access across every module
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleExportAccountingCsv}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                      Ledger CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportUsersCsv}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                    >
+                      <Download className="w-3 h-3 text-blue-600" />
+                      Users CSV
+                    </button>
+                    {onOpenWorkspace && (
+                      <button
+                        type="button"
+                        onClick={onOpenWorkspace}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer"
+                      >
+                        <LayoutDashboard className="w-3 h-3" />
+                        Full User View
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-2.5">
                   {[
-                    { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
+                    { label: 'Revenue & Profit', sub: `${accountingRecordsList.length} ledger`, tab: 'revenue' as AdminTab, icon: TrendingUp, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
+                    { label: 'Live Monitor', sub: `${visitorStats.totalVisits} visits`, tab: 'live' as AdminTab, icon: Activity, tint: 'bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900/60' },
                     { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
+                    { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
                     { label: 'Accounting', sub: `${accountingRecordsList.length} archived`, tab: 'accounting' as AdminTab, icon: Archive, tint: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60' },
-                    { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
-                    { label: 'Landing Studio', sub: 'Notice, wallet & hero', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
+                    { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-900/60' },
+                    { label: 'Landing & Banners', sub: 'Hero & user images', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
                     { label: 'Wallet & Copy', sub: 'Edit all write-ups', tab: 'copy' as AdminTab, icon: FileText, tint: 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/60' },
+                    { label: 'Promo Codes', sub: `${data.promoCodes.length} active`, tab: 'promos' as AdminTab, icon: Tag, tint: 'bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-300 border-pink-200 dark:border-pink-900/60' },
                     { label: 'Broadcasts & Mail', sub: `${data.notifications.length} notices`, tab: 'notifications' as AdminTab, icon: Bell, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
-                    { label: 'Master Controls', sub: data.settings.maintenanceMode ? 'Maintenance ON' : 'Live & online', tab: 'settings' as AdminTab, icon: Sliders, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' },
+                    { label: 'Support Desk', sub: `${data.metrics.openTickets} open tickets`, tab: 'support' as AdminTab, icon: LifeBuoy, tint: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900/60' },
+                    ...(isMainAdmin
+                      ? [{ label: 'Sub-Admins', sub: 'Delegate 1 feature', tab: 'team' as AdminTab, icon: ShieldCheck, tint: 'bg-slate-900 text-white dark:bg-slate-800 border-slate-700' }]
+                      : [{ label: 'Master Controls', sub: data.settings.maintenanceMode ? 'Maintenance ON' : 'Live & online', tab: 'settings' as AdminTab, icon: Sliders, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' }]),
                   ].map((tool) => {
                     const ToolIcon = tool.icon;
                     return (
@@ -1923,7 +2018,10 @@ export function AdminDashboard({
                 </div>
 
                 <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredUsers.map((u) => (
+                  {filteredUsers.map((u) => {
+                    const targetIsMain = isUserMainAdmin(u);
+                    const targetProtected = targetIsMain && !isMainAdmin;
+                    return (
                     <div key={u.id} className="py-4 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
@@ -1933,15 +2031,24 @@ export function AdminDashboard({
                               <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
                                 {u.name}
                               </p>
-                              <span
-                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                                  u.role === 'admin'
-                                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                                }`}
-                              >
-                                {u.role}
-                              </span>
+                              {targetIsMain ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
+                                  <Crown className="w-2.5 h-2.5" />
+                                  Main Admin · Protected
+                                </span>
+                              ) : (
+                                <span
+                                  className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                                    u.role === 'admin'
+                                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {u.role === 'admin' && u.allowedAdminTab
+                                    ? `Sub-Admin (${u.allowedAdminTab})`
+                                    : u.role}
+                                </span>
+                              )}
                               <span
                                 className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
                                   u.status === 'active'
@@ -1962,6 +2069,12 @@ export function AdminDashboard({
                         </p>
                       </div>
 
+                      {targetProtected ? (
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl px-3 py-2">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                          <span>Protected Main Admin account — locked against balance edits, suspension, password resets, and deletion.</span>
+                        </div>
+                      ) : (
                       <div className="flex flex-wrap items-center gap-2">
                         <input
                           type="number"
@@ -2023,7 +2136,7 @@ export function AdminDashboard({
                           - Debit
                         </button>
 
-                        {(u.role !== 'admin' || u.status === 'suspended') && (
+                        {!targetIsMain && (u.role !== 'admin' || u.status === 'suspended') && (
                           <button
                             type="button"
                             onClick={async () => {
@@ -2117,7 +2230,7 @@ export function AdminDashboard({
                           Message
                         </button>
 
-                        {u.email !== 'chibuikeexcellent592@gmail.com' && (
+                        {!targetIsMain && (
                           confirmDeleteUserId === u.id ? (
                             <div className="inline-flex items-center gap-1">
                               <button
@@ -2156,8 +2269,9 @@ export function AdminDashboard({
                           )
                         )}
                       </div>
+                      )}
                     </div>
-                  ))}
+                  );})}
                 </div>
               </div>
             </div>
@@ -3855,6 +3969,34 @@ export function AdminDashboard({
             </div>
           )}
 
+          {/* REVENUE & PROFIT */}
+          {tab === 'revenue' && (
+            <AdminRevenueProfitPanel
+              settings={data.settings}
+              accountingRecords={accountingRecordsList}
+              transactions={data.transactions}
+              onRefresh={loadAdmin}
+            />
+          )}
+
+          {/* LIVE MONITOR */}
+          {tab === 'live' && (
+            <AdminLiveMonitorPanel
+              symbol={symbol}
+              onNavigateTab={(nextTab) => selectTab(nextTab)}
+            />
+          )}
+
+          {/* SUB-ADMINS & MAIN ADMIN PROTECTION */}
+          {tab === 'team' && isMainAdmin && (
+            <AdminSubAdminsPanel
+              currentUser={user}
+              mainAdminEmail={mainAdminEmail}
+              allUsers={data.users}
+              onRefresh={loadAdmin}
+            />
+          )}
+
           {/* CATALOG, SECTIONS & LOGOS */}
           {tab === 'catalog' && <AdminCatalogPanel data={data} onRefresh={loadAdmin} />}
 
@@ -4096,7 +4238,7 @@ export function AdminDashboard({
                 <select
                   value={editUserRole}
                   onChange={(e) => setEditUserRole(e.target.value as 'user' | 'admin')}
-                  disabled={editingUser.email.toLowerCase() === 'chibuikeexcellent592@gmail.com'}
+                  disabled={isUserMainAdmin(editingUser)}
                   className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 disabled:opacity-60"
                 >
                   <option value="user">User</option>
@@ -4260,48 +4402,66 @@ export function AdminDashboard({
                 const matchedTabs = allTabs.filter(
                   (t) => !q || t.label.toLowerCase().includes(q) || t.id.toLowerCase().includes(q),
                 );
-                const quickActions = [
-                  {
-                    id: 'act_backup',
-                    label: 'Export Full Overwatch JSON Backup',
-                    run: () => handleExportJsonBackup(),
-                  },
-                  {
-                    id: 'act_csv',
-                    label: 'Download All Users CSV',
-                    run: () => handleExportUsersCsv(),
-                  },
-                  {
-                    id: 'act_maint',
-                    label: data.settings.maintenanceMode
-                      ? 'Disable Maintenance Mode'
-                      : 'Enable Maintenance Mode',
-                    run: () =>
-                      void handleToggleQuickSetting(
-                        'maintenanceMode',
-                        !data.settings.maintenanceMode,
-                      ),
-                  },
-                  {
-                    id: 'act_sync',
-                    label: 'Force Refresh & Sync Store State',
-                    run: () => void loadAdmin(),
-                  },
-                  {
-                    id: 'act_refresh_ops',
-                    label: 'Refresh Website Queues (Safe Preserve)',
-                    run: () => void handleRefreshOpsSafe(),
-                  },
-                  ...(onBackHome
-                    ? [
+                const quickActions = (
+                  allowedScopedTab
+                    ? []
+                    : [
                         {
-                          id: 'act_store',
-                          label: 'Open Public Storefront',
-                          run: () => onBackHome(),
+                          id: 'act_backup',
+                          label: 'Export Full Overwatch JSON Backup',
+                          run: () => handleExportJsonBackup(),
                         },
+                        {
+                          id: 'act_csv',
+                          label: 'Download All Users CSV',
+                          run: () => handleExportUsersCsv(),
+                        },
+                        {
+                          id: 'act_acc_csv',
+                          label: 'Download Accounting Archive CSV',
+                          run: () => handleExportAccountingCsv(),
+                        },
+                        {
+                          id: 'act_maint',
+                          label: data.settings.maintenanceMode
+                            ? 'Disable Maintenance Mode'
+                            : 'Enable Maintenance Mode',
+                          run: () =>
+                            void handleToggleQuickSetting(
+                              'maintenanceMode',
+                              !data.settings.maintenanceMode,
+                            ),
+                        },
+                        {
+                          id: 'act_sync',
+                          label: 'Force Refresh & Sync Store State',
+                          run: () => void loadAdmin(),
+                        },
+                        {
+                          id: 'act_refresh_ops',
+                          label: 'Refresh Website Queues (Safe Preserve)',
+                          run: () => void handleRefreshOpsSafe(),
+                        },
+                        ...(onOpenWorkspace
+                          ? [
+                              {
+                                id: 'act_workspace',
+                                label: 'Switch to Full User View',
+                                run: () => onOpenWorkspace(),
+                              },
+                            ]
+                          : []),
+                        ...(onBackHome
+                          ? [
+                              {
+                                id: 'act_store',
+                                label: 'Open Public Storefront',
+                                run: () => onBackHome(),
+                              },
+                            ]
+                          : []),
                       ]
-                    : []),
-                ].filter((a) => !q || a.label.toLowerCase().includes(q));
+                ).filter((a) => !q || a.label.toLowerCase().includes(q));
                 const matchedUsers = data.users
                   .filter(
                     (u) =>

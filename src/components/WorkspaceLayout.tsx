@@ -31,6 +31,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { apiFetch, formatNaira } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
+import { BrandNameText } from './BrandNameText';
 import { PinnedMarquee } from './PinnedMarquee';
 import { UserAvatar } from './UserAvatar';
 import { BoostingPanel } from './workspace/BoostingPanel';
@@ -205,7 +206,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
             />
             <div className="min-w-0">
               <p className="font-display text-base font-extrabold text-slate-900 dark:text-white leading-tight truncate">
-                {siteName}
+                <BrandNameText settings={settings} />
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                 {siteTagline}
@@ -500,7 +501,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                 />
                 <div className="min-w-0">
                   <p className="font-display text-sm sm:text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight truncate">
-                    {siteName}
+                    <BrandNameText settings={settings} />
                   </p>
                   <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 leading-tight truncate">
                     {siteTagline}
@@ -550,6 +551,22 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
           </header>
 
           <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-5">
+            {user?.role === 'admin' && onOpenAdmin && (
+              <div className="rounded-2xl border border-blue-200 dark:border-blue-900/70 bg-blue-50/80 dark:bg-blue-950/35 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-blue-900 dark:text-blue-200">
+                  <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-sky-400 shrink-0" />
+                  <span>Full User View Active — browsing live user experience</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenAdmin}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Return to Overwatch
+                </button>
+              </div>
+            )}
             {activeTab === 'overview' && <PinnedMarquee />}
             {activeTab === 'overview' && <OverviewPanel onNavigate={selectTab} />}
             {activeTab === 'orders' && <OrdersPanel onNavigate={selectTab} />}
@@ -557,7 +574,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               <TransactionsPanel onFundWallet={() => selectTab('wallet')} />
             )}
             {activeTab === 'referral' && <ReferralPanel />}
-            {activeTab === 'sms' && <SmsPanel />}
+            {activeTab === 'sms' && <SmsPanel onFundWallet={() => selectTab('wallet')} />}
             {activeTab === 'boosting' && <BoostingPanel />}
             {activeTab === 'marketplace' && (
               <MarketplacePanel onOpenOrders={() => selectTab('orders')} />

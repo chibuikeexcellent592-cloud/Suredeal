@@ -1,20 +1,60 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, Copy, RefreshCw, RotateCcw, Search, Smartphone, XCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Copy,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Smartphone,
+  Tag,
+  Wallet,
+  XCircle,
+} from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatCountdown, formatNaira } from '../../lib/api';
 import { getSectionCopy } from '../../lib/sectionCopy';
 import type { SmsCountry, SmsOrder, SmsService } from '../../types';
 
-export function SmsPanel() {
-  const { catalog, updateLocalBalance, notify } = useApp();
-  const symbol = catalog?.settings?.currencySymbol || '₦';
+function countryCodeToFlag(code?: string): string {
+  const cc = (code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '🌍';
+  return String.fromCodePoint(
+    0x1f1e6 + cc.charCodeAt(0) - 65,
+    0x1f1e6 + cc.charCodeAt(1) - 65,
+  );
+}
+
+interface SmsPanelProps {
+  onFundWallet?: () => void;
+}
+
+export function SmsPanel({ onFundWallet }: SmsPanelProps) {
+  const { user, catalog, updateLocalBalance, notify } = useApp();
+  const settings = catalog?.settings;
+  const symbol = settings?.currencySymbol || '₦';
+  const currencyCode = settings?.currencyCode || 'NGN';
+  const walletBalance = user?.balance || 0;
+
+  const primeLabel = settings?.smsPrimeLabel?.trim() || 'Prime';
+  const alternateLabel = settings?.smsAlternateLabel?.trim() || 'Alternate';
+  const alternateDiscountPct = Math.min(
+    70,
+    Math.max(0, Number(settings?.smsAlternateDiscountPct ?? 15)),
+  );
+  const allowPromoCodes = settings?.allowPromoCodes !== false;
 
   const [services, setServices] = useState<SmsService[]>([]);
   const [countries, setCountries] = useState<SmsCountry[]>([]);
   const [orders, setOrders] = useState<SmsOrder[]>([]);
+  const [tier, setTier] = useState<'prime' | 'alternate'>('prime');
   const [selectedServiceId, setSelectedServiceId] = useState('');
   const [selectedCountryId, setSelectedCountryId] = useState('');
   const [serviceSearch, setServiceSearch] = useState('');
+  const [couponOpen, setCouponOpen] = useState(false);
+  const [promoCode, setPromoCode] = useState('');
   const [loading, setLoading] = useState(true);
   const [renting, setRenting] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -97,24 +137,52 @@ export function SmsPanel() {
     );
   }, [services, serviceSearch]);
 
+  useEffect(() => {
+    if (
+      filteredServices.length > 0 &&
+      !filteredServices.some((s) => s.id === selectedServiceId)
+    ) {
+      setSelectedServiceId(filteredServices[0].id);
+    }
+  }, [filteredServices, selectedServiceId]);
+
   const activeService = services.find((s) => s.id === selectedServiceId);
   const activeCountry = countries.find((c) => c.id === selectedCountryId);
-  const computedPrice =
+
+  const primePrice =
     activeService && activeCountry
       ? Math.round(activeService.basePrice * activeCountry.multiplier)
       : 0;
+  const computedPrice =
+    tier === 'alternate' && primePrice > 0
+      ? Math.max(50, Math.round(primePrice * ((100 - alternateDiscountPct) / 100)))
+      : primePrice;
+  const availableStock = activeService?.stock ?? 0;
+  const shortfall = Math.max(0, computedPrice - walletBalance);
+  const hasInsufficientBalance = computedPrice > 0 && walletBalance < computedPrice;
 
   const handleRent = async () => {
     if (!selectedServiceId || !selectedCountryId) return;
+    if (hasInsufficientBalance) {
+      notify(`Insufficient balance. Need ${formatNaira(shortfall, symbol)} more.`, 'error');
+      return;
+    }
     setRenting(true);
     try {
       const res = await apiFetch<{ order: SmsOrder; balance: number }>('/api/sms/rent', {
         method: 'POST',
-        body: JSON.stringify({ serviceId: selectedServiceId, countryId: selectedCountryId }),
+        body: JSON.stringify({
+          serviceId: selectedServiceId,
+          countryId: selectedCountryId,
+          tier,
+          promoCode: promoCode.trim() || undefined,
+        }),
       });
       setOrders((prev) => [res.order, ...prev]);
       updateLocalBalance(res.balance);
-      const isAwaitingNumber = !res.order.phoneNumber || res.order.phoneNumber === 'Awaiting number';
+      setPromoCode('');
+      const isAwaitingNumber =
+        !res.order.phoneNumber || res.order.phoneNumber === 'Awaiting number';
       notify(
         res.order.status === 'received' && res.order.otpCode
           ? `Rented ${res.order.phoneNumber} — OTP delivered to your inbox!`
@@ -134,9 +202,7 @@ export function SmsPanel() {
     try {
       const res = await apiFetch<{ order: SmsOrder; balance?: number }>(
         `/api/sms/orders/${orderId}/check-otp`,
-        {
-          method: 'POST',
-        },
+        { method: 'POST' },
       );
       setOrders((prev) => prev.map((o) => (o.id === orderId ? res.order : o)));
       if (typeof res.balance === 'number') {
@@ -181,132 +247,297 @@ export function SmsPanel() {
     }
   };
 
-  const smsPaused = catalog?.settings?.enableSmsService === false;
+  const smsPaused = settings?.enableSmsService === false;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          {getSectionCopy(catalog?.settings, 'smsTitle', { symbol })}
+          {getSectionCopy(settings, 'smsTitle', { symbol })}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          {getSectionCopy(catalog?.settings, 'smsSubtitle', { symbol })}
+          {getSectionCopy(settings, 'smsSubtitle', { symbol })}
         </p>
       </div>
 
       {smsPaused && (
         <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
-          {getSectionCopy(catalog?.settings, 'smsPausedText', { symbol })}
+          {getSectionCopy(settings, 'smsPausedText', { symbol })}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Order Configurator: Country First, then Service */}
-        <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-5">
+        {/* Clean Place-an-Order Configurator modeled on IMG_6144 */}
+        <div className="lg:col-span-5 bg-white dark:bg-[#11121B] border border-slate-200 dark:border-slate-800/90 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xs">
+          <div>
+            <h2 className="font-display text-lg font-extrabold text-slate-900 dark:text-white">
+              Place an order
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Pick a country and service, then confirm stock and price.
+            </p>
+          </div>
+
+          {/* Prime | Alternate Segmented Switcher */}
+          <div className="p-1 rounded-2xl bg-slate-100 dark:bg-[#191B26] border border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setTier('prime')}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                tier === 'prime'
+                  ? 'bg-[#A594F9] text-slate-950 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {primeLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTier('alternate')}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                tier === 'alternate'
+                  ? 'bg-[#A594F9] text-slate-950 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <span>{alternateLabel}</span>
+              {alternateDiscountPct > 0 && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
+                    tier === 'alternate'
+                      ? 'bg-slate-950/15 text-slate-950'
+                      : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                  }`}
+                >
+                  -{alternateDiscountPct}%
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Country Selector */}
           <div>
             <label
               htmlFor="sms-country-select"
               className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2"
             >
-              1. Select Carrier Country
+              Country
             </label>
-            <select
-              id="sms-country-select"
-              value={selectedCountryId}
-              onChange={(e) => setSelectedCountryId(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-            >
-              {countries.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.dialCode}) — {c.multiplier}x rate
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                id="sms-country-select"
+                value={selectedCountryId}
+                onChange={(e) => setSelectedCountryId(e.target.value)}
+                disabled={loading || countries.length === 0}
+                className="w-full appearance-none px-3.5 py-3 pr-9 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer"
+              >
+                {countries.length === 0 ? (
+                  <option value="">Loading countries...</option>
+                ) : (
+                  countries.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {countryCodeToFlag(c.code)} {c.name} ({c.dialCode})
+                    </option>
+                  ))
+                )}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2" />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-              2. Search &amp; Choose Service
-              {activeCountry ? ` (${activeCountry.name})` : ''}
-            </label>
-            <div className="relative mb-3">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={serviceSearch}
-                onChange={(e) => setServiceSearch(e.target.value)}
-                placeholder="Search WhatsApp, Telegram, Google, OpenAI..."
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
+          {/* Service Selector + Quick Search */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="sms-service-select"
+                className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+              >
+                Service
+              </label>
+              {services.length > 6 && (
+                <div className="relative w-40">
+                  <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={serviceSearch}
+                    onChange={(e) => setServiceSearch(e.target.value)}
+                    placeholder="Filter app..."
+                    className="w-full pl-7 pr-2 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <select
+                id="sms-service-select"
+                value={selectedServiceId}
+                onChange={(e) => setSelectedServiceId(e.target.value)}
+                disabled={loading || filteredServices.length === 0}
+                className="w-full appearance-none px-3.5 py-3 pr-9 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer"
+              >
+                {filteredServices.length === 0 ? (
+                  <option value="">
+                    {loading ? 'Loading services...' : 'No matching SMS services'}
+                  </option>
+                ) : (
+                  filteredServices.map((svc) => {
+                    const base = Math.round(svc.basePrice * (activeCountry?.multiplier || 1));
+                    const shown =
+                      tier === 'alternate'
+                        ? Math.max(50, Math.round(base * ((100 - alternateDiscountPct) / 100)))
+                        : base;
+                    return (
+                      <option key={svc.id} value={svc.id}>
+                        {svc.name} · {formatNaira(shown, symbol)} ({svc.stock.toLocaleString()} ready)
+                      </option>
+                    );
+                  })
+                )}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2" />
+            </div>
+          </div>
+
+          {/* Bordered Summary Box: Payable Amount, Available Stock, Coupon + Wallet Balance Pill */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-[#161722] divide-y divide-slate-200/80 dark:divide-slate-800">
+            <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                Payable Amount
+              </span>
+              <div className="text-right">
+                {tier === 'alternate' && primePrice > computedPrice && (
+                  <span className="font-mono text-xs line-through text-slate-400 mr-2 tabular-nums">
+                    {formatNaira(primePrice, symbol)}
+                  </span>
+                )}
+                <span className="font-mono text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tabular-nums">
+                  {formatNaira(computedPrice, symbol)}
+                </span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
-              {loading ? (
-                <p className="text-xs text-slate-500 col-span-2 py-4 text-center">
-                  Loading services...
-                </p>
-              ) : (
-                filteredServices.map((svc) => {
-                  const unitPrice = Math.round(
-                    svc.basePrice * (activeCountry?.multiplier || 1),
-                  );
-                  return (
+            <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                Available Stock
+              </span>
+              <span className="font-mono text-sm font-bold text-slate-900 dark:text-white tabular-nums">
+                {availableStock.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="px-4 py-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                {allowPromoCodes ? (
+                  <button
+                    type="button"
+                    onClick={() => setCouponOpen((v) => !v)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                  >
+                    {couponOpen ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                    <span>Have a coupon?</span>
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-400">Wallet Balance</span>
+                )}
+
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1E202E] text-xs font-mono font-bold text-slate-800 dark:text-slate-100 tabular-nums">
+                  <Wallet className="w-3.5 h-3.5 text-slate-400" />
+                  <span>{formatNaira(walletBalance, symbol)}</span>
+                </span>
+              </div>
+
+              {allowPromoCodes && couponOpen && (
+                <div className="flex items-center gap-2 pt-1">
+                  <div className="relative flex-1">
+                    <Tag className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={promoCode}
+                      onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                      placeholder="Enter promo code (e.g. SURE10)"
+                      className="w-full pl-8 pr-3 py-2 text-xs font-mono uppercase rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11121B] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                  </div>
+                  {promoCode.trim() && (
                     <button
-                      key={svc.id}
                       type="button"
-                      onClick={() => setSelectedServiceId(svc.id)}
-                      className={`p-3 rounded-lg border text-left transition-colors cursor-pointer ${
-                        selectedServiceId === svc.id
-                          ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/40'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                      }`}
+                      onClick={() => setPromoCode('')}
+                      className="px-2.5 py-2 text-[11px] font-semibold text-slate-500 hover:text-slate-700 cursor-pointer"
                     >
-                      <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                        {svc.name}
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
-                        {formatNaira(unitPrice, symbol)} · {svc.successRate}%
-                      </p>
+                      Clear
                     </button>
-                  );
-                })
+                  )}
+                </div>
               )}
             </div>
           </div>
 
-          <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Session Price</p>
-              <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">
-                {formatNaira(computedPrice, symbol)}
-              </p>
+          {/* Insufficient Balance Alert with Fund Wallet Button */}
+          {hasInsufficientBalance && (
+            <div className="rounded-2xl border border-amber-300 dark:border-amber-700/70 bg-amber-50 dark:bg-[#2A200D] px-4 py-3.5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                    Insufficient balance
+                  </p>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300/90 mt-0.5 tabular-nums">
+                    Need {formatNaira(shortfall, symbol)} more in {currencyCode}.
+                  </p>
+                </div>
+              </div>
+              {onFundWallet && (
+                <button
+                  type="button"
+                  onClick={onFundWallet}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold shadow-xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>Fund wallet</span>
+                </button>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={handleRent}
-              disabled={renting || smsPaused || !activeService || !activeCountry}
-              className="px-5 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              {smsPaused
-                ? 'Paused'
-                : renting
-                  ? 'Placing Order...'
-                  : getSectionCopy(catalog?.settings, 'smsRentButtonLabel', { symbol })}
-            </button>
-          </div>
+          )}
 
-          <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
-            {getSectionCopy(catalog?.settings, 'smsSessionNote', { symbol })}
+          {/* Primary Place Order CTA */}
+          <button
+            type="button"
+            onClick={handleRent}
+            disabled={
+              renting ||
+              smsPaused ||
+              !activeService ||
+              !activeCountry ||
+              availableStock <= 0 ||
+              hasInsufficientBalance
+            }
+            className="w-full py-3.5 px-5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 dark:bg-[#6E63B6] dark:hover:bg-[#7D71CC] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl shadow-sm transition-colors cursor-pointer"
+          >
+            {smsPaused
+              ? 'Service Paused'
+              : availableStock <= 0 && activeService
+                ? 'Out of Stock'
+                : renting
+                  ? 'Placing order...'
+                  : settings?.smsRentButtonLabel?.trim() || 'Place order'}
+          </button>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center">
+            {getSectionCopy(settings, 'smsSessionNote', { symbol })}
           </p>
         </div>
 
         {/* Active SMS Inbox */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
+        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                {getSectionCopy(catalog?.settings, 'smsInboxTitle', { symbol })}
+                {getSectionCopy(settings, 'smsInboxTitle', { symbol })}
               </h2>
             </div>
             <button
@@ -330,145 +561,149 @@ export function SmsPanel() {
                   !order.phoneNumber || order.phoneNumber === 'Awaiting number';
                 const timer = formatCountdown(order.expiresAt, nowMs);
                 return (
-                <div key={order.id} className="py-4 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {order.serviceName} · {order.countryName} ·{' '}
-                        <span className="font-mono">{formatNaira(order.price, symbol)}</span>
-                      </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        {isAwaitingNumber ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200/80 dark:border-amber-900/60">
-                            Awaiting number
+                  <div key={order.id} className="py-4 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {order.serviceName} · {order.countryName} ·{' '}
+                          <span className="font-mono">{formatNaira(order.price, symbol)}</span>
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          {isAwaitingNumber ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200/80 dark:border-amber-900/60">
+                              Awaiting number
+                            </span>
+                          ) : (
+                            <>
+                              <span className="font-mono text-base font-bold text-slate-900 dark:text-white">
+                                {order.phoneNumber}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await copyText(order.phoneNumber);
+                                  notify('Phone number copied', 'info');
+                                }}
+                                className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                                aria-label="Copy phone number"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {order.status === 'waiting' && (
+                          <span
+                            className={`inline-flex items-center gap-1 font-mono text-xs font-bold px-2.5 py-1 rounded-md border tabular-nums ${
+                              timer.isUrgent
+                                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-900'
+                                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-900'
+                            }`}
+                            title="15-minute session timer"
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                            {timer.remainingMs > 0 ? timer.label : '00:00'}
                           </span>
-                        ) : (
-                          <>
-                            <span className="font-mono text-base font-bold text-slate-900 dark:text-white">
-                              {order.phoneNumber}
+                        )}
+                        <span
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
+                            order.status === 'received'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : order.status === 'waiting'
+                                ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          {order.status === 'received'
+                            ? 'OTP Received'
+                            : order.status === 'waiting'
+                              ? isAwaitingNumber
+                                ? 'Awaiting Number'
+                                : 'Waiting for SMS'
+                              : order.status === 'expired'
+                                ? 'Expired & Refunded'
+                                : 'Cancelled & Refunded'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {order.status === 'waiting' && (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            {isAwaitingNumber
+                              ? 'Awaiting number & OTP — our team will drop your number and code shortly.'
+                              : 'Number assigned! Waiting for OTP code — inbox checks automatically once delivered.'}
+                          </span>
+                          <span className="font-mono font-bold tabular-nums">
+                            {timer.remainingMs > 0
+                              ? `${timer.label} left (auto-refunds on expiry)`
+                              : 'Expiring & refunding...'}
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleCheckOtp(order.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Check for OTP
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelRefund(order.id)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline shrink-0 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            Cancel &amp; Refund
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {order.status === 'received' && order.otpCode && (
+                      <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              Code:
+                            </span>
+                            <span className="font-mono text-lg font-bold text-blue-600 dark:text-blue-400">
+                              {order.otpCode}
                             </span>
                             <button
                               type="button"
                               onClick={async () => {
-                                await copyText(order.phoneNumber);
-                                notify('Phone number copied', 'info');
+                                await copyText(order.otpCode || '');
+                                notify('OTP code copied', 'info');
                               }}
-                              className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
-                              aria-label="Copy phone number"
+                              className="p-1 text-slate-400 hover:text-blue-600 cursor-pointer"
+                              aria-label="Copy OTP"
                             >
                               <Copy className="w-3.5 h-3.5" />
                             </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {order.status === 'waiting' && (
-                        <span
-                          className={`inline-flex items-center gap-1 font-mono text-xs font-bold px-2.5 py-1 rounded-md border tabular-nums ${
-                            timer.isUrgent
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-900'
-                              : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-900'
-                          }`}
-                          title="15-minute session timer"
-                        >
-                          <Clock className="w-3.5 h-3.5" />
-                          {timer.remainingMs > 0 ? timer.label : '00:00'}
-                        </span>
-                      )}
-                      <span
-                        className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
-                          order.status === 'received'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : order.status === 'waiting'
-                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                        }`}
-                      >
-                        {order.status === 'received'
-                          ? 'OTP Received'
-                          : order.status === 'waiting'
-                            ? isAwaitingNumber
-                              ? 'Awaiting Number'
-                              : 'Waiting for SMS'
-                            : order.status === 'expired'
-                              ? 'Expired & Refunded'
-                              : 'Cancelled & Refunded'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {order.status === 'waiting' && (
-                    <div className="space-y-2 pt-1">
-                      <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-                        <span>
-                          {isAwaitingNumber
-                            ? 'Awaiting number & OTP — our team will drop your number and code shortly.'
-                            : 'Number assigned! Waiting for OTP code — inbox checks automatically once delivered.'}
-                        </span>
-                        <span className="font-mono font-bold tabular-nums">
-                          {timer.remainingMs > 0
-                            ? `${timer.label} left (auto-refunds on expiry)`
-                            : 'Expiring & refunding...'}
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <button
-                          type="button"
-                          onClick={() => handleCheckOtp(order.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          Check for OTP
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCancelRefund(order.id)}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline shrink-0 cursor-pointer"
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          Cancel &amp; Refund
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {order.status === 'received' && order.otpCode && (
-                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 dark:text-slate-400">Code:</span>
-                          <span className="font-mono text-lg font-bold text-blue-600 dark:text-blue-400">
-                            {order.otpCode}
-                          </span>
+                          </div>
                           <button
                             type="button"
-                            onClick={async () => {
-                              await copyText(order.otpCode || '');
-                              notify('OTP code copied', 'info');
-                            }}
-                            className="p-1 text-slate-400 hover:text-blue-600 cursor-pointer"
-                            aria-label="Copy OTP"
+                            onClick={() => handleRequestAnother(order.id)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 cursor-pointer"
                           >
-                            <Copy className="w-3.5 h-3.5" />
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Request Another
                           </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRequestAnother(order.id)}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 cursor-pointer"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          Request Another
-                        </button>
+                        {order.smsText && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400">
+                            {order.smsText}
+                          </p>
+                        )}
                       </div>
-                      {order.smsText && (
-                        <p className="text-xs text-slate-600 dark:text-slate-400">{order.smsText}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

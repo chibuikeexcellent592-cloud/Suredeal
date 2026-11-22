@@ -1,5 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, BookOpen, Check, Copy, LifeBuoy, Send, Share2, Shield, Upload } from 'lucide-react';
+import {
+  Bell,
+  BookOpen,
+  Check,
+  Copy,
+  ExternalLink,
+  LifeBuoy,
+  Mail,
+  MessageCircle,
+  Send,
+  Share2,
+  Shield,
+  Upload,
+  Users,
+} from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, fileToDataUrl, formatNaira } from '../../lib/api';
 import { getSectionCopy } from '../../lib/sectionCopy';
@@ -220,18 +234,196 @@ export function SupportPanel() {
   };
 
   const activeTicket = tickets.find((t) => t.id === selectedId);
+  const settings = catalog?.settings;
+  const primaryChannel = settings?.supportPrimaryChannel || 'whatsapp';
+  const whatsappRaw =
+    settings?.supportWhatsapp?.trim() || settings?.adminNotifyPhone?.trim() || '+2347031537390';
+  const whatsappDigits = whatsappRaw.replace(/[^\d]/g, '') || '2347031537390';
+  const whatsappUrl = `https://wa.me/${whatsappDigits}`;
+  const telegramRaw = settings?.supportTelegram?.trim() || '';
+  const telegramUrl = telegramRaw
+    ? telegramRaw.startsWith('http://') || telegramRaw.startsWith('https://')
+      ? telegramRaw
+      : `https://t.me/${telegramRaw.replace(/^@/, '')}`
+    : '';
+
+  const groupPlatform = settings?.supportGroupPlatform || 'whatsapp';
+  const groupName = settings?.supportGroupName?.trim() || 'SureDeal Official Community Group';
+  const groupUrlRaw =
+    settings?.supportGroupUrl?.trim() || settings?.communityChannelUrl?.trim() || whatsappUrl;
+  const safeGroupUrl = /^https?:\/\//i.test(groupUrlRaw) ? groupUrlRaw : whatsappUrl;
+  const supportEmail = settings?.supportEmail?.trim() || 'chibuikeexcellent592@gmail.com';
+  const deskNote = settings?.supportDeskNote?.trim();
+  const allowTickets = settings?.supportAllowTickets !== false;
+
+  const showWhatsapp = primaryChannel === 'whatsapp' || primaryChannel === 'both';
+  const showTelegram =
+    (primaryChannel === 'telegram' || primaryChannel === 'both') && Boolean(telegramUrl);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-          {getSectionCopy(catalog?.settings, 'supportTitle')}
+          {getSectionCopy(settings, 'supportTitle')}
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          {getSectionCopy(catalog?.settings, 'supportSubtitle')}
+          {getSectionCopy(settings, 'supportSubtitle')}
         </p>
       </div>
 
+      {/* Admin-Configured Direct Channels: WhatsApp / Telegram Support + Copyable Official Group */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {showWhatsapp && (
+          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 p-5 flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                  <MessageCircle className="w-4 h-4" />
+                  WhatsApp Support
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                  Direct Help
+                </span>
+              </div>
+              <p className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+                {whatsappRaw}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Chat directly with our live support desk on WhatsApp for order or wallet assistance.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>Chat on WhatsApp</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={async () => {
+                  await copyText(whatsappRaw);
+                  notify('WhatsApp support number copied!', 'success');
+                }}
+                className="px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 text-xs font-bold cursor-pointer"
+                title="Copy WhatsApp number"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showTelegram && (
+          <div className="rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/30 p-5 flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+                  <Send className="w-4 h-4" />
+                  Telegram Support
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-sky-600 text-white text-[10px] font-bold">
+                  Fast Desk
+                </span>
+              </div>
+              <p className="font-mono text-sm font-bold text-slate-900 dark:text-white truncate">
+                {telegramRaw}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Message our verified Telegram support agent directly for instant help.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={telegramUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-colors"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Open Telegram</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={async () => {
+                  await copyText(telegramRaw);
+                  notify('Telegram handle copied!', 'success');
+                }}
+                className="px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-800 bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 text-xs font-bold cursor-pointer"
+                title="Copy Telegram handle"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Official Group Card with Copyable Group Invite Link */}
+        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/30 p-5 flex flex-col justify-between gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                <Users className="w-4 h-4" />
+                {groupPlatform === 'telegram' ? 'Telegram Group' : 'WhatsApp Group'}
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                Official Group
+              </span>
+            </div>
+            <p className="font-display text-sm font-extrabold text-slate-900 dark:text-white truncate">
+              {groupName}
+            </p>
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200/80 dark:border-indigo-900/70">
+              <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate flex-1">
+                {safeGroupUrl}
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  await copyText(safeGroupUrl);
+                  notify('Official group link copied!', 'success');
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+              >
+                <Copy className="w-3 h-3" />
+                <span>Copy</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <a
+              href={safeGroupUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors"
+            >
+              <span>Join Official Group</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <a
+              href={`mailto:${supportEmail}`}
+              className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-semibold"
+              title={`Email ${supportEmail}`}
+            >
+              <Mail className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {deskNote && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+          {deskNote}
+        </div>
+      )}
+
+      {allowTickets && (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <form
           onSubmit={handleCreate}
@@ -387,6 +579,7 @@ export function SupportPanel() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

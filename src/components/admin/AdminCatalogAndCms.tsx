@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { BrandLogo } from '../BrandLogo';
+import { BrandNameText } from '../BrandNameText';
 import {
   apiFetch,
   fileToDataUrl,
@@ -54,6 +55,7 @@ import type {
   BoostingService,
   CustomSection,
   CustomSectionProduct,
+  DashboardBannerItem,
   EmailLog,
   MarketplaceCategory,
   MarketplaceListing,
@@ -177,6 +179,24 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [svcStock, setSvcStock] = useState(1000);
   const [svcTemplate, setSvcTemplate] = useState('Your verification code is {{CODE}}.');
   const [editingSms, setEditingSms] = useState<SmsService | null>(null);
+  const [smsPrimeLabel, setSmsPrimeLabel] = useState(data.settings.smsPrimeLabel || 'Prime');
+  const [smsAlternateLabel, setSmsAlternateLabel] = useState(
+    data.settings.smsAlternateLabel || 'Alternate',
+  );
+  const [smsAlternateDiscountPct, setSmsAlternateDiscountPct] = useState(
+    data.settings.smsAlternateDiscountPct ?? 15,
+  );
+  const [savingSmsTiers, setSavingSmsTiers] = useState(false);
+
+  useEffect(() => {
+    setSmsPrimeLabel(data.settings.smsPrimeLabel || 'Prime');
+    setSmsAlternateLabel(data.settings.smsAlternateLabel || 'Alternate');
+    setSmsAlternateDiscountPct(data.settings.smsAlternateDiscountPct ?? 15);
+  }, [
+    data.settings.smsPrimeLabel,
+    data.settings.smsAlternateLabel,
+    data.settings.smsAlternateDiscountPct,
+  ]);
 
   // Country form & edit state
   const [cntName, setCntName] = useState('');
@@ -1824,9 +1844,83 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
         </div>
       )}
 
-      {/* SMS SERVICES CRUD */}
+      {/* SMS SERVICES CRUD & EASY TIER SETUP */}
       {subTab === 'sms' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="space-y-6">
+          {/* Quick SMS Panel Tier Configuration (Prime vs Alternate) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  SMS Panel Tier Labels &amp; Discount (Prime / Alternate)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Configure the segmented tier switcher shown at the top of the user SMS &ldquo;Place an order&rdquo; panel.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={savingSmsTiers}
+                onClick={async () => {
+                  setSavingSmsTiers(true);
+                  try {
+                    await apiFetch('/api/admin/settings', {
+                      method: 'PATCH',
+                      body: JSON.stringify({
+                        smsPrimeLabel: smsPrimeLabel.trim() || 'Prime',
+                        smsAlternateLabel: smsAlternateLabel.trim() || 'Alternate',
+                        smsAlternateDiscountPct: Math.max(0, Math.min(80, Number(smsAlternateDiscountPct) || 0)),
+                      }),
+                    });
+                    notify('SMS Panel tiers saved permanently!', 'success');
+                    await syncAll();
+                  } catch (err) {
+                    notify(err instanceof Error ? err.message : 'Failed to save SMS tiers', 'error');
+                  } finally {
+                    setSavingSmsTiers(false);
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer disabled:opacity-60"
+              >
+                {savingSmsTiers ? 'Saving...' : 'Save Tier Config'}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold mb-1">Primary Tier Label</label>
+                <input
+                  type="text"
+                  value={smsPrimeLabel}
+                  onChange={(e) => setSmsPrimeLabel(e.target.value)}
+                  placeholder="Prime"
+                  className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold mb-1">Alternate Tier Label</label>
+                <input
+                  type="text"
+                  value={smsAlternateLabel}
+                  onChange={(e) => setSmsAlternateLabel(e.target.value)}
+                  placeholder="Alternate"
+                  className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold mb-1">Alternate Discount (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={80}
+                  value={smsAlternateDiscountPct}
+                  onChange={(e) => setSmsAlternateDiscountPct(Number(e.target.value))}
+                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -1853,6 +1947,35 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
             <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
               Add SMS Service
             </h3>
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Quick-Fill Popular Apps
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { name: 'WhatsApp', cat: 'Messaging', price: 2400 },
+                  { name: 'Telegram', cat: 'Messaging', price: 1800 },
+                  { name: 'Google / Gmail', cat: 'Email', price: 1500 },
+                  { name: 'Instagram', cat: 'Social', price: 1300 },
+                  { name: 'TikTok', cat: 'Social', price: 1400 },
+                  { name: 'OpenAI / ChatGPT', cat: 'AI', price: 1900 },
+                ].map((preset) => (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => {
+                      setSvcName(preset.name);
+                      setSvcCat(preset.cat);
+                      setSvcPrice(preset.price);
+                      setSvcTemplate(`Your ${preset.name} verification code is {{CODE}}.`);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/50 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    + {preset.name.split(' ')[0]}
+                  </button>
+                ))}
+              </div>
+            </div>
             <input
               type="text"
               required
@@ -2082,6 +2205,38 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                             className="w-24 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                           />
                         </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">
+                            Stock
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            defaultValue={svc.stock}
+                            key={`sms-stock-${svc.id}-${svc.stock}`}
+                            onBlur={async (e) => {
+                              const val = Math.floor(Number(e.target.value));
+                              if (!Number.isFinite(val) || val < 0) {
+                                e.target.value = String(svc.stock);
+                                return;
+                              }
+                              if (val !== svc.stock) {
+                                try {
+                                  await apiFetch(`/api/admin/sms-services/${svc.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ stock: val }),
+                                  });
+                                  notify(`Updated ${svc.name} stock`, 'success');
+                                  await syncAll();
+                                } catch (err) {
+                                  e.target.value = String(svc.stock);
+                                  notify(err instanceof Error ? err.message : 'Stock update failed', 'error');
+                                }
+                              }
+                            }}
+                            className="w-20 px-2 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                          />
+                        </div>
                         <button
                           type="button"
                           disabled={fullIdx === 0}
@@ -2168,6 +2323,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 })}
             </div>
           </div>
+        </div>
         </div>
       )}
 
@@ -4055,6 +4211,26 @@ export function AdminCommsAndSettingsPanel({
     dashboardBalanceLabel: s.dashboardBalanceLabel ?? 'Account Balance',
     dashboardFundButtonLabel: s.dashboardFundButtonLabel ?? 'Add Funds',
     dashboardHistoryButtonLabel: s.dashboardHistoryButtonLabel ?? 'History',
+    siteNameColorMode: s.siteNameColorMode ?? 'split',
+    siteNameColor1: s.siteNameColor1 ?? '#2563EB',
+    siteNameColor2: s.siteNameColor2 ?? '#0F172A',
+    supportPrimaryChannel: s.supportPrimaryChannel ?? 'whatsapp',
+    supportTelegram: s.supportTelegram ?? '',
+    supportGroupPlatform: s.supportGroupPlatform ?? 'whatsapp',
+    supportGroupName: s.supportGroupName ?? 'SureDeal Official Community Group',
+    supportGroupUrl: s.supportGroupUrl ?? '',
+    supportDeskNote: s.supportDeskNote ?? '',
+    supportAllowTickets: s.supportAllowTickets ?? true,
+    requireEmailVerification: s.requireEmailVerification ?? true,
+    googleAuthEnabled: s.googleAuthEnabled ?? false,
+    googleClientId: s.googleClientId ?? '',
+    dashboardBanners: s.dashboardBanners ?? [],
+    smsPrimeLabel: s.smsPrimeLabel ?? 'Prime',
+    smsAlternateLabel: s.smsAlternateLabel ?? 'Alternate',
+    smsAlternateDiscountPct: s.smsAlternateDiscountPct ?? 15,
+    profitCostPercentMarketplace: s.profitCostPercentMarketplace ?? 65,
+    profitCostPercentSms: s.profitCostPercentSms ?? 60,
+    profitCostPercentBoosting: s.profitCostPercentBoosting ?? 55,
   });
 
   // Global Settings + CMS state
@@ -4065,21 +4241,85 @@ export function AdminCommsAndSettingsPanel({
   const [savingLogo, setSavingLogo] = useState(false);
   const [confirmRefreshOps, setConfirmRefreshOps] = useState(false);
   const [refreshingOps, setRefreshingOps] = useState(false);
+  const [bannerTitle, setBannerTitle] = useState('');
+  const [bannerImageUrl, setBannerImageUrl] = useState('');
+  const [bannerLinkUrl, setBannerLinkUrl] = useState('');
 
   useEffect(() => {
     setFormSettings(hydrateSettings(data.settings));
   }, [data.settings]);
 
+  const CMS_SETTINGS_KEYS = new Set<string>([
+    'siteLogoUrl',
+    'landingVideoUrl',
+    'heroKicker',
+    'heroHeadline',
+    'heroSecondaryHeadline',
+    'heroSubheadline',
+    'heroPrimaryCta',
+    'heroSecondaryCta',
+    'snapshotKicker',
+    'snapshotTitle',
+    'snapshotBadge',
+    'snapshotFooterText',
+    'servicesKicker',
+    'servicesTitle',
+    'landingStats',
+    'landingShowcaseCards',
+    'dashboardBanners',
+    'workflowKicker',
+    'workflowTitle',
+    'workflowSubtitle',
+    'workflowSteps',
+    'ctaKicker',
+    'ctaTitle',
+    'ctaSubtitle',
+    'maintenanceHeadline',
+    'maintenanceMessage',
+    'footerTagline',
+    'creatorName',
+    'creatorUrl',
+    'announcementBanner',
+    'pinnedTickerEnabled',
+    'pinnedTickerText',
+    'pinnedTickerTheme',
+    'showLandingShowcase',
+    'showLandingRates',
+    'communityChannelEnabled',
+    'communityChannelPlatform',
+    'communityChannelTitle',
+    'communityChannelSubtitle',
+    'communityChannelUrl',
+    'communityChannelCta',
+    'defaultBuyWarning',
+    'defaultBuyWarningLevel',
+    'dashboardNoticeEnabled',
+    'dashboardNoticeText',
+    'dashboardNoticeTone',
+    'dashboardWalletBadge',
+    'dashboardWalletTitle',
+    'dashboardWalletSubtitle',
+    'dashboardBalanceLabel',
+    'dashboardFundButtonLabel',
+    'dashboardHistoryButtonLabel',
+  ]);
+
   const saveGlobalSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const trimmedLogo = (formSettings.siteLogoUrl || '').trim();
-      const payload: Record<string, unknown> = { ...formSettings };
+      const rawPayload: Record<string, unknown> = { ...formSettings };
       if (!trimmedLogo) {
-        delete payload.siteLogoUrl;
+        delete rawPayload.siteLogoUrl;
       } else {
-        payload.siteLogoUrl = trimmedLogo;
+        rawPayload.siteLogoUrl = trimmedLogo;
       }
+      const payload: Record<string, unknown> =
+        tab === 'cms'
+          ? Object.fromEntries(
+              Object.entries(rawPayload).filter(([k]) => CMS_SETTINGS_KEYS.has(k)),
+            )
+          : rawPayload;
       await apiFetch('/api/admin/settings', {
         method: 'PATCH',
         body: JSON.stringify(payload),
@@ -6013,6 +6253,174 @@ export function AdminCommsAndSettingsPanel({
           </div>
         </div>
 
+        {/* User Dashboard Promotional Images / Banners (Rendered above Recent Account Ledger) */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-blue-600" />
+              <div>
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                  User Dashboard Images &amp; Promotional Banners
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Images added here appear directly above &ldquo;Recent Account Ledger&rdquo; on every user&apos;s dashboard.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+            <div>
+              <label className="block text-xs font-semibold mb-1">Banner Title / Caption</label>
+              <input
+                type="text"
+                value={bannerTitle}
+                onChange={(e) => setBannerTitle(e.target.value)}
+                placeholder="e.g. Weekend SMS Discount"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Image URL or Upload</label>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={bannerImageUrl}
+                  onChange={(e) => setBannerImageUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="flex-1 min-w-0 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+                <label className="px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer shrink-0">
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (ev) => {
+                      const file = ev.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const dataUrl = await fileToDataUrl(file);
+                        setBannerImageUrl(dataUrl);
+                        notify('Banner image loaded! Click + Add Banner then Save.', 'success');
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Failed to load image', 'error');
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Optional Click Link (https://)</label>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={bannerLinkUrl}
+                  onChange={(e) => setBannerLinkUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="flex-1 min-w-0 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!bannerImageUrl.trim()) {
+                      notify('Provide or upload a banner image first.', 'error');
+                      return;
+                    }
+                    const nextBanner: DashboardBannerItem = {
+                      id: `bnr_${Date.now()}`,
+                      title: bannerTitle.trim() || 'Featured Update',
+                      imageUrl: bannerImageUrl.trim(),
+                      linkUrl: bannerLinkUrl.trim() || undefined,
+                      active: true,
+                    };
+                    setFormSettings((prev) => ({
+                      ...prev,
+                      dashboardBanners: [...(prev.dashboardBanners || []), nextBanner],
+                    }));
+                    setBannerTitle('');
+                    setBannerImageUrl('');
+                    setBannerLinkUrl('');
+                    notify('Banner added! Click Save & Publish below to publish live.', 'success');
+                  }}
+                  className="px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl cursor-pointer shrink-0"
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {(formSettings.dashboardBanners || []).length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(formSettings.dashboardBanners || []).map((b) => (
+                <div
+                  key={b.id}
+                  className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col justify-between"
+                >
+                  <div className="h-32 w-full bg-slate-200 dark:bg-slate-900 overflow-hidden">
+                    <img
+                      src={resolveApiUrl(b.imageUrl)}
+                      alt={b.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="p-3 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {b.title}
+                      </p>
+                      {b.linkUrl && (
+                        <p className="text-[10px] text-slate-500 truncate">{b.linkUrl}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormSettings((prev) => ({
+                            ...prev,
+                            dashboardBanners: (prev.dashboardBanners || []).map((item) =>
+                              item.id === b.id ? { ...item, active: !item.active } : item,
+                            ),
+                          }))
+                        }
+                        className={`px-2 py-1 text-[10px] font-bold rounded-lg cursor-pointer ${
+                          b.active
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        {b.active ? 'Active' : 'Hidden'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormSettings((prev) => ({
+                            ...prev,
+                            dashboardBanners: (prev.dashboardBanners || []).filter(
+                              (item) => item.id !== b.id,
+                            ),
+                          }))
+                        }
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
+                        title="Remove banner"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500 text-center py-3">
+              No dashboard banners configured yet. Upload an image above to show one above Recent Account Ledger.
+            </p>
+          )}
+        </div>
+
         <button
           type="submit"
           className="px-6 py-3 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm cursor-pointer"
@@ -6203,6 +6611,105 @@ export function AdminCommsAndSettingsPanel({
                 }
                 placeholder="+2347031537390"
                 className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Site Name ("SureDeal") Colour Mixer */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-blue-600" />
+            <div>
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Site Name (&ldquo;{formSettings.siteName || 'SureDeal Store'}&rdquo;) Colour Mixer
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Mix two colours or use a gradient for the website name across Landing, Login, Sidebar &amp; Overwatch headers.
+              </p>
+            </div>
+          </div>
+          <div className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+            <BrandNameText
+              settings={formSettings}
+              className="font-display text-lg sm:text-xl font-extrabold"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Colour Mix Mode</label>
+            <select
+              value={formSettings.siteNameColorMode || 'split'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  siteNameColorMode: e.target.value as 'solid' | 'split' | 'gradient',
+                })
+              }
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="split">Two-Tone Split (Sure + Deal Store)</option>
+              <option value="gradient">Smooth Gradient Blend</option>
+              <option value="solid">Single Solid Colour</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Primary Text Colour (#1)</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={formSettings.siteNameColor1 || '#2563EB'}
+                onChange={(e) =>
+                  setFormSettings({
+                    ...formSettings,
+                    siteNameColor1: e.target.value.toUpperCase(),
+                  })
+                }
+                className="w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer bg-transparent"
+              />
+              <input
+                type="text"
+                value={formSettings.siteNameColor1 || '#2563EB'}
+                onChange={(e) =>
+                  setFormSettings({
+                    ...formSettings,
+                    siteNameColor1: e.target.value.toUpperCase(),
+                  })
+                }
+                className="flex-1 min-w-0 px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Secondary Text Colour (#2)</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={formSettings.siteNameColor2 || '#0F172A'}
+                onChange={(e) =>
+                  setFormSettings({
+                    ...formSettings,
+                    siteNameColor2: e.target.value.toUpperCase(),
+                  })
+                }
+                className="w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer bg-transparent"
+              />
+              <input
+                type="text"
+                value={formSettings.siteNameColor2 || '#0F172A'}
+                onChange={(e) =>
+                  setFormSettings({
+                    ...formSettings,
+                    siteNameColor2: e.target.value.toUpperCase(),
+                  })
+                }
+                className="flex-1 min-w-0 px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
             </div>
           </div>
@@ -6494,6 +7001,16 @@ export function AdminCommsAndSettingsPanel({
                 desc: 'Credit new signups automatically on join',
               },
               {
+                key: 'requireEmailVerification',
+                title: '6-Digit Email Signup Verification',
+                desc: 'Send a verification code directly to user email before signup activation',
+              },
+              {
+                key: 'googleAuthEnabled',
+                title: 'Google Sign-Up & Sign-In',
+                desc: 'Show Continue with Google on Login/Signup screen',
+              },
+              {
                 key: 'maintenanceMode',
                 title: 'Maintenance Lockdown',
                 desc: 'Restrict public & non-admin logins',
@@ -6546,6 +7063,149 @@ export function AdminCommsAndSettingsPanel({
               </label>
             );
           })}
+        </div>
+
+        <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+          <label className="block text-xs font-semibold mb-1">
+            Google OAuth Web Client ID (Required for Google Sign-In/Sign-Up)
+          </label>
+          <input
+            type="text"
+            value={formSettings.googleClientId || ''}
+            onChange={(e) => setFormSettings({ ...formSettings, googleClientId: e.target.value })}
+            placeholder="1234567890-xxxxxxxx.apps.googleusercontent.com"
+            className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+          />
+          <p className="text-[11px] text-slate-500 mt-1">
+            Configure email SMTP / Resend settings in server environment variables so 6-digit verification codes deliver directly to users&apos; inboxes.
+          </p>
+        </div>
+      </div>
+
+      {/* Customer Support Desk, WhatsApp/Telegram Channels & Official Copyable Group */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 text-emerald-600" />
+            <div>
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Customer Support Desk &amp; Official Group Settings
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Choose WhatsApp, Telegram, or Both for the Support Desk and configure the Official Group link that users can copy in 1 tap.
+              </p>
+            </div>
+          </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formSettings.supportAllowTickets ?? true}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportAllowTickets: e.target.checked })
+              }
+            />
+            {formSettings.supportAllowTickets ?? true ? 'Support Tickets ON' : 'Tickets Hidden'}
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Active Support Channels</label>
+            <select
+              value={formSettings.supportPrimaryChannel || 'whatsapp'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  supportPrimaryChannel: e.target.value as 'whatsapp' | 'telegram' | 'both',
+                })
+              }
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="whatsapp">WhatsApp Support</option>
+              <option value="telegram">Telegram Support</option>
+              <option value="both">Both WhatsApp &amp; Telegram</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">WhatsApp Number / Link</label>
+            <input
+              type="text"
+              value={formSettings.supportWhatsapp || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportWhatsapp: e.target.value })
+              }
+              placeholder="+2347031537390"
+              className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Telegram Handle or URL</label>
+            <input
+              type="text"
+              value={formSettings.supportTelegram || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportTelegram: e.target.value })
+              }
+              placeholder="@suredealsupport or https://t.me/..."
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Official Group Platform</label>
+            <select
+              value={formSettings.supportGroupPlatform || 'whatsapp'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  supportGroupPlatform: e.target.value as 'whatsapp' | 'telegram',
+                })
+              }
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="whatsapp">WhatsApp Group</option>
+              <option value="telegram">Telegram Group</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Official Group Name</label>
+            <input
+              type="text"
+              value={formSettings.supportGroupName || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportGroupName: e.target.value })
+              }
+              placeholder="SureDeal Official Community Group"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Copyable Group Invite URL</label>
+            <input
+              type="text"
+              value={formSettings.supportGroupUrl || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportGroupUrl: e.target.value })
+              }
+              placeholder="https://chat.whatsapp.com/... or https://t.me/..."
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold mb-1">Support Desk Notice / Hours (Optional)</label>
+          <input
+            type="text"
+            value={formSettings.supportDeskNote || ''}
+            onChange={(e) =>
+              setFormSettings({ ...formSettings, supportDeskNote: e.target.value })
+            }
+            placeholder="e.g. Live support replies daily from 8:00 AM - 10:00 PM WAT."
+            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+          />
         </div>
       </div>
 

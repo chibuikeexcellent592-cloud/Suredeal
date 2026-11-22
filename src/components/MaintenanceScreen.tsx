@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { BrandLogo } from './BrandLogo';
+import { BrandNameText } from './BrandNameText';
 
 interface MaintenanceScreenProps {
   onAdminSignIn: () => void;
@@ -148,7 +149,7 @@ export function MaintenanceScreen({
             shape="rounded"
           />
           <span className="font-display text-base font-bold tracking-tight truncate">
-            {siteName}
+            <BrandNameText settings={settings} />
           </span>
         </div>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-[11px] font-bold uppercase tracking-wider shrink-0">

@@ -10,6 +10,7 @@ import {
 import type {
   AccountingRecord,
   AdminAlert,
+  AdminFeatureTab,
   BoostingService,
   CustomSection,
   CustomSectionProduct,
@@ -28,13 +29,16 @@ import {
   base64ToBytes,
   buildCredentialFromTemplateWeb,
   hashPasswordWeb,
+  hexToBytes,
   makeId,
   randomHex,
+  sha256Hex,
   signTokenWeb,
+  timingSafeEqualBytes,
   verifyPasswordWeb,
   verifyTokenWeb,
 } from './crypto.ts';
-import { sendTransactionalEmailWeb } from './mailer.ts';
+import { sendTransactionalEmailWeb, sendVerificationCodeEmailWeb } from './mailer.ts';
 
 export interface SqlStorageCursor {
   toArray(): Array<Record<string, unknown>>;
@@ -67,7 +71,32 @@ export interface WorkerEnv {
   SESSION_SECRET?: string;
   GEMINI_API_KEY?: string;
   RESEND_API_KEY?: string;
+  GOOGLE_CLIENT_ID?: string;
   CORS_ORIGIN?: string;
+}
+
+const DELEGATABLE_ADMIN_TABS: AdminFeatureTab[] = [
+  'overview',
+  'revenue',
+  'live',
+  'users',
+  'orders',
+  'accounting',
+  'catalog',
+  'cms',
+  'copy',
+  'promos',
+  'notifications',
+  'tutorials',
+  'support',
+  'audit',
+  'settings',
+];
+
+function generateSixDigitCodeWeb(): string {
+  const num = new Uint32Array(1);
+  crypto.getRandomValues(num);
+  return String(100000 + (num[0] % 900000));
 }
 
 const STATE_KEYS: Array<keyof DatabaseState> = [
@@ -333,8 +362,12 @@ export class SureDealStoreDO {
       ? mergeParsedDatabaseState(parsed, adminHash)
       : createInitialDatabaseState(adminHash);
 
+    const mainAdminEmail = (db.settings.mainAdminEmail || HEAD_ADMIN_EMAIL).toLowerCase();
     const existingHeadAdmin = db.users.find(
-      (u) => u.email.toLowerCase() === HEAD_ADMIN_EMAIL.toLowerCase(),
+      (u) =>
+        u.id === 'usr_head_admin' ||
+        Boolean(u.isMainAdmin) ||
+        u.email.toLowerCase() === mainAdminEmail,
     );
     let dirty = !hasAnyKey;
 
@@ -342,9 +375,11 @@ export class SureDealStoreDO {
       db.users.unshift({
         id: 'usr_head_admin',
         name: HEAD_ADMIN_NAME,
-        email: HEAD_ADMIN_EMAIL,
+        email: db.settings.mainAdminEmail || HEAD_ADMIN_EMAIL,
         passwordHash: adminHash,
         role: 'admin',
+        isMainAdmin: true,
+        emailVerified: true,
         balance: 250000,
         status: 'active',
         referralCode: HEAD_ADMIN_REFERRAL_CODE,
@@ -352,9 +387,21 @@ export class SureDealStoreDO {
       });
       dirty = true;
     } else {
-      if (existingHeadAdmin.role !== 'admin' || existingHeadAdmin.status !== 'active') {
+      if (
+        existingHeadAdmin.role !== 'admin' ||
+        existingHeadAdmin.status !== 'active' ||
+        !existingHeadAdmin.isMainAdmin ||
+        existingHeadAdmin.allowedAdminTab !== undefined
+      ) {
         existingHeadAdmin.role = 'admin';
         existingHeadAdmin.status = 'active';
+        existingHeadAdmin.isMainAdmin = true;
+        existingHeadAdmin.allowedAdminTab = undefined;
+        existingHeadAdmin.emailVerified = true;
+        dirty = true;
+      }
+      if (!db.settings.mainAdminEmail || db.settings.mainAdminEmail.toLowerCase() !== existingHeadAdmin.email.toLowerCase()) {
+        db.settings.mainAdminEmail = existingHeadAdmin.email.toLowerCase();
         dirty = true;
       }
       if (!existingHeadAdmin.passwordHash.startsWith('pbkdf2_sha256$')) {
@@ -626,10 +673,8 @@ export class SureDealStoreDO {
         errorResponse: jsonResponse({ error: 'Account not found' }, 401, request, this.env),
       };
     }
-    if (
-      (user.role === 'admin' || user.email.toLowerCase() === HEAD_ADMIN_EMAIL.toLowerCase()) &&
-      user.status !== 'active'
-    ) {
+    const isHead = this.isMainAdminUser(user);
+    if ((user.role === 'admin' || isHead) && user.status !== 'active') {
       user.status = 'active';
       this.persistKeys('users');
     }
@@ -656,6 +701,15 @@ export class SureDealStoreDO {
     return { user };
   }
 
+  private isMainAdminUser(user: StoredUser): boolean {
+    const mainEmail = (this.db.settings.mainAdminEmail || HEAD_ADMIN_EMAIL).toLowerCase();
+    return (
+      user.id === 'usr_head_admin' ||
+      Boolean(user.isMainAdmin) ||
+      user.email.toLowerCase() === mainEmail
+    );
+  }
+
   private requireAdmin(
     user: StoredUser,
     request: Request,
@@ -664,6 +718,140 @@ export class SureDealStoreDO {
       return jsonResponse({ error: 'Administrator privileges required' }, 403, request, this.env);
     }
     return null;
+  }
+
+  private requireMainAdmin(
+    user: StoredUser,
+    request: Request,
+  ): Response | null {
+    if (user.role !== 'admin' || !this.isMainAdminUser(user)) {
+      return jsonResponse({ error: 'Main Admin privileges required for this action' }, 403, request, this.env);
+    }
+    return null;
+  }
+
+  private requireAdminScope(
+    user: StoredUser,
+    request: Request,
+    ...allowedTabs: AdminFeatureTab[]
+  ): Response | null {
+    if (user.role !== 'admin') {
+      return jsonResponse({ error: 'Administrator privileges required' }, 403, request, this.env);
+    }
+    if (this.isMainAdminUser(user) || !user.allowedAdminTab) {
+      return null;
+    }
+    if (!allowedTabs.includes(user.allowedAdminTab)) {
+      return jsonResponse(
+        { error: `Access restricted: your admin account is assigned to "${user.allowedAdminTab}" only.` },
+        403,
+        request,
+        this.env,
+      );
+    }
+    return null;
+  }
+
+  private async hashVerificationCodeWeb(email: string, code: string): Promise<string> {
+    return sha256Hex(`${this.sessionSecret!}:${email.toLowerCase()}:${code}`);
+  }
+
+  private createRegisteredUserRecord(params: {
+    name: string;
+    email: string;
+    passwordHash: string;
+    referralCodeInput?: string;
+    authProvider: 'email' | 'google';
+    avatarUrl?: string;
+  }): StoredUser {
+    const db = this.db;
+    const now = new Date().toISOString();
+    const newCode = `SD${randomHex(3).toUpperCase()}`;
+    const inviter = params.referralCodeInput
+      ? db.users.find((u) => u.referralCode.toUpperCase() === params.referralCodeInput!.toUpperCase())
+      : undefined;
+
+    const welcomeBonus = db.settings.welcomePromoEnabled
+      ? Math.max(0, db.settings.welcomePromoAmount || 0)
+      : 0;
+
+    const newUser: StoredUser = {
+      id: makeId('usr'),
+      name: params.name,
+      email: params.email.toLowerCase(),
+      passwordHash: params.passwordHash,
+      role: 'user',
+      authProvider: params.authProvider,
+      emailVerified: true,
+      avatarUrl: params.avatarUrl || undefined,
+      balance: welcomeBonus,
+      status: 'active',
+      referralCode: newCode,
+      referredBy: inviter?.id,
+      referralRewardClaimed: false,
+      createdAt: now,
+      lastLoginAt: now,
+    };
+
+    db.users.push(newUser);
+
+    if (welcomeBonus > 0) {
+      const welcomeTxId = makeId('tx');
+      db.transactions.unshift({
+        id: welcomeTxId,
+        userId: newUser.id,
+        userName: newUser.name,
+        userEmail: newUser.email,
+        type: 'welcome_bonus',
+        amount: welcomeBonus,
+        status: 'completed',
+        description: 'Welcome Promo Bonus credited on signup',
+        createdAt: now,
+      });
+      this.recordAccountingEntry({
+        kind: 'transaction',
+        sourceId: welcomeTxId,
+        category: 'welcome_bonus',
+        userId: newUser.id,
+        userName: newUser.name,
+        userEmail: newUser.email,
+        title: 'WELCOME BONUS',
+        detail: 'Welcome Promo Bonus credited on signup',
+        amount: welcomeBonus,
+        status: 'completed',
+        createdAt: now,
+      });
+    }
+
+    if (inviter) {
+      db.notifications.unshift({
+        id: makeId('ntf'),
+        title: 'New Referral Registered',
+        message: `${newUser.name} signed up with your referral link. Your bonus unlocks once their first deposit is verified.`,
+        type: 'info',
+        targetUserId: inviter.id,
+        readBy: [],
+        createdAt: now,
+      });
+    }
+
+    db.notifications.unshift({
+      id: makeId('ntf'),
+      title: `Welcome to ${db.settings.siteName}`,
+      message: `Your account (${newUser.email}) is verified and active.`,
+      type: 'success',
+      targetUserId: newUser.id,
+      readBy: [],
+      createdAt: now,
+    });
+
+    this.addAdminAlert(
+      'New User Registered',
+      `${newUser.name} (${newUser.email}) joined via ${params.authProvider === 'google' ? 'Google Sign-In' : 'Verified Email'}.`,
+      'user',
+    );
+    this.persistKeys('users', 'transactions', 'accountingRecords', 'notifications', 'adminAlerts', 'pendingSignups');
+    return newUser;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -726,6 +914,9 @@ export class SureDealStoreDO {
             'We’re currently performing scheduled maintenance. Please check back shortly.',
           siteName: s.siteName || 'SureDeal Store',
           siteLogoUrl: s.siteLogoUrl || '',
+          siteNameColorMode: s.siteNameColorMode || 'split',
+          siteNameColor1: s.siteNameColor1 || '#0F172A',
+          siteNameColor2: s.siteNameColor2 || '#2563EB',
           supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
           supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
           creatorName: s.creatorName || 'Excellent',
@@ -785,10 +976,14 @@ export class SureDealStoreDO {
           smtpPass: _smtpPass,
           smtpFrom: _smtpFrom,
           resendApiKey: _resendApiKey,
+          mainAdminEmail: _mainAdminEmail,
           ...publicSettings
         } = db.settings;
         return okJson({
-          settings: publicSettings,
+          settings: {
+            ...publicSettings,
+            googleClientId: publicSettings.googleClientId || this.env.GOOGLE_CLIENT_ID || '',
+          },
           smsCountriesCount: db.smsCountries.filter((c) => c.active).length,
           smsServices: db.smsServices.filter((s) => s.active),
           boostingServices: db.boostingServices.filter((b) => b.active),
@@ -816,10 +1011,7 @@ export class SureDealStoreDO {
         if (!user || !(await verifyPasswordWeb(password, user.passwordHash))) {
           return errJson('Invalid email address or password', 401);
         }
-        if (
-          (user.role === 'admin' || user.email.toLowerCase() === HEAD_ADMIN_EMAIL.toLowerCase()) &&
-          user.status !== 'active'
-        ) {
+        if ((user.role === 'admin' || this.isMainAdminUser(user)) && user.status !== 'active') {
           user.status = 'active';
           this.persistKeys('users');
         }
@@ -862,93 +1054,230 @@ export class SureDealStoreDO {
           return errJson('An account with this email already exists', 409);
         }
 
-        const now = new Date().toISOString();
-        const newCode = `SD${randomHex(3).toUpperCase()}`;
-        const inviter = referralCodeInput
-          ? db.users.find((u) => u.referralCode.toUpperCase() === referralCodeInput)
-          : undefined;
+        const passwordHash = await hashPasswordWeb(password);
 
-        const welcomeBonus = db.settings.welcomePromoEnabled
-          ? Math.max(0, db.settings.welcomePromoAmount || 0)
-          : 0;
+        if (db.settings.requireEmailVerification !== false) {
+          const nowMs = Date.now();
+          db.pendingSignups = (db.pendingSignups || []).filter(
+            (p) => p.expiresAt > nowMs && p.email.toLowerCase() !== email,
+          );
+          const code = generateSixDigitCodeWeb();
+          const expiresInMinutes = 15;
+          db.pendingSignups.unshift({
+            email,
+            name,
+            passwordHash,
+            referralCodeInput: referralCodeInput || undefined,
+            codeHash: await this.hashVerificationCodeWeb(email, code),
+            expiresAt: nowMs + expiresInMinutes * 60 * 1000,
+            attempts: 0,
+            lastSentAt: nowMs,
+          });
+          this.persistKeys('pendingSignups');
 
-        const newUser: StoredUser = {
-          id: makeId('usr'),
+          const mailRes = await sendVerificationCodeEmailWeb({
+            to: email,
+            name,
+            code,
+            expiresInMinutes,
+            settings: db.settings,
+            envResendApiKey: this.env.RESEND_API_KEY,
+          });
+
+          return okJson({
+            requiresVerification: true,
+            email,
+            mailSent: mailRes.delivered,
+            message: mailRes.delivered
+              ? `We sent a 6-digit verification code to ${email}. Enter it below to activate your account.`
+              : mailRes.error ||
+                'Email delivery could not be completed. Configure Resend API Key in Admin Settings, or ask Admin for support.',
+          });
+        }
+
+        const newUser = this.createRegisteredUserRecord({
           name,
           email,
-          passwordHash: await hashPasswordWeb(password),
-          role: 'user',
-          balance: welcomeBonus,
-          status: 'active',
-          referralCode: newCode,
-          referredBy: inviter?.id,
-          referralRewardClaimed: false,
-          createdAt: now,
-          lastLoginAt: now,
-        };
-
-        db.users.push(newUser);
-
-        if (welcomeBonus > 0) {
-          const welcomeTxId = makeId('tx');
-          db.transactions.unshift({
-            id: welcomeTxId,
-            userId: newUser.id,
-            userName: newUser.name,
-            userEmail: newUser.email,
-            type: 'welcome_bonus',
-            amount: welcomeBonus,
-            status: 'completed',
-            description: 'Welcome Promo Bonus credited on signup',
-            createdAt: now,
-          });
-          this.recordAccountingEntry({
-            kind: 'transaction',
-            sourceId: welcomeTxId,
-            category: 'welcome_bonus',
-            userId: newUser.id,
-            userName: newUser.name,
-            userEmail: newUser.email,
-            title: 'WELCOME BONUS',
-            detail: 'Welcome Promo Bonus credited on signup',
-            amount: welcomeBonus,
-            status: 'completed',
-            createdAt: now,
-          });
-        }
-
-        // Referrer reward is intentionally deferred until this user's first verified deposit.
-        if (inviter) {
-          db.notifications.unshift({
-            id: makeId('ntf'),
-            title: 'New Referral Registered',
-            message: `${newUser.name} signed up with your referral link. Your bonus unlocks once their first deposit is verified.`,
-            type: 'info',
-            targetUserId: inviter.id,
-            readBy: [],
-            createdAt: now,
-          });
-        }
-
-        db.notifications.unshift({
-          id: makeId('ntf'),
-          title: `Welcome to ${db.settings.siteName}`,
-          message: `Your account (${newUser.email}) is active and ready.`,
-          type: 'success',
-          targetUserId: newUser.id,
-          readBy: [],
-          createdAt: now,
+          passwordHash,
+          referralCodeInput,
+          authProvider: 'email',
         });
-
-        this.addAdminAlert(
-          'New User Registered',
-          `${newUser.name} (${newUser.email}) created an account.`,
-          'user',
-        );
-        this.persistKeys('users', 'transactions', 'notifications', 'adminAlerts');
-
         const token = await signTokenWeb(newUser.id, this.sessionSecret!);
         return okJson({ token, user: toPublicUser(newUser) }, 201);
+      }
+
+      if (method === 'POST' && pathname === '/api/auth/signup/verify') {
+        const db = this.db;
+        const body = await readJsonBody(request);
+        const email = String(body.email || '').trim().toLowerCase();
+        const code = String(body.code || '').trim().replace(/\s+/g, '');
+        if (!email || !/^\d{6}$/.test(code)) {
+          return errJson('Enter the 6-digit verification code sent to your email.', 400);
+        }
+        const nowMs = Date.now();
+        const pendingList = db.pendingSignups || [];
+        const pending = pendingList.find((p) => p.email.toLowerCase() === email);
+        if (!pending) {
+          return errJson('No pending verification found for this email. Please sign up again.', 400);
+        }
+        if (nowMs > pending.expiresAt) {
+          db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+          this.persistKeys('pendingSignups');
+          return errJson('Verification code has expired. Please request a new code.', 400);
+        }
+        if (pending.attempts >= 5) {
+          db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+          this.persistKeys('pendingSignups');
+          return errJson('Too many invalid attempts. Please register again.', 429);
+        }
+
+        const expectedBytes = hexToBytes(pending.codeHash);
+        const providedHex = await this.hashVerificationCodeWeb(email, code);
+        const providedBytes = hexToBytes(providedHex);
+        if (!expectedBytes || !providedBytes || !timingSafeEqualBytes(expectedBytes, providedBytes)) {
+          pending.attempts += 1;
+          this.persistKeys('pendingSignups');
+          return errJson('Invalid verification code. Check your email and try again.', 400);
+        }
+
+        if (db.users.some((u) => u.email.toLowerCase() === email)) {
+          db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+          this.persistKeys('pendingSignups');
+          return errJson('An account with this email already exists.', 409);
+        }
+
+        db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+        const newUser = this.createRegisteredUserRecord({
+          name: pending.name,
+          email: pending.email,
+          passwordHash: pending.passwordHash,
+          referralCodeInput: pending.referralCodeInput,
+          authProvider: 'email',
+        });
+        const token = await signTokenWeb(newUser.id, this.sessionSecret!);
+        return okJson({ token, user: toPublicUser(newUser) }, 201);
+      }
+
+      if (method === 'POST' && pathname === '/api/auth/signup/resend') {
+        const db = this.db;
+        const body = await readJsonBody(request);
+        const email = String(body.email || '').trim().toLowerCase();
+        if (!email) {
+          return errJson('Email address is required', 400);
+        }
+        const pendingList = db.pendingSignups || [];
+        const pending = pendingList.find((p) => p.email.toLowerCase() === email);
+        if (!pending) {
+          return errJson('No pending registration found. Please fill out the signup form again.', 404);
+        }
+        const nowMs = Date.now();
+        if (nowMs - pending.lastSentAt < 30_000) {
+          const waitSec = Math.ceil((30_000 - (nowMs - pending.lastSentAt)) / 1000);
+          return errJson(`Please wait ${waitSec}s before requesting another code.`, 429);
+        }
+
+        const code = generateSixDigitCodeWeb();
+        const expiresInMinutes = 15;
+        pending.codeHash = await this.hashVerificationCodeWeb(email, code);
+        pending.expiresAt = nowMs + expiresInMinutes * 60 * 1000;
+        pending.attempts = 0;
+        pending.lastSentAt = nowMs;
+        this.persistKeys('pendingSignups');
+
+        const mailRes = await sendVerificationCodeEmailWeb({
+          to: email,
+          name: pending.name,
+          code,
+          expiresInMinutes,
+          settings: db.settings,
+          envResendApiKey: this.env.RESEND_API_KEY,
+        });
+
+        return okJson({
+          ok: true,
+          mailSent: mailRes.delivered,
+          error: mailRes.delivered ? undefined : mailRes.error || 'Mail provider rejected or not configured',
+        });
+      }
+
+      if (method === 'POST' && pathname === '/api/auth/google') {
+        const db = this.db;
+        const settings = db.settings;
+        if (!settings.googleAuthEnabled) {
+          return errJson('Google Sign-In is currently disabled by Admin.', 403);
+        }
+        const expectedClientId = (settings.googleClientId || this.env.GOOGLE_CLIENT_ID || '').trim();
+        if (!expectedClientId) {
+          return errJson('Google Client ID is not configured yet.', 400);
+        }
+        const body = await readJsonBody(request);
+        const credential = String(body.credential || '').trim();
+        const referralCodeInput = String(body.referralCode || '').trim().toUpperCase();
+        if (!credential) {
+          return errJson('Missing Google sign-in token', 400);
+        }
+
+        try {
+          const verifyResp = await fetch(
+            `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+          );
+          if (!verifyResp.ok) {
+            return errJson('Google sign-in token could not be verified', 401);
+          }
+          const info = (await verifyResp.json()) as {
+            aud?: string;
+            email?: string;
+            email_verified?: string | boolean;
+            name?: string;
+            picture?: string;
+            exp?: string;
+          };
+          const email = String(info.email || '').trim().toLowerCase();
+          const verified = info.email_verified === true || info.email_verified === 'true';
+          const expMs = info.exp ? Number(info.exp) * 1000 : Date.now() + 60_000;
+          if (!email || !verified || info.aud !== expectedClientId || expMs < Date.now()) {
+            return errJson('Google token verification failed or mismatched Client ID', 401);
+          }
+
+          const existing = db.users.find((u) => u.email.toLowerCase() === email);
+          if (existing) {
+            if (existing.status === 'suspended') {
+              return errJson('This account is suspended. Reach out to support.', 403);
+            }
+            if (settings.maintenanceMode && existing.role !== 'admin') {
+              return errJson('Maintenance mode is active. Only our team can sign in right now.', 503);
+            }
+            existing.lastLoginAt = new Date().toISOString();
+            existing.emailVerified = true;
+            if (!existing.avatarUrl && info.picture) {
+              existing.avatarUrl = info.picture;
+            }
+            this.persistKeys('users');
+            const token = await signTokenWeb(existing.id, this.sessionSecret!);
+            return okJson({ token, user: toPublicUser(existing) });
+          }
+
+          if (settings.maintenanceMode) {
+            return errJson('Registrations are paused during maintenance.', 503);
+          }
+          if (settings.allowNewSignups === false) {
+            return errJson('New account registrations are currently paused.', 403);
+          }
+
+          const newUser = this.createRegisteredUserRecord({
+            name: String(info.name || email.split('@')[0]).trim(),
+            email,
+            passwordHash: await hashPasswordWeb(randomHex(24)),
+            referralCodeInput,
+            authProvider: 'google',
+            avatarUrl: info.picture,
+          });
+          const token = await signTokenWeb(newUser.id, this.sessionSecret!);
+          return okJson({ token, user: toPublicUser(newUser) }, 201);
+        } catch (err) {
+          console.error('Google tokeninfo verification error:', err);
+          return errJson('Could not reach Google verification service. Try again.', 502);
+        }
       }
 
       // All routes below require authentication
@@ -1035,6 +1364,8 @@ export class SureDealStoreDO {
         const body = await readJsonBody(request);
         const serviceId = String(body.serviceId || '');
         const countryId = String(body.countryId || '');
+        const tier = body.tier === 'alternate' ? 'alternate' : 'prime';
+        const promoCodeStr = String(body.promoCode || '').trim().toUpperCase();
 
         const service = db.smsServices.find((s) => s.id === serviceId && s.active);
         const country = db.smsCountries.find((c) => c.id === countryId && c.active);
@@ -1042,7 +1373,35 @@ export class SureDealStoreDO {
           return errJson('Selected SMS service or country is unavailable', 404);
         }
 
-        const price = Math.round(service.basePrice * country.multiplier);
+        const basePrice = Math.round(service.basePrice * country.multiplier);
+        const altDiscountPct = Math.max(
+          0,
+          Math.min(70, Number(db.settings.smsAlternateDiscountPct ?? 15)),
+        );
+        const tierPrice =
+          tier === 'alternate'
+            ? Math.max(50, Math.round(basePrice * (1 - altDiscountPct / 100)))
+            : basePrice;
+
+        let price = tierPrice;
+        let appliedPromo: PromoCode | undefined;
+        if (promoCodeStr) {
+          if (db.settings.allowPromoCodes === false) {
+            return errJson('Promo codes are currently disabled.', 403);
+          }
+          appliedPromo = db.promoCodes.find(
+            (p) => p.active && p.code.toUpperCase() === promoCodeStr && p.uses < p.maxUses,
+          );
+          if (!appliedPromo) {
+            return errJson('Coupon code is invalid or expired', 400);
+          }
+          if (appliedPromo.discountType === 'percent') {
+            price = Math.max(50, Math.round(tierPrice * (1 - appliedPromo.value / 100)));
+          } else {
+            price = Math.max(50, tierPrice - appliedPromo.value);
+          }
+        }
+
         if (currentUser.balance < price) {
           return errJson(
             `Insufficient wallet balance. You need ${db.settings.currencySymbol}${price.toLocaleString()}.`,
@@ -1063,6 +1422,12 @@ export class SureDealStoreDO {
 
         currentUser.balance -= price;
         if (service.stock > 0) service.stock -= 1;
+        if (appliedPromo) appliedPromo.uses += 1;
+
+        const tierLabel =
+          tier === 'alternate'
+            ? db.settings.smsAlternateLabel || 'Alternate'
+            : db.settings.smsPrimeLabel || 'Prime';
 
         const order: DatabaseState['smsOrders'][number] = {
           id: orderId,
@@ -1092,6 +1457,7 @@ export class SureDealStoreDO {
         db.smsOrders.unshift(order);
         const smsTxId = makeId('tx');
         const smsNowIso = new Date(now).toISOString();
+        const descSuffix = `${tierLabel}${appliedPromo ? ` · ${appliedPromo.code}` : ''}`;
         db.transactions.unshift({
           id: smsTxId,
           userId: currentUser.id,
@@ -1100,7 +1466,7 @@ export class SureDealStoreDO {
           type: 'purchase',
           amount: price,
           status: 'completed',
-          description: `SMS Rental: ${service.name} (${country.name})`,
+          description: `SMS Rental: ${service.name} (${country.name}) [${descSuffix}]`,
           createdAt: smsNowIso,
         });
         this.recordAccountingEntry({
@@ -1111,7 +1477,7 @@ export class SureDealStoreDO {
           userName: currentUser.name,
           userEmail: currentUser.email,
           title: `${service.name} (${country.name})`,
-          detail: `Number: ${phoneNumber}`,
+          detail: `Number: ${phoneNumber} · ${descSuffix}`,
           amount: price,
           status: order.status,
           createdAt: smsNowIso,
@@ -1124,14 +1490,14 @@ export class SureDealStoreDO {
           userName: currentUser.name,
           userEmail: currentUser.email,
           title: 'SMS RENTAL',
-          detail: `SMS Rental: ${service.name} (${country.name})`,
+          detail: `SMS Rental: ${service.name} (${country.name}) [${descSuffix}]`,
           amount: price,
           status: 'completed',
           createdAt: smsNowIso,
         });
         this.addAdminAlert(
           'New SMS Number Rented',
-          `${currentUser.email} rented ${service.name} (${country.name}) · ${phoneNumber}`,
+          `${currentUser.email} rented ${service.name} (${country.name} · ${tierLabel}) · ${phoneNumber}`,
           'order',
         );
         this.persistKeys(
@@ -1142,6 +1508,7 @@ export class SureDealStoreDO {
           'transactions',
           'accountingRecords',
           'adminAlerts',
+          'promoCodes',
         );
         this.scheduleNextSmsExpiryAlarm();
         return okJson({ order, balance: currentUser.balance }, 201);
@@ -1898,19 +2265,25 @@ export class SureDealStoreDO {
         if (!text) return errJson('Reply message cannot be empty', 400);
         const ticket = db.tickets.find((t) => t.id === ticketId);
         if (!ticket) return errJson('Ticket not found', 404);
-        if (currentUser.role !== 'admin' && ticket.userId !== currentUser.id) {
+        const canReplyAsAdmin =
+          currentUser.role === 'admin' &&
+          (this.isMainAdminUser(currentUser) ||
+            !currentUser.allowedAdminTab ||
+            currentUser.allowedAdminTab === 'support' ||
+            currentUser.allowedAdminTab === 'live');
+        if (!canReplyAsAdmin && ticket.userId !== currentUser.id) {
           return errJson('Access denied', 403);
         }
         const now = new Date().toISOString();
         ticket.messages.push({
           id: makeId('msg'),
-          senderRole: currentUser.role === 'admin' ? 'admin' : 'user',
+          senderRole: canReplyAsAdmin ? 'admin' : 'user',
           senderName: currentUser.name,
           text,
           createdAt: now,
         });
         ticket.updatedAt = now;
-        if (currentUser.role === 'admin' && ticket.status === 'open') {
+        if (canReplyAsAdmin && ticket.status === 'open') {
           ticket.status = 'in_progress';
         }
         this.persistKeys('tickets');
@@ -2018,6 +2391,10 @@ export class SureDealStoreDO {
 
         if (method === 'GET' && pathname === '/api/admin/overview') {
           this.expireTimedOutSmsOrders();
+          const isMain = this.isMainAdminUser(currentUser);
+          const scopedTab = !isMain ? currentUser.allowedAdminTab : undefined;
+          const allow = (tabs: AdminFeatureTab[]) => !scopedTab || tabs.includes(scopedTab);
+
           const visibleTransactions = db.transactions.filter((t) => !t.adminCleared);
           const visibleSmsOrders = db.smsOrders.filter((s) => !s.adminCleared);
           const visibleBoostingOrders = db.boostingOrders.filter((b) => !b.adminCleared);
@@ -2048,8 +2425,20 @@ export class SureDealStoreDO {
           );
           const unreadAlerts = db.adminAlerts.filter((a) => !a.read).length;
 
+          let safeSettings: PlatformSettings = db.settings;
+          if (!isMain && scopedTab !== 'settings') {
+            const {
+              smtpPass: _smtpPass,
+              smtpUser: _smtpUser,
+              smtpHost: _smtpHost,
+              resendApiKey: _resendApiKey,
+              ...restSettings
+            } = db.settings;
+            safeSettings = restSettings as PlatformSettings;
+          }
+
           return okJson({
-            settings: db.settings,
+            settings: safeSettings,
             metrics: {
               totalUsers: db.users.length,
               totalRevenue,
@@ -2064,33 +2453,216 @@ export class SureDealStoreDO {
               openTickets: openTickets.length,
               unreadAlerts,
             },
-            users: db.users.map(toPublicUser),
-            transactions: visibleTransactions,
-            smsOrders: visibleSmsOrders,
-            smsPool: db.smsPool,
+            users: allow(['overview', 'users']) ? db.users.map(toPublicUser) : [],
+            transactions: allow(['overview', 'revenue', 'live', 'users', 'orders', 'accounting'])
+              ? visibleTransactions
+              : [],
+            smsOrders: allow(['overview', 'revenue', 'live', 'users', 'orders']) ? visibleSmsOrders : [],
+            smsPool: allow(['overview', 'orders', 'catalog']) ? db.smsPool : [],
             smsServices: db.smsServices,
             smsCountries: db.smsCountries,
-            boostingOrders: visibleBoostingOrders,
+            boostingOrders: allow(['overview', 'revenue', 'live', 'users', 'orders'])
+              ? visibleBoostingOrders
+              : [],
             boostingServices: db.boostingServices,
             marketplaceCategories: db.marketplaceCategories,
             marketplaceListings: db.marketplaceListings,
-            vaultItems: visibleVaultItems,
+            vaultItems: allow(['overview', 'revenue', 'live', 'users', 'orders']) ? visibleVaultItems : [],
             customSections: db.customSections,
-            notifications: db.notifications,
-            emailLogs: db.emailLogs,
+            notifications: allow(['overview', 'notifications']) ? db.notifications : [],
+            emailLogs: allow(['overview', 'notifications']) ? db.emailLogs : [],
             tutorials: db.tutorials,
-            tickets: db.tickets,
+            tickets: allow(['overview', 'live', 'support']) ? db.tickets : [],
             adminAlerts: db.adminAlerts,
             promoCodes: db.promoCodes,
-            auditLogs: db.auditLogs,
-            accountingRecords: db.accountingRecords || [],
+            auditLogs: allow(['overview', 'audit']) ? db.auditLogs : [],
+            accountingRecords: allow(['overview', 'revenue', 'accounting'])
+              ? db.accountingRecords || []
+              : [],
             visitorStats: db.visitorStats || { totalVisits: 0, recentSessions: [] },
           });
+        }
+
+        // --- LIVE MONITOR FEED ---
+        if (method === 'GET' && pathname === '/api/admin/live') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'overview', 'live');
+          if (scopeErr) return scopeErr;
+          this.expireTimedOutSmsOrders();
+          const nowMs = Date.now();
+          const recentSessions = (db.visitorStats?.recentSessions || []).slice(0, 30);
+          const activeVisitors5m = recentSessions.filter(
+            (s) => nowMs - new Date(s.visitedAt).getTime() <= 5 * 60 * 1000,
+          ).length;
+          return okJson({
+            serverTime: new Date(nowMs).toISOString(),
+            totalVisits: db.visitorStats?.totalVisits || 0,
+            activeVisitors5m,
+            recentSessions,
+            waitingSms: db.smsOrders.filter((o) => !o.adminCleared && o.status === 'waiting').slice(0, 25),
+            activeBoosting: db.boostingOrders
+              .filter(
+                (o) =>
+                  !o.adminCleared &&
+                  (o.status === 'pending' || o.status === 'processing' || o.status === 'refilling'),
+              )
+              .slice(0, 25),
+            pendingDeposits: db.transactions
+              .filter((t) => !t.adminCleared && t.type === 'deposit' && t.status === 'pending')
+              .slice(0, 25),
+            openTickets: db.tickets
+              .filter((t) => t.status === 'open' || t.status === 'in_progress')
+              .slice(0, 20),
+            recentUsers: [...db.users]
+              .sort(
+                (a, b) =>
+                  new Date(b.lastLoginAt || b.createdAt).getTime() -
+                  new Date(a.lastLoginAt || a.createdAt).getTime(),
+              )
+              .slice(0, 15)
+              .map(toPublicUser),
+            recentAlerts: db.adminAlerts.slice(0, 25),
+          });
+        }
+
+        // --- MAIN ADMIN IDENTITY & SINGLE-FEATURE SUB-ADMIN MANAGEMENT ---
+        if (method === 'POST' && pathname === '/api/admin/main-admin/change-email') {
+          const mainErr = this.requireMainAdmin(currentUser, request);
+          if (mainErr) return mainErr;
+          const body = await readJsonBody(request);
+          const newEmail = String(body.newEmail || '').trim().toLowerCase();
+          const currentPassword = String(body.currentPassword || '');
+          if (!(await verifyPasswordWeb(currentPassword, currentUser.passwordHash))) {
+            return errJson('Current password verification failed', 400);
+          }
+          if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+            return errJson('Please enter a valid email address', 400);
+          }
+          const conflict = db.users.some(
+            (u) => u.id !== currentUser.id && u.email.toLowerCase() === newEmail,
+          );
+          if (conflict) {
+            return errJson('Another account already uses this email address', 409);
+          }
+          const oldEmail = currentUser.email;
+          currentUser.email = newEmail;
+          currentUser.isMainAdmin = true;
+          currentUser.allowedAdminTab = undefined;
+          db.settings.mainAdminEmail = newEmail;
+          this.logAudit(
+            newEmail,
+            'MAIN_ADMIN_EMAIL_CHANGE',
+            oldEmail,
+            `Main Admin email updated from ${oldEmail} to ${newEmail}`,
+          );
+          this.persistKeys('users', 'settings', 'auditLogs');
+          return okJson({ user: toPublicUser(currentUser), settings: db.settings });
+        }
+
+        if (method === 'GET' && pathname === '/api/admin/sub-admins') {
+          const mainErr = this.requireMainAdmin(currentUser, request);
+          if (mainErr) return mainErr;
+          const mainAdmin = db.users.find((u) => this.isMainAdminUser(u));
+          const subAdmins = db.users
+            .filter((u) => u.role === 'admin' && !this.isMainAdminUser(u))
+            .map(toPublicUser);
+          return okJson({
+            mainAdmin: mainAdmin ? toPublicUser(mainAdmin) : null,
+            subAdmins,
+            delegatableTabs: DELEGATABLE_ADMIN_TABS,
+          });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/sub-admins') {
+          const mainErr = this.requireMainAdmin(currentUser, request);
+          if (mainErr) return mainErr;
+          const body = await readJsonBody(request);
+          const allowedAdminTab = String(body.allowedAdminTab || '') as AdminFeatureTab;
+          if (!DELEGATABLE_ADMIN_TABS.includes(allowedAdminTab)) {
+            return errJson('Select one valid single admin feature to delegate', 400);
+          }
+          const userId = String(body.userId || '').trim();
+          const email = String(body.email || '').trim().toLowerCase();
+          const name = String(body.name || '').trim();
+          const password = String(body.password || '');
+
+          let target: StoredUser | undefined;
+          if (userId) {
+            target = db.users.find((u) => u.id === userId);
+            if (!target) return errJson('Selected user not found', 404);
+          } else if (email) {
+            target = db.users.find((u) => u.email.toLowerCase() === email);
+            if (!target) {
+              if (!name || name.length < 2 || password.length < 6) {
+                return errJson('Name (min 2 chars) and password (min 6 chars) are required for a new sub-admin', 400);
+              }
+              target = {
+                id: makeId('usr'),
+                name,
+                email,
+                passwordHash: await hashPasswordWeb(password),
+                role: 'admin',
+                isMainAdmin: false,
+                allowedAdminTab,
+                authProvider: 'email',
+                emailVerified: true,
+                balance: 0,
+                status: 'active',
+                referralCode: `SD${randomHex(3).toUpperCase()}`,
+                createdAt: new Date().toISOString(),
+              };
+              db.users.push(target);
+            }
+          } else {
+            return errJson('Provide an existing user or email to assign a sub-admin', 400);
+          }
+
+          if (this.isMainAdminUser(target)) {
+            return errJson('Cannot restrict or modify the protected Main Admin account', 400);
+          }
+
+          target.role = 'admin';
+          target.isMainAdmin = false;
+          target.status = 'active';
+          target.allowedAdminTab = allowedAdminTab;
+
+          this.logAudit(
+            currentUser.email,
+            'DELEGATE_SUB_ADMIN',
+            target.email,
+            `Assigned single admin feature: ${allowedAdminTab}`,
+          );
+          this.persistKeys('users', 'auditLogs');
+          return okJson({ user: toPublicUser(target) });
+        }
+
+        const subAdminIdMatch = pathname.match(/^\/api\/admin\/sub-admins\/([^/]+)$/);
+        if (method === 'DELETE' && subAdminIdMatch) {
+          const mainErr = this.requireMainAdmin(currentUser, request);
+          if (mainErr) return mainErr;
+          const targetId = decodeURIComponent(subAdminIdMatch[1]);
+          const target = db.users.find((u) => u.id === targetId);
+          if (!target) return errJson('Sub-admin not found', 404);
+          if (this.isMainAdminUser(target)) {
+            return errJson('Main Admin is permanently protected and cannot be revoked', 403);
+          }
+          target.role = 'user';
+          target.isMainAdmin = false;
+          target.allowedAdminTab = undefined;
+          this.logAudit(
+            currentUser.email,
+            'REVOKE_SUB_ADMIN',
+            target.email,
+            'Reverted sub-admin back to standard user',
+          );
+          this.persistKeys('users', 'auditLogs');
+          return okJson({ ok: true });
         }
 
         // --- IMMUTABLE ACCOUNTING LEDGER CONTROLS ---
         const adminAccDelMatch = pathname.match(/^\/api\/admin\/accounting\/([^/]+)$/);
         if (method === 'DELETE' && adminAccDelMatch && pathname !== '/api/admin/accounting/clear') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'accounting');
+          if (scopeErr) return scopeErr;
           const accId = decodeURIComponent(adminAccDelMatch[1]);
           const before = (db.accountingRecords || []).length;
           const target = (db.accountingRecords || []).find((r) => r.id === accId);
@@ -2107,6 +2679,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/accounting/clear') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'accounting');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const scope = String(body.scope || 'all');
           const current = db.accountingRecords || [];
@@ -2135,6 +2709,8 @@ export class SureDealStoreDO {
 
         // --- SOFT REFRESH WEBSITE ---
         if (method === 'POST' && pathname === '/api/admin/system/refresh-ops') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'overview', 'settings');
+          if (scopeErr) return scopeErr;
           const counts = {
             smsOrders: db.smsOrders.length,
             boostingOrders: db.boostingOrders.length,
@@ -2193,6 +2769,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/upload-video') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'settings');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const dataUrl = String(body.videoDataUrl || '');
           const fileName = String(body.fileName || 'video.mp4');
@@ -2217,11 +2795,16 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/users') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'users');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const name = String(body.name || '').trim();
           const email = String(body.email || '').trim().toLowerCase();
           const password = String(body.password || 'SureDeal123!');
           const role = body.role === 'admin' ? 'admin' : 'user';
+          if (role === 'admin' && !this.isMainAdminUser(currentUser)) {
+            return errJson('Only Main Admin can create administrator accounts', 403);
+          }
           const balance = Math.max(0, Number(body.balance || 0));
 
           if (!name || !email.includes('@')) {
@@ -2236,6 +2819,9 @@ export class SureDealStoreDO {
             email,
             passwordHash: await hashPasswordWeb(password),
             role,
+            isMainAdmin: false,
+            allowedAdminTab: role === 'admin' ? 'overview' : undefined,
+            emailVerified: true,
             balance,
             status: 'active',
             referralCode: `SD${randomHex(3).toUpperCase()}`,
@@ -2254,9 +2840,14 @@ export class SureDealStoreDO {
 
         const adminUserBalMatch = pathname.match(/^\/api\/admin\/users\/([^/]+)\/balance$/);
         if (method === 'POST' && adminUserBalMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'users');
+          if (scopeErr) return scopeErr;
           const targetId = decodeURIComponent(adminUserBalMatch[1]);
           const target = db.users.find((u) => u.id === targetId);
           if (!target) return errJson('User not found', 404);
+          if (this.isMainAdminUser(target) && !this.isMainAdminUser(currentUser)) {
+            return errJson('Main Admin account is permanently protected and cannot be modified', 403);
+          }
           const body = await readJsonBody(request);
           const mode = String(body.mode || 'credit');
           const amount = Number(body.amount || 0);
@@ -2316,6 +2907,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/users/airdrop-bonus') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'users', 'promos');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const amount = Number(body.amount || 0);
           const title = String(body.title || 'Creator Wallet Bonus').trim();
@@ -2382,20 +2975,29 @@ export class SureDealStoreDO {
 
         const adminUserIdMatch = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
         if (adminUserIdMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'users');
+          if (scopeErr) return scopeErr;
           const targetId = decodeURIComponent(adminUserIdMatch[1]);
           const target = db.users.find((u) => u.id === targetId);
           if (!target) return errJson('User not found', 404);
+          const targetIsMain = this.isMainAdminUser(target);
+          const callerIsMain = this.isMainAdminUser(currentUser);
+          if (targetIsMain && !callerIsMain) {
+            return errJson('Main Admin account is permanently protected and cannot be modified', 403);
+          }
           const body = await readJsonBody(request);
+          if (!callerIsMain && (target.role === 'admin' || body.role === 'admin')) {
+            return errJson('Only Main Admin can modify administrator roles', 403);
+          }
           if (typeof body.name === 'string' && body.name.trim()) {
             target.name = body.name.trim();
           }
-          if (typeof body.email === 'string' && body.email.includes('@')) {
+          if (typeof body.email === 'string' && body.email.includes('@') && !targetIsMain) {
             target.email = body.email.trim().toLowerCase();
           }
-          const isHeadAdmin = target.email.toLowerCase() === HEAD_ADMIN_EMAIL.toLowerCase();
-          const isTargetAdmin = target.role === 'admin' || isHeadAdmin;
-          if (isHeadAdmin && body.role === 'user') {
-            return errJson('Cannot remove admin role from the Head Admin account', 400);
+          const isTargetAdmin = target.role === 'admin' || targetIsMain;
+          if (targetIsMain && body.role === 'user') {
+            return errJson('Cannot remove admin role from the Main Admin account', 400);
           }
           if (isTargetAdmin && body.status === 'suspended') {
             return errJson('Admin accounts cannot be suspended', 400);
@@ -2404,6 +3006,8 @@ export class SureDealStoreDO {
             target.role = body.role;
             if (target.role === 'admin') {
               target.status = 'active';
+            } else {
+              target.allowedAdminTab = undefined;
             }
           }
           if (body.status === 'active' || body.status === 'suspended') {
@@ -2442,7 +3046,7 @@ export class SureDealStoreDO {
               currentUser.email,
               'RESET_PASSWORD',
               target.email,
-              'Password updated by Head Admin',
+              'Password updated by Admin',
             );
           }
           this.persistKeys('users', 'auditLogs');
@@ -2450,14 +3054,16 @@ export class SureDealStoreDO {
         }
 
         if (adminUserIdMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'users');
+          if (scopeErr) return scopeErr;
           const targetId = decodeURIComponent(adminUserIdMatch[1]);
           const target = db.users.find((u) => u.id === targetId);
           if (!target) return errJson('User not found', 404);
-          if (
-            target.id === currentUser.id ||
-            target.email.toLowerCase() === HEAD_ADMIN_EMAIL.toLowerCase()
-          ) {
-            return errJson('Cannot permanently delete the Head Admin account', 400);
+          if (target.id === currentUser.id || this.isMainAdminUser(target)) {
+            return errJson('Cannot permanently delete the Main Admin account', 403);
+          }
+          if (target.role === 'admin' && !this.isMainAdminUser(currentUser)) {
+            return errJson('Only Main Admin can delete administrator accounts', 403);
           }
           const targetEmail = target.email.toLowerCase();
           db.users = db.users.filter(
@@ -2496,6 +3102,8 @@ export class SureDealStoreDO {
         // --- TRANSACTIONS ADMIN ---
         const txDecisionMatch = pathname.match(/^\/api\/admin\/transactions\/([^/]+)\/decision$/);
         if (method === 'POST' && txDecisionMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          if (scopeErr) return scopeErr;
           const txId = decodeURIComponent(txDecisionMatch[1]);
           const tx = db.transactions.find((t) => t.id === txId);
           if (!tx || tx.type !== 'deposit') {
@@ -2564,6 +3172,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/transactions/bulk-approve-matched') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          if (scopeErr) return scopeErr;
           const matched = db.transactions.filter(
             (t) =>
               !t.adminCleared &&
@@ -2613,6 +3223,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/transactions/clear') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const scope = String(body.scope || 'all');
           let removed = 0;
@@ -2652,6 +3264,8 @@ export class SureDealStoreDO {
 
         const adminTxDeleteMatch = pathname.match(/^\/api\/admin\/transactions\/([^/]+)$/);
         if (method === 'DELETE' && adminTxDeleteMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          if (scopeErr) return scopeErr;
           const txId = decodeURIComponent(adminTxDeleteMatch[1]);
           const target = db.transactions.find((t) => t.id === txId && !t.adminCleared);
           if (!target) return errJson('Transaction record not found', 404);
@@ -2668,6 +3282,8 @@ export class SureDealStoreDO {
 
         // --- BOOSTING ADMIN ---
         if (method === 'POST' && pathname === '/api/admin/boosting-orders/bulk-status') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const fromStatus = String(body.fromStatus || '');
           const toStatus = String(body.toStatus || '');
@@ -2701,6 +3317,8 @@ export class SureDealStoreDO {
 
         const adminBoostMatch = pathname.match(/^\/api\/admin\/boosting-orders\/([^/]+)$/);
         if (adminBoostMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          if (scopeErr) return scopeErr;
           const orderId = decodeURIComponent(adminBoostMatch[1]);
           const order = db.boostingOrders.find((o) => o.id === orderId);
           if (!order) return errJson('Boosting order not found', 404);
@@ -2758,6 +3376,8 @@ export class SureDealStoreDO {
         }
 
         if (adminBoostMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          if (scopeErr) return scopeErr;
           const orderId = decodeURIComponent(adminBoostMatch[1]);
           const target = db.boostingOrders.find((o) => o.id === orderId && !o.adminCleared);
           if (!target) return errJson('Boosting order not found', 404);
@@ -2775,6 +3395,8 @@ export class SureDealStoreDO {
         // --- SMS ADMIN ---
         const smsAssignMatch = pathname.match(/^\/api\/admin\/sms-orders\/([^/]+)\/assign-number$/);
         if (method === 'POST' && smsAssignMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          if (scopeErr) return scopeErr;
           this.expireTimedOutSmsOrders();
           const orderId = decodeURIComponent(smsAssignMatch[1]);
           const order = db.smsOrders.find((o) => o.id === orderId);
@@ -2811,6 +3433,8 @@ export class SureDealStoreDO {
 
         const smsDeliverMatch = pathname.match(/^\/api\/admin\/sms-orders\/([^/]+)\/deliver$/);
         if (method === 'POST' && smsDeliverMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          if (scopeErr) return scopeErr;
           this.expireTimedOutSmsOrders();
           const orderId = decodeURIComponent(smsDeliverMatch[1]);
           const order = db.smsOrders.find((o) => o.id === orderId);
@@ -2850,6 +3474,8 @@ export class SureDealStoreDO {
 
         const smsDeleteMatch = pathname.match(/^\/api\/admin\/sms-orders\/([^/]+)$/);
         if (method === 'DELETE' && smsDeleteMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          if (scopeErr) return scopeErr;
           const orderId = decodeURIComponent(smsDeleteMatch[1]);
           const target = db.smsOrders.find((o) => o.id === orderId && !o.adminCleared);
           if (!target) return errJson('SMS order not found', 404);
@@ -2865,6 +3491,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/sms-pool') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const phoneNumber = String(body.phoneNumber || '').trim();
           const countryId = String(body.countryId || 'cnt_us');
@@ -2887,6 +3515,8 @@ export class SureDealStoreDO {
 
         const smsPoolDelMatch = pathname.match(/^\/api\/admin\/sms-pool\/([^/]+)$/);
         if (method === 'DELETE' && smsPoolDelMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(smsPoolDelMatch[1]);
           db.smsPool = db.smsPool.filter((p) => p.id !== id);
           this.persistKeys('smsPool');
@@ -2894,6 +3524,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/orders/clear') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const scope = String(body.scope || 'completed');
           if (scope === 'all') {
@@ -2928,6 +3560,8 @@ export class SureDealStoreDO {
 
         const adminVaultDelMatch = pathname.match(/^\/api\/admin\/vault-items\/([^/]+)$/);
         if (method === 'DELETE' && adminVaultDelMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          if (scopeErr) return scopeErr;
           const vaultId = decodeURIComponent(adminVaultDelMatch[1]);
           const target = db.vaultItems.find((v) => v.id === vaultId && !v.adminCleared);
           if (!target) return errJson('Vault delivery record not found', 404);
@@ -2944,6 +3578,8 @@ export class SureDealStoreDO {
 
         // --- ADMIN CATALOG CRUD ---
         if (method === 'POST' && pathname === '/api/admin/sms-services') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const svc: SmsService = {
             id: makeId('svc'),
@@ -2962,6 +3598,8 @@ export class SureDealStoreDO {
 
         const smsSvcMatch = pathname.match(/^\/api\/admin\/sms-services\/([^/]+)$/);
         if (smsSvcMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(smsSvcMatch[1]);
           const svc = db.smsServices.find((s) => s.id === id);
           if (!svc) return errJson('SMS service not found', 404);
@@ -2993,6 +3631,8 @@ export class SureDealStoreDO {
         }
 
         if (smsSvcMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(smsSvcMatch[1]);
           db.smsServices = db.smsServices.filter((s) => s.id !== id);
           this.persistKeys('smsServices');
@@ -3000,6 +3640,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/sms-countries') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const country: SmsCountry = {
             id: makeId('cnt'),
@@ -3016,6 +3658,8 @@ export class SureDealStoreDO {
 
         const smsCntMatch = pathname.match(/^\/api\/admin\/sms-countries\/([^/]+)$/);
         if (smsCntMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(smsCntMatch[1]);
           const country = db.smsCountries.find((c) => c.id === id);
           if (!country) return errJson('Country not found', 404);
@@ -3041,6 +3685,8 @@ export class SureDealStoreDO {
         }
 
         if (smsCntMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(smsCntMatch[1]);
           db.smsCountries = db.smsCountries.filter((c) => c.id !== id);
           this.persistKeys('smsCountries');
@@ -3048,6 +3694,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/boosting-services') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const item: BoostingService = {
             id: makeId('bst'),
@@ -3068,6 +3716,8 @@ export class SureDealStoreDO {
 
         const boostSvcMatch = pathname.match(/^\/api\/admin\/boosting-services\/([^/]+)$/);
         if (boostSvcMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(boostSvcMatch[1]);
           const item = db.boostingServices.find((b) => b.id === id);
           if (!item) return errJson('Boosting service not found', 404);
@@ -3104,6 +3754,8 @@ export class SureDealStoreDO {
         }
 
         if (boostSvcMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(boostSvcMatch[1]);
           db.boostingServices = db.boostingServices.filter((b) => b.id !== id);
           this.persistKeys('boostingServices');
@@ -3111,6 +3763,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/marketplace-categories') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const name = String(body.name || '').trim();
           if (!name) return errJson('Category name is required', 400);
@@ -3126,6 +3780,8 @@ export class SureDealStoreDO {
 
         const mktCatMatch = pathname.match(/^\/api\/admin\/marketplace-categories\/([^/]+)$/);
         if (method === 'PATCH' && mktCatMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(mktCatMatch[1]);
           const cat = db.marketplaceCategories.find((c) => c.id === id);
           if (!cat) return errJson('Category not found', 404);
@@ -3147,6 +3803,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'DELETE' && mktCatMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(mktCatMatch[1]);
           db.marketplaceCategories = db.marketplaceCategories.filter((c) => c.id !== id);
           this.persistKeys('marketplaceCategories');
@@ -3154,6 +3812,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/catalog/reorder') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'cms');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const rawKind = String(body.kind || body.entity || '').trim();
           const orderedIds = Array.isArray(body.orderedIds) ? body.orderedIds.map(String) : [];
@@ -3195,6 +3855,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/catalog/bulk') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const target = String(body.target || '').trim();
           const action = String(body.action || '').trim();
@@ -3271,6 +3933,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/catalog/duplicate') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'cms');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const target = String(body.target || '').trim();
           const id = String(body.id || '').trim();
@@ -3332,6 +3996,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/marketplace-listings') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const featuresRaw = body.features;
           const features = Array.isArray(featuresRaw)
@@ -3407,6 +4073,8 @@ export class SureDealStoreDO {
 
         const mktListMatch = pathname.match(/^\/api\/admin\/marketplace-listings\/([^/]+)$/);
         if (mktListMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(mktListMatch[1]);
           const item = db.marketplaceListings.find((l) => l.id === id);
           if (!item) return errJson('Listing not found', 404);
@@ -3488,6 +4156,8 @@ export class SureDealStoreDO {
         }
 
         if (mktListMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(mktListMatch[1]);
           const target = db.marketplaceListings.find((l) => l.id === id);
           db.marketplaceListings = db.marketplaceListings.filter((l) => l.id !== id);
@@ -3505,6 +4175,8 @@ export class SureDealStoreDO {
 
         // --- SECTIONS ---
         if (method === 'POST' && pathname === '/api/admin/sections/ai-setup') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const name = String(body.name || '').trim();
           if (!name) return errJson('Section name is required for AI setup', 400);
@@ -3518,6 +4190,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/sections') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const secId = makeId('sec');
           const starterRaw = Array.isArray(body.products) ? body.products : [];
@@ -3568,6 +4242,8 @@ export class SureDealStoreDO {
 
         const adminSecMatch = pathname.match(/^\/api\/admin\/sections\/([^/]+)$/);
         if (adminSecMatch && method === 'PATCH') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(adminSecMatch[1]);
           const section = db.customSections.find((s) => s.id === id);
           if (!section) return errJson('Section not found', 404);
@@ -3592,6 +4268,8 @@ export class SureDealStoreDO {
         }
 
         if (adminSecMatch && method === 'DELETE') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(adminSecMatch[1]);
           db.customSections = db.customSections.filter((s) => s.id !== id);
           this.persistKeys('customSections');
@@ -3599,6 +4277,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/section-products') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const sectionId = String(body.sectionId || '');
           const section = db.customSections.find((s) => s.id === sectionId);
@@ -3635,6 +4315,8 @@ export class SureDealStoreDO {
 
         const secProdMatch = pathname.match(/^\/api\/admin\/section-products\/([^/]+)$/);
         if (method === 'PATCH' && secProdMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(secProdMatch[1]);
           let targetProduct: CustomSectionProduct | undefined;
           for (const s of db.customSections) {
@@ -3690,6 +4372,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'DELETE' && secProdMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'cms', 'catalog');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(secProdMatch[1]);
           db.customSections.forEach((s) => {
             s.products = s.products.filter((p) => p.id !== id);
@@ -3700,6 +4384,8 @@ export class SureDealStoreDO {
 
         // --- PROMO CODES ---
         if (method === 'POST' && pathname === '/api/admin/promo-codes') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'promos');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const code = String(body.code || '').trim().toUpperCase();
           if (!code) return errJson('Promo code text is required', 400);
@@ -3720,6 +4406,8 @@ export class SureDealStoreDO {
 
         const promoToggleMatch = pathname.match(/^\/api\/admin\/promo-codes\/([^/]+)\/toggle$/);
         if (method === 'PATCH' && promoToggleMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'promos');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(promoToggleMatch[1]);
           const promo = db.promoCodes.find((p) => p.id === id);
           if (!promo) return errJson('Promo code not found', 404);
@@ -3731,6 +4419,8 @@ export class SureDealStoreDO {
 
         const promoDelMatch = pathname.match(/^\/api\/admin\/promo-codes\/([^/]+)$/);
         if (method === 'DELETE' && promoDelMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'promos');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(promoDelMatch[1]);
           db.promoCodes = db.promoCodes.filter((p) => p.id !== id);
           this.persistKeys('promoCodes');
@@ -3738,6 +4428,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/audit-logs/clear') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'audit');
+          if (scopeErr) return scopeErr;
           const count = db.auditLogs.length;
           db.auditLogs = [];
           this.logAudit(
@@ -3752,6 +4444,8 @@ export class SureDealStoreDO {
 
         // --- NOTIFICATIONS, EMAIL, TUTORIALS, TICKETS ---
         if (method === 'POST' && pathname === '/api/admin/notifications') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'notifications');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const item = {
             id: makeId('ntf'),
@@ -3772,6 +4466,8 @@ export class SureDealStoreDO {
 
         const ntfDelMatch = pathname.match(/^\/api\/admin\/notifications\/([^/]+)$/);
         if (method === 'DELETE' && ntfDelMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'notifications');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(ntfDelMatch[1]);
           db.notifications = db.notifications.filter((n) => n.id !== id);
           this.persistKeys('notifications');
@@ -3779,6 +4475,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/email') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'notifications');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const to = String(body.to || '').trim().toLowerCase();
           const subject = String(body.subject || '').trim();
@@ -3827,6 +4525,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/tutorials') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'tutorials');
+          if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const tutorial = {
             id: makeId('tut'),
@@ -3845,6 +4545,8 @@ export class SureDealStoreDO {
 
         const tutDelMatch = pathname.match(/^\/api\/admin\/tutorials\/([^/]+)$/);
         if (method === 'PATCH' && tutDelMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'tutorials');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(tutDelMatch[1]);
           const tutorial = db.tutorials.find((t) => t.id === id);
           if (!tutorial) return errJson('Tutorial not found', 404);
@@ -3871,6 +4573,8 @@ export class SureDealStoreDO {
           return okJson({ tutorial });
         }
         if (method === 'DELETE' && tutDelMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'tutorials');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(tutDelMatch[1]);
           db.tutorials = db.tutorials.filter((t) => t.id !== id);
           this.persistKeys('tutorials');
@@ -3879,6 +4583,8 @@ export class SureDealStoreDO {
 
         const ticketStatusMatch = pathname.match(/^\/api\/admin\/tickets\/([^/]+)\/status$/);
         if (method === 'PATCH' && ticketStatusMatch) {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'support', 'live');
+          if (scopeErr) return scopeErr;
           const id = decodeURIComponent(ticketStatusMatch[1]);
           const ticket = db.tickets.find((t) => t.id === id);
           if (!ticket) return errJson('Ticket not found', 404);
@@ -3892,6 +4598,8 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/activity/refresh') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'audit', 'overview');
+          if (scopeErr) return scopeErr;
           db.adminAlerts = [];
           db.auditLogs = [];
           db.emailLogs = [];
@@ -3901,14 +4609,142 @@ export class SureDealStoreDO {
 
         // --- SETTINGS ---
         if (method === 'PATCH' && pathname === '/api/admin/settings') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'settings', 'cms', 'copy', 'revenue', 'catalog');
+          if (scopeErr) return scopeErr;
           const s: PlatformSettings = db.settings;
           const body = await readJsonBody(request);
+          if (!this.isMainAdminUser(currentUser) && currentUser.allowedAdminTab && currentUser.allowedAdminTab !== 'settings') {
+            const copyAllowedKeys = [
+              'dashboardNoticeEnabled',
+              'dashboardNoticeText',
+              'dashboardNoticeTone',
+              'dashboardWalletBadge',
+              'dashboardWalletTitle',
+              'dashboardWalletSubtitle',
+              'dashboardBalanceLabel',
+              'dashboardFundButtonLabel',
+              'dashboardHistoryButtonLabel',
+              'walletPageTitle',
+              'walletPageSubtitle',
+              'walletNoticeText',
+              'walletCardHeader',
+              'walletFormTitle',
+              'walletUploadHint',
+              'walletSubmitButtonLabel',
+              'walletActivityTitle',
+              'walletEmptyActivityText',
+              'marketplaceTitle',
+              'marketplaceSubtitle',
+              'marketplacePausedText',
+              'defaultBuyWarning',
+              'defaultBuyWarningLevel',
+              'smsTitle',
+              'smsSubtitle',
+              'smsSessionNote',
+              'smsInboxTitle',
+              'smsRentButtonLabel',
+              'smsPausedText',
+              'boostingTitle',
+              'boostingSubtitle',
+              'boostingHistoryTitle',
+              'boostingEmptyText',
+              'boostingPausedText',
+              'ordersTitle',
+              'ordersSubtitle',
+              'transactionsTitle',
+              'transactionsSubtitle',
+              'referralTitle',
+              'referralSubtitle',
+              'referralCardBadge',
+              'referralCardHeadline',
+              'referralCardDesc',
+              'tutorialsTitle',
+              'tutorialsSubtitle',
+              'supportTitle',
+              'supportSubtitle',
+              'notificationsTitle',
+              'notificationsSubtitle',
+              'settingsTitle',
+              'settingsSubtitle',
+            ];
+            const tabWhitelists: Record<string, Set<string>> = {
+              revenue: new Set([
+                'profitCostPercentMarketplace',
+                'profitCostPercentSms',
+                'profitCostPercentBoosting',
+              ]),
+              catalog: new Set([
+                'smsPrimeLabel',
+                'smsAlternateLabel',
+                'smsAlternateDiscountPct',
+                'defaultBuyWarning',
+                'defaultBuyWarningLevel',
+              ]),
+              copy: new Set(copyAllowedKeys),
+              cms: new Set([
+                ...copyAllowedKeys,
+                'siteLogoUrl',
+                'clearSiteLogo',
+                'landingVideoUrl',
+                'heroKicker',
+                'heroHeadline',
+                'heroSecondaryHeadline',
+                'heroSubheadline',
+                'heroPrimaryCta',
+                'heroSecondaryCta',
+                'snapshotKicker',
+                'snapshotTitle',
+                'snapshotBadge',
+                'snapshotFooterText',
+                'servicesKicker',
+                'servicesTitle',
+                'landingStats',
+                'landingShowcaseCards',
+                'dashboardBanners',
+                'workflowKicker',
+                'workflowTitle',
+                'workflowSubtitle',
+                'workflowSteps',
+                'ctaKicker',
+                'ctaTitle',
+                'ctaSubtitle',
+                'maintenanceHeadline',
+                'maintenanceMessage',
+                'footerTagline',
+                'creatorName',
+                'creatorUrl',
+                'announcementBanner',
+                'pinnedTickerEnabled',
+                'pinnedTickerText',
+                'pinnedTickerTheme',
+                'showLandingShowcase',
+                'showLandingRates',
+                'communityChannelEnabled',
+                'communityChannelPlatform',
+                'communityChannelTitle',
+                'communityChannelSubtitle',
+                'communityChannelUrl',
+                'communityChannelCta',
+              ]),
+            };
+            const allowedKeys = tabWhitelists[currentUser.allowedAdminTab];
+            const forbiddenKeys = Object.keys(body).filter((k) => !allowedKeys || !allowedKeys.has(k));
+            if (forbiddenKeys.length > 0) {
+              return errJson(
+                `Access restricted: "${currentUser.allowedAdminTab}" sub-admin cannot modify settings fields (${forbiddenKeys.join(', ')}).`,
+                403,
+              );
+            }
+          }
 
           if (typeof body.siteName === 'string' && body.siteName.trim()) {
             s.siteName = body.siteName.trim();
           }
           if (typeof body.siteTagline === 'string') {
             s.siteTagline = body.siteTagline.trim();
+          }
+          if (body.siteNameColorMode === 'solid' || body.siteNameColorMode === 'split' || body.siteNameColorMode === 'gradient') {
+            s.siteNameColorMode = body.siteNameColorMode;
           }
           if (body.clearSiteLogo === true) {
             s.siteLogoUrl = '';
@@ -3942,6 +4778,8 @@ export class SureDealStoreDO {
             typeof v === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v.trim());
           if (isHex(body.brandColor)) s.brandColor = body.brandColor.trim().toUpperCase();
           if (isHex(body.accentColor)) s.accentColor = body.accentColor.trim().toUpperCase();
+          if (isHex(body.siteNameColor1)) s.siteNameColor1 = body.siteNameColor1.trim().toUpperCase();
+          if (isHex(body.siteNameColor2)) s.siteNameColor2 = body.siteNameColor2.trim().toUpperCase();
           if (isHex(body.surfaceBgLight)) s.surfaceBgLight = body.surfaceBgLight.trim().toUpperCase();
           if (isHex(body.surfaceBgDark)) s.surfaceBgDark = body.surfaceBgDark.trim().toUpperCase();
           if (typeof body.colorPreset === 'string' && body.colorPreset.trim()) {
@@ -3950,6 +4788,17 @@ export class SureDealStoreDO {
           if (typeof body.maintenanceMode === 'boolean') s.maintenanceMode = body.maintenanceMode;
           if (typeof body.supportEmail === 'string') s.supportEmail = body.supportEmail.trim();
           if (typeof body.supportWhatsapp === 'string') s.supportWhatsapp = body.supportWhatsapp.trim();
+          if (typeof body.supportTelegram === 'string') s.supportTelegram = body.supportTelegram.trim();
+          if (body.supportPrimaryChannel === 'whatsapp' || body.supportPrimaryChannel === 'telegram' || body.supportPrimaryChannel === 'both') {
+            s.supportPrimaryChannel = body.supportPrimaryChannel;
+          }
+          if (body.supportGroupPlatform === 'whatsapp' || body.supportGroupPlatform === 'telegram') {
+            s.supportGroupPlatform = body.supportGroupPlatform;
+          }
+          if (typeof body.supportGroupName === 'string') s.supportGroupName = body.supportGroupName.trim();
+          if (typeof body.supportGroupUrl === 'string') s.supportGroupUrl = body.supportGroupUrl.trim();
+          if (typeof body.supportDeskNote === 'string') s.supportDeskNote = body.supportDeskNote.trim();
+          if (typeof body.supportAllowTickets === 'boolean') s.supportAllowTickets = body.supportAllowTickets;
           if (typeof body.showFloatingWhatsapp === 'boolean') {
             s.showFloatingWhatsapp = body.showFloatingWhatsapp;
           }
@@ -3977,6 +4826,15 @@ export class SureDealStoreDO {
           if (typeof body.creatorName === 'string') s.creatorName = body.creatorName.trim();
           if (typeof body.creatorUrl === 'string') s.creatorUrl = body.creatorUrl.trim();
           if (typeof body.allowNewSignups === 'boolean') s.allowNewSignups = body.allowNewSignups;
+          if (typeof body.requireEmailVerification === 'boolean') {
+            s.requireEmailVerification = body.requireEmailVerification;
+          }
+          if (typeof body.googleAuthEnabled === 'boolean') {
+            s.googleAuthEnabled = body.googleAuthEnabled;
+          }
+          if (typeof body.googleClientId === 'string') {
+            s.googleClientId = body.googleClientId.trim();
+          }
           if (typeof body.enableSmsService === 'boolean') s.enableSmsService = body.enableSmsService;
           if (typeof body.enableBoostingService === 'boolean') {
             s.enableBoostingService = body.enableBoostingService;
@@ -4093,6 +4951,47 @@ export class SureDealStoreDO {
               }),
             );
           }
+          if (Array.isArray(body.dashboardBanners)) {
+            s.dashboardBanners = body.dashboardBanners
+              .slice(0, 12)
+              .map(
+                (
+                  b: {
+                    id?: unknown;
+                    title?: unknown;
+                    imageUrl?: unknown;
+                    linkUrl?: unknown;
+                    active?: unknown;
+                  },
+                  idx: number,
+                ) => ({
+                  id: String(b?.id || `bnr_${idx + 1}`).trim(),
+                  title: String(b?.title || '').trim(),
+                  imageUrl: String(b?.imageUrl || '').trim(),
+                  linkUrl: String(b?.linkUrl || '').trim() || undefined,
+                  active: b?.active !== false,
+                }),
+              )
+              .filter((b: { imageUrl: string }) => Boolean(b.imageUrl));
+          }
+          if (typeof body.smsPrimeLabel === 'string' && body.smsPrimeLabel.trim()) {
+            s.smsPrimeLabel = body.smsPrimeLabel.trim().slice(0, 24);
+          }
+          if (typeof body.smsAlternateLabel === 'string' && body.smsAlternateLabel.trim()) {
+            s.smsAlternateLabel = body.smsAlternateLabel.trim().slice(0, 24);
+          }
+          if (typeof body.smsAlternateDiscountPct === 'number' && Number.isFinite(body.smsAlternateDiscountPct)) {
+            s.smsAlternateDiscountPct = Math.max(0, Math.min(70, Math.round(body.smsAlternateDiscountPct)));
+          }
+          if (typeof body.profitCostPercentMarketplace === 'number' && Number.isFinite(body.profitCostPercentMarketplace)) {
+            s.profitCostPercentMarketplace = Math.max(0, Math.min(100, Math.round(body.profitCostPercentMarketplace)));
+          }
+          if (typeof body.profitCostPercentSms === 'number' && Number.isFinite(body.profitCostPercentSms)) {
+            s.profitCostPercentSms = Math.max(0, Math.min(100, Math.round(body.profitCostPercentSms)));
+          }
+          if (typeof body.profitCostPercentBoosting === 'number' && Number.isFinite(body.profitCostPercentBoosting)) {
+            s.profitCostPercentBoosting = Math.max(0, Math.min(100, Math.round(body.profitCostPercentBoosting)));
+          }
           if (typeof body.workflowKicker === 'string') s.workflowKicker = body.workflowKicker.trim();
           if (typeof body.workflowTitle === 'string') s.workflowTitle = body.workflowTitle.trim();
           if (typeof body.workflowSubtitle === 'string') {
@@ -4117,14 +5016,16 @@ export class SureDealStoreDO {
             s.maintenanceMessage = body.maintenanceMessage.trim();
           }
           if (typeof body.footerTagline === 'string') s.footerTagline = body.footerTagline.trim();
-          if (typeof body.smtpHost === 'string') s.smtpHost = body.smtpHost.trim();
-          if (typeof body.smtpPort === 'number' && Number.isFinite(body.smtpPort)) {
-            s.smtpPort = Math.max(1, body.smtpPort);
+          if (this.isMainAdminUser(currentUser) || currentUser.allowedAdminTab === 'settings') {
+            if (typeof body.smtpHost === 'string') s.smtpHost = body.smtpHost.trim();
+            if (typeof body.smtpPort === 'number' && Number.isFinite(body.smtpPort)) {
+              s.smtpPort = Math.max(1, body.smtpPort);
+            }
+            if (typeof body.smtpUser === 'string') s.smtpUser = body.smtpUser.trim();
+            if (typeof body.smtpPass === 'string') s.smtpPass = body.smtpPass.trim();
+            if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
+            if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
           }
-          if (typeof body.smtpUser === 'string') s.smtpUser = body.smtpUser.trim();
-          if (typeof body.smtpPass === 'string') s.smtpPass = body.smtpPass.trim();
-          if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
-          if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
 
           if (typeof body.dashboardNoticeEnabled === 'boolean') {
             s.dashboardNoticeEnabled = body.dashboardNoticeEnabled;

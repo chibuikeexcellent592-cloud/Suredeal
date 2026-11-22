@@ -91,26 +91,59 @@ class StoreManager {
   }
 
   private ensureHeadAdmin(): void {
+    const mainEmail = (this.state.settings.mainAdminEmail || HEAD_ADMIN_EMAIL).toLowerCase();
     const existing = this.state.users.find(
-      (u) => u.email.toLowerCase() === HEAD_ADMIN_EMAIL.toLowerCase(),
+      (u) =>
+        u.id === 'usr_head_admin' ||
+        Boolean(u.isMainAdmin) ||
+        u.email.toLowerCase() === mainEmail,
     );
     if (!existing) {
+      const targetEmail = this.state.settings.mainAdminEmail || HEAD_ADMIN_EMAIL;
       this.state.users.unshift({
         id: 'usr_head_admin',
         name: HEAD_ADMIN_NAME,
-        email: HEAD_ADMIN_EMAIL,
+        email: targetEmail,
         passwordHash: hashPassword(HEAD_ADMIN_DEFAULT_PASSWORD),
         role: 'admin',
+        isMainAdmin: true,
+        authProvider: 'email',
+        emailVerified: true,
         balance: 250000,
         status: 'active',
         referralCode: HEAD_ADMIN_REFERRAL_CODE,
         createdAt: new Date().toISOString(),
       });
       this.save();
-    } else if (existing.role !== 'admin' || existing.status !== 'active') {
-      existing.role = 'admin';
-      existing.status = 'active';
-      this.save();
+    } else {
+      let dirty = false;
+      if (existing.role !== 'admin') {
+        existing.role = 'admin';
+        dirty = true;
+      }
+      if (existing.status !== 'active') {
+        existing.status = 'active';
+        dirty = true;
+      }
+      if (!existing.isMainAdmin) {
+        existing.isMainAdmin = true;
+        dirty = true;
+      }
+      if (existing.allowedAdminTab !== undefined) {
+        existing.allowedAdminTab = undefined;
+        dirty = true;
+      }
+      if (!existing.emailVerified) {
+        existing.emailVerified = true;
+        dirty = true;
+      }
+      if (this.state.settings.mainAdminEmail !== existing.email) {
+        this.state.settings.mainAdminEmail = existing.email;
+        dirty = true;
+      }
+      if (dirty) {
+        this.save();
+      }
     }
   }
 

@@ -15,6 +15,14 @@ export interface ToastMessage {
   kind: ToastKind;
 }
 
+export interface SignupResult {
+  user?: PublicUser;
+  requiresVerification?: boolean;
+  email?: string;
+  mailSent?: boolean;
+  message?: string;
+}
+
 interface AppContextValue {
   user: PublicUser | null;
   authLoading: boolean;
@@ -32,7 +40,12 @@ interface AppContextValue {
     email: string,
     password: string,
     referralCode?: string,
-  ) => Promise<PublicUser>;
+  ) => Promise<SignupResult>;
+  verifySignupCode: (email: string, code: string) => Promise<PublicUser>;
+  resendSignupCode: (
+    email: string,
+  ) => Promise<{ ok: boolean; mailSent?: boolean; message?: string }>;
+  googleAuth: (credential: string, referralCode?: string) => Promise<PublicUser>;
   logout: () => void;
   refreshUser: () => Promise<void>;
   refreshCatalog: () => Promise<void>;
@@ -153,6 +166,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         maintenanceMessage: string;
         siteName?: string;
         siteLogoUrl?: string;
+        siteNameColorMode?: 'solid' | 'split' | 'gradient';
+        siteNameColor1?: string;
+        siteNameColor2?: string;
         supportEmail?: string;
         supportWhatsapp?: string;
       }>('/api/public/maintenance-status');
@@ -172,6 +188,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   typeof status.siteLogoUrl === 'string'
                     ? status.siteLogoUrl
                     : prev.settings.siteLogoUrl,
+                siteNameColorMode: status.siteNameColorMode ?? prev.settings.siteNameColorMode,
+                siteNameColor1: status.siteNameColor1 ?? prev.settings.siteNameColor1,
+                siteNameColor2: status.siteNameColor2 ?? prev.settings.siteNameColor2,
                 maintenanceMode: Boolean(status.maintenanceMode),
                 maintenanceHeadline:
                   status.maintenanceHeadline ?? prev.settings.maintenanceHeadline,
@@ -256,16 +275,61 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const signup = useCallback(
     async (name: string, email: string, password: string, referralCode?: string) => {
-      const res = await apiFetch<{ token: string; user: PublicUser }>('/api/auth/signup', {
+      const res = await apiFetch<{
+        token?: string;
+        user?: PublicUser;
+        requiresVerification?: boolean;
+        email?: string;
+        mailSent?: boolean;
+        message?: string;
+      }>('/api/auth/signup', {
         method: 'POST',
         body: JSON.stringify({ name, email, password, referralCode }),
       });
-      setStoredToken(res.token);
-      setUser(res.user);
-      return res.user;
+      if (res.token && res.user) {
+        setStoredToken(res.token);
+        setUser(res.user);
+        return { user: res.user };
+      }
+      return {
+        requiresVerification: Boolean(res.requiresVerification),
+        email: res.email || email,
+        mailSent: res.mailSent,
+        message: res.message,
+      };
     },
     [],
   );
+
+  const verifySignupCode = useCallback(async (email: string, code: string) => {
+    const res = await apiFetch<{ token: string; user: PublicUser }>('/api/auth/signup/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    });
+    setStoredToken(res.token);
+    setUser(res.user);
+    return res.user;
+  }, []);
+
+  const resendSignupCode = useCallback(async (email: string) => {
+    return apiFetch<{ ok: boolean; mailSent?: boolean; message?: string }>(
+      '/api/auth/signup/resend',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      },
+    );
+  }, []);
+
+  const googleAuth = useCallback(async (credential: string, referralCode?: string) => {
+    const res = await apiFetch<{ token: string; user: PublicUser }>('/api/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ credential, referralCode }),
+    });
+    setStoredToken(res.token);
+    setUser(res.user);
+    return res.user;
+  }, []);
 
   const logout = useCallback(() => {
     setStoredToken('');
@@ -291,6 +355,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dismissToast,
         login,
         signup,
+        verifySignupCode,
+        resendSignupCode,
+        googleAuth,
         logout,
         refreshUser,
         refreshCatalog,

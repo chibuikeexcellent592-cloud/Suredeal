@@ -21,10 +21,40 @@ export interface LandingWorkflowStep {
   desc: string;
 }
 
+export type AdminFeatureTab =
+  | 'overview'
+  | 'revenue'
+  | 'live'
+  | 'users'
+  | 'orders'
+  | 'accounting'
+  | 'catalog'
+  | 'cms'
+  | 'copy'
+  | 'promos'
+  | 'notifications'
+  | 'tutorials'
+  | 'support'
+  | 'audit'
+  | 'settings'
+  | 'team';
+
+export interface DashboardBannerItem {
+  id: string;
+  title: string;
+  imageUrl: string;
+  linkUrl?: string;
+  active: boolean;
+}
+
 export interface PlatformSettings {
   siteName: string;
   siteTagline?: string;
   siteLogoUrl: string;
+  siteNameColorMode?: 'solid' | 'split' | 'gradient';
+  siteNameColor1?: string;
+  siteNameColor2?: string;
+  mainAdminEmail?: string;
   currencyCode: string;
   currencySymbol: string;
   announcementBanner: string;
@@ -39,6 +69,13 @@ export interface PlatformSettings {
   maintenanceMode: boolean;
   supportEmail: string;
   supportWhatsapp?: string;
+  supportTelegram?: string;
+  supportPrimaryChannel?: 'whatsapp' | 'telegram' | 'both';
+  supportGroupPlatform?: 'whatsapp' | 'telegram';
+  supportGroupName?: string;
+  supportGroupUrl?: string;
+  supportDeskNote?: string;
+  supportAllowTickets?: boolean;
   showFloatingWhatsapp?: boolean;
   communityChannelEnabled?: boolean;
   communityChannelPlatform?: 'whatsapp' | 'telegram';
@@ -49,6 +86,9 @@ export interface PlatformSettings {
   creatorName?: string;
   creatorUrl?: string;
   allowNewSignups?: boolean;
+  requireEmailVerification?: boolean;
+  googleAuthEnabled?: boolean;
+  googleClientId?: string;
   enableSmsService?: boolean;
   enableBoostingService?: boolean;
   enableMarketplace?: boolean;
@@ -109,6 +149,17 @@ export interface PlatformSettings {
   dashboardBalanceLabel?: string;
   dashboardFundButtonLabel?: string;
   dashboardHistoryButtonLabel?: string;
+  dashboardBanners?: DashboardBannerItem[];
+
+  // SMS Panel Tier Settings
+  smsPrimeLabel?: string;
+  smsAlternateLabel?: string;
+  smsAlternateDiscountPct?: number;
+
+  // Revenue & Profit Estimation Settings
+  profitCostPercentMarketplace?: number;
+  profitCostPercentSms?: number;
+  profitCostPercentBoosting?: number;
 
   // Dedicated Section Write-Ups (Wallet & Workspace Sections)
   walletPageTitle?: string;
@@ -166,6 +217,9 @@ export interface MaintenanceStatusResponse {
   maintenanceMessage: string;
   siteName: string;
   siteLogoUrl: string;
+  siteNameColorMode?: 'solid' | 'split' | 'gradient';
+  siteNameColor1?: string;
+  siteNameColor2?: string;
   supportWhatsapp: string;
   supportEmail: string;
   creatorName: string;
@@ -177,6 +231,9 @@ export interface PublicUser {
   name: string;
   email: string;
   role: UserRole;
+  isMainAdmin?: boolean;
+  allowedAdminTab?: AdminFeatureTab;
+  authProvider?: 'email' | 'google';
   balance: number;
   status: UserStatus;
   referralCode: string;

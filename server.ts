@@ -9,7 +9,7 @@ import {
   generateCustomSectionSetupWithAi,
   verifyMoniepointReceiptWithAi,
 } from './server/ai.ts';
-import { sendTransactionalEmail } from './server/mailer.ts';
+import { sendTransactionalEmail, sendVerificationCodeEmail } from './server/mailer.ts';
 import { dispatchAdminPhoneAlert } from './server/notify.ts';
 import {
   hashPassword,
@@ -20,7 +20,9 @@ import {
   verifyPassword,
   type StoredUser,
 } from './server/store.ts';
+import { HEAD_ADMIN_EMAIL } from './shared/initialData.ts';
 import type {
+  AdminFeatureTab,
   BoostingService,
   CustomSection,
   CustomSectionProduct,
@@ -95,7 +97,11 @@ function resolveAuthedUser(req: AuthedRequest, res: Response): StoredUser | null
     res.status(401).json({ error: 'Account not found' });
     return null;
   }
-  if ((user.role === 'admin' || user.email.toLowerCase() === 'chibuikeexcellent592@gmail.com') && user.status !== 'active') {
+  const isHead =
+    user.id === 'usr_head_admin' ||
+    Boolean(user.isMainAdmin) ||
+    user.email.toLowerCase() === (store.db.settings.mainAdminEmail || HEAD_ADMIN_EMAIL).toLowerCase();
+  if ((user.role === 'admin' || isHead) && user.status !== 'active') {
     user.status = 'active';
     store.save();
   }
@@ -175,12 +181,182 @@ function reorderByIds<T extends { id: string }>(items: T[], orderedIds: string[]
   });
 }
 
+const DELEGATABLE_ADMIN_TABS: AdminFeatureTab[] = [
+  'overview',
+  'revenue',
+  'live',
+  'users',
+  'orders',
+  'accounting',
+  'catalog',
+  'cms',
+  'copy',
+  'promos',
+  'notifications',
+  'tutorials',
+  'support',
+  'audit',
+  'settings',
+];
+
+function isMainAdminUser(user: StoredUser): boolean {
+  const mainEmail = (store.db.settings.mainAdminEmail || HEAD_ADMIN_EMAIL).toLowerCase();
+  return (
+    user.id === 'usr_head_admin' ||
+    Boolean(user.isMainAdmin) ||
+    user.email.toLowerCase() === mainEmail
+  );
+}
+
 function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction): void {
   if (!req.currentUser || req.currentUser.role !== 'admin') {
     res.status(403).json({ error: 'Administrator privileges required' });
     return;
   }
   next();
+}
+
+function requireMainAdmin(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (!req.currentUser || req.currentUser.role !== 'admin' || !isMainAdminUser(req.currentUser)) {
+    res.status(403).json({ error: 'Main Admin privileges required for this action' });
+    return;
+  }
+  next();
+}
+
+function requireAdminScope(...allowedTabs: AdminFeatureTab[]) {
+  return (req: AuthedRequest, res: Response, next: NextFunction): void => {
+    const user = req.currentUser;
+    if (!user || user.role !== 'admin') {
+      res.status(403).json({ error: 'Administrator privileges required' });
+      return;
+    }
+    if (isMainAdminUser(user) || !user.allowedAdminTab) {
+      next();
+      return;
+    }
+    if (!allowedTabs.includes(user.allowedAdminTab)) {
+      res.status(403).json({
+        error: `Access restricted: your admin account is assigned to "${user.allowedAdminTab}" only.`,
+      });
+      return;
+    }
+    next();
+  };
+}
+
+function hashVerificationCode(email: string, code: string): string {
+  return crypto
+    .createHmac('sha256', TOKEN_SECRET)
+    .update(`${email.toLowerCase()}:${code}`)
+    .digest('hex');
+}
+
+function generateSixDigitCode(): string {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+function createRegisteredUserRecord(params: {
+  name: string;
+  email: string;
+  passwordHash: string;
+  referralCodeInput?: string;
+  authProvider: 'email' | 'google';
+  avatarUrl?: string;
+}): StoredUser {
+  const now = new Date().toISOString();
+  const newCode = `SD${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  const inviter = params.referralCodeInput
+    ? store.db.users.find((u) => u.referralCode.toUpperCase() === params.referralCodeInput!.toUpperCase())
+    : undefined;
+
+  const welcomeBonus = store.db.settings.welcomePromoEnabled
+    ? Math.max(0, store.db.settings.welcomePromoAmount || 0)
+    : 0;
+
+  const newUser: StoredUser = {
+    id: makeId('usr'),
+    name: params.name,
+    email: params.email.toLowerCase(),
+    passwordHash: params.passwordHash,
+    role: 'user',
+    authProvider: params.authProvider,
+    emailVerified: true,
+    avatarUrl: params.avatarUrl || undefined,
+    balance: welcomeBonus,
+    status: 'active',
+    referralCode: newCode,
+    referredBy: inviter?.id,
+    referralRewardClaimed: false,
+    createdAt: now,
+    lastLoginAt: now,
+  };
+
+  store.db.users.push(newUser);
+
+  if (welcomeBonus > 0) {
+    const welcomeTxId = makeId('tx');
+    store.db.transactions.unshift({
+      id: welcomeTxId,
+      userId: newUser.id,
+      userName: newUser.name,
+      userEmail: newUser.email,
+      type: 'welcome_bonus',
+      amount: welcomeBonus,
+      status: 'completed',
+      description: 'Welcome Promo Bonus credited on signup',
+      createdAt: now,
+    });
+    store.recordAccountingEntry({
+      kind: 'transaction',
+      sourceId: welcomeTxId,
+      category: 'welcome_bonus',
+      userId: newUser.id,
+      userName: newUser.name,
+      userEmail: newUser.email,
+      title: 'WELCOME BONUS',
+      detail: 'Welcome Promo Bonus credited on signup',
+      amount: welcomeBonus,
+      status: 'completed',
+      createdAt: now,
+    });
+  }
+
+  if (inviter) {
+    store.db.notifications.unshift({
+      id: makeId('ntf'),
+      title: 'New Referral Registered',
+      message: `${newUser.name} signed up with your referral link. Your bonus unlocks once their first deposit is verified.`,
+      type: 'info',
+      targetUserId: inviter.id,
+      readBy: [],
+      createdAt: now,
+    });
+  }
+
+  store.db.notifications.unshift({
+    id: makeId('ntf'),
+    title: `Welcome to ${store.db.settings.siteName}`,
+    message: `Your account (${newUser.email}) is verified and active.`,
+    type: 'success',
+    targetUserId: newUser.id,
+    readBy: [],
+    createdAt: now,
+  });
+
+  store.addAdminAlert(
+    'New User Registered',
+    `${newUser.name} (${newUser.email}) joined via ${params.authProvider === 'google' ? 'Google Sign-In' : 'Verified Email'}.`,
+    'user',
+  );
+  store.save();
+
+  void dispatchAdminPhoneAlert({
+    eventType: 'new_user',
+    message: `[${store.db.settings.siteName}] New User Signup: ${newUser.name} (${newUser.email}) at ${new Date(now).toLocaleString()}`,
+  });
+
+  return newUser;
 }
 
 function buildCredentialFromTemplate(template: string): string {
@@ -243,6 +419,9 @@ async function startServer() {
         'We’re currently performing scheduled maintenance. Please check back shortly.',
       siteName: s.siteName || 'SureDeal Store',
       siteLogoUrl: s.siteLogoUrl || '',
+      siteNameColorMode: s.siteNameColorMode || 'split',
+      siteNameColor1: s.siteNameColor1 || '#0F172A',
+      siteNameColor2: s.siteNameColor2 || '#2563EB',
       supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
       supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
       creatorName: s.creatorName || 'Excellent',
@@ -303,10 +482,14 @@ async function startServer() {
       smtpPass: _smtpPass,
       smtpFrom: _smtpFrom,
       resendApiKey: _resendApiKey,
+      mainAdminEmail: _mainAdminEmail,
       ...publicSettings
     } = db.settings;
     res.json({
-      settings: publicSettings,
+      settings: {
+        ...publicSettings,
+        googleClientId: publicSettings.googleClientId || process.env.GOOGLE_CLIENT_ID || '',
+      },
       smsCountriesCount: db.smsCountries.filter((c) => c.active).length,
       smsServices: db.smsServices.filter((s) => s.active),
       boostingServices: db.boostingServices.filter((b) => b.active),
@@ -334,7 +517,7 @@ async function startServer() {
       res.status(401).json({ error: 'Invalid email address or password' });
       return;
     }
-    if ((user.role === 'admin' || user.email.toLowerCase() === 'chibuikeexcellent592@gmail.com') && user.status !== 'active') {
+    if ((user.role === 'admin' || isMainAdminUser(user)) && user.status !== 'active') {
       user.status = 'active';
       store.save();
     }
@@ -354,7 +537,7 @@ async function startServer() {
     res.json({ token, user: toPublicUser(user) });
   });
 
-  app.post('/api/auth/signup', (req, res) => {
+  app.post('/api/auth/signup', async (req, res) => {
     if (store.db.settings.maintenanceMode) {
       res.status(503).json({ error: 'Registrations are paused during maintenance.' });
       return;
@@ -385,98 +568,246 @@ async function startServer() {
       return;
     }
 
-    const now = new Date().toISOString();
-    const newCode = `SD${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const inviter = referralCodeInput
-      ? store.db.users.find((u) => u.referralCode.toUpperCase() === referralCodeInput)
-      : undefined;
+    const passwordHash = hashPassword(password);
 
-    const welcomeBonus = store.db.settings.welcomePromoEnabled
-      ? Math.max(0, store.db.settings.welcomePromoAmount || 0)
-      : 0;
+    if (store.db.settings.requireEmailVerification !== false) {
+      const nowMs = Date.now();
+      store.db.pendingSignups = (store.db.pendingSignups || []).filter(
+        (p) => p.expiresAt > nowMs && p.email.toLowerCase() !== email,
+      );
+      const code = generateSixDigitCode();
+      const expiresInMinutes = 15;
+      store.db.pendingSignups.unshift({
+        email,
+        name,
+        passwordHash,
+        referralCodeInput: referralCodeInput || undefined,
+        codeHash: hashVerificationCode(email, code),
+        expiresAt: nowMs + expiresInMinutes * 60 * 1000,
+        attempts: 0,
+        lastSentAt: nowMs,
+      });
+      store.save();
 
-    const newUser: StoredUser = {
-      id: makeId('usr'),
+      const mailRes = await sendVerificationCodeEmail({
+        to: email,
+        name,
+        code,
+        expiresInMinutes,
+        settings: store.db.settings,
+      });
+
+      res.json({
+        requiresVerification: true,
+        email,
+        mailSent: mailRes.delivered,
+        message: mailRes.delivered
+          ? `We sent a 6-digit verification code to ${email}. Enter it below to activate your account.`
+          : mailRes.error ||
+            'Email delivery could not be completed. Configure SMTP or Resend in Admin Settings, or ask Admin for support.',
+      });
+      return;
+    }
+
+    const newUser = createRegisteredUserRecord({
       name,
       email,
-      passwordHash: hashPassword(password),
-      role: 'user',
-      balance: welcomeBonus,
-      status: 'active',
-      referralCode: newCode,
-      referredBy: inviter?.id,
-      referralRewardClaimed: false,
-      createdAt: now,
-      lastLoginAt: now,
-    };
-
-    store.db.users.push(newUser);
-
-    if (welcomeBonus > 0) {
-      const welcomeTxId = makeId('tx');
-      store.db.transactions.unshift({
-        id: welcomeTxId,
-        userId: newUser.id,
-        userName: newUser.name,
-        userEmail: newUser.email,
-        type: 'welcome_bonus',
-        amount: welcomeBonus,
-        status: 'completed',
-        description: `Welcome Promo Bonus credited on signup`,
-        createdAt: now,
-      });
-      store.recordAccountingEntry({
-        kind: 'transaction',
-        sourceId: welcomeTxId,
-        category: 'welcome_bonus',
-        userId: newUser.id,
-        userName: newUser.name,
-        userEmail: newUser.email,
-        title: 'WELCOME BONUS',
-        detail: 'Welcome Promo Bonus credited on signup',
-        amount: welcomeBonus,
-        status: 'completed',
-        createdAt: now,
-      });
-    }
-
-    // Referrer reward is intentionally deferred until this user's first verified deposit.
-    if (inviter) {
-      store.db.notifications.unshift({
-        id: makeId('ntf'),
-        title: 'New Referral Registered',
-        message: `${newUser.name} signed up with your referral link. Your bonus unlocks once their first deposit is verified.`,
-        type: 'info',
-        targetUserId: inviter.id,
-        readBy: [],
-        createdAt: now,
-      });
-    }
-
-    store.db.notifications.unshift({
-      id: makeId('ntf'),
-      title: `Welcome to ${store.db.settings.siteName}`,
-      message: `Your account (${newUser.email}) is active and ready.`,
-      type: 'success',
-      targetUserId: newUser.id,
-      readBy: [],
-      createdAt: now,
-    });
-
-    store.addAdminAlert(
-      'New User Registered',
-      `${newUser.name} (${newUser.email}) created an account.`,
-      'user',
-    );
-    store.save();
-
-    void dispatchAdminPhoneAlert({
-      eventType: 'new_user',
-      message: `[${store.db.settings.siteName}] New User Signup: ${newUser.name} (${newUser.email}) at ${new Date(now).toLocaleString()}`,
+      passwordHash,
+      referralCodeInput,
+      authProvider: 'email',
     });
 
     const token = signToken(newUser.id);
     res.status(201).json({ token, user: toPublicUser(newUser) });
+  });
+
+  app.post('/api/auth/signup/verify', (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim().replace(/\s+/g, '');
+    if (!email || !/^\d{6}$/.test(code)) {
+      res.status(400).json({ error: 'Enter the 6-digit verification code sent to your email.' });
+      return;
+    }
+    const nowMs = Date.now();
+    const pendingList = store.db.pendingSignups || [];
+    const pending = pendingList.find((p) => p.email.toLowerCase() === email);
+    if (!pending) {
+      res.status(400).json({ error: 'No pending verification found for this email. Please sign up again.' });
+      return;
+    }
+    if (nowMs > pending.expiresAt) {
+      store.db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+      store.save();
+      res.status(400).json({ error: 'Verification code has expired. Please request a new code.' });
+      return;
+    }
+    if (pending.attempts >= 5) {
+      store.db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+      store.save();
+      res.status(429).json({ error: 'Too many invalid attempts. Please register again.' });
+      return;
+    }
+
+    const expectedHash = Buffer.from(pending.codeHash, 'hex');
+    const providedHash = Buffer.from(hashVerificationCode(email, code), 'hex');
+    if (
+      expectedHash.length !== providedHash.length ||
+      !crypto.timingSafeEqual(expectedHash, providedHash)
+    ) {
+      pending.attempts += 1;
+      store.save();
+      res.status(400).json({ error: 'Invalid verification code. Check your email and try again.' });
+      return;
+    }
+
+    if (store.db.users.some((u) => u.email.toLowerCase() === email)) {
+      store.db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+      store.save();
+      res.status(409).json({ error: 'An account with this email already exists.' });
+      return;
+    }
+
+    store.db.pendingSignups = pendingList.filter((p) => p.email.toLowerCase() !== email);
+    const newUser = createRegisteredUserRecord({
+      name: pending.name,
+      email: pending.email,
+      passwordHash: pending.passwordHash,
+      referralCodeInput: pending.referralCodeInput,
+      authProvider: 'email',
+    });
+
+    const token = signToken(newUser.id);
+    res.status(201).json({ token, user: toPublicUser(newUser) });
+  });
+
+  app.post('/api/auth/signup/resend', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) {
+      res.status(400).json({ error: 'Email address is required' });
+      return;
+    }
+    const pendingList = store.db.pendingSignups || [];
+    const pending = pendingList.find((p) => p.email.toLowerCase() === email);
+    if (!pending) {
+      res.status(404).json({ error: 'No pending registration found. Please fill out the signup form again.' });
+      return;
+    }
+    const nowMs = Date.now();
+    if (nowMs - pending.lastSentAt < 30_000) {
+      const waitSec = Math.ceil((30_000 - (nowMs - pending.lastSentAt)) / 1000);
+      res.status(429).json({ error: `Please wait ${waitSec}s before requesting another code.` });
+      return;
+    }
+
+    const code = generateSixDigitCode();
+    const expiresInMinutes = 15;
+    pending.codeHash = hashVerificationCode(email, code);
+    pending.expiresAt = nowMs + expiresInMinutes * 60 * 1000;
+    pending.attempts = 0;
+    pending.lastSentAt = nowMs;
+    store.save();
+
+    const mailRes = await sendVerificationCodeEmail({
+      to: email,
+      name: pending.name,
+      code,
+      expiresInMinutes,
+      settings: store.db.settings,
+    });
+
+    res.json({
+      ok: true,
+      mailSent: mailRes.delivered,
+      error: mailRes.delivered ? undefined : mailRes.error || 'Mail provider rejected or not configured',
+    });
+  });
+
+  app.post('/api/auth/google', async (req, res) => {
+    const settings = store.db.settings;
+    if (!settings.googleAuthEnabled) {
+      res.status(403).json({ error: 'Google Sign-In is currently disabled by Admin.' });
+      return;
+    }
+    const expectedClientId = (settings.googleClientId || process.env.GOOGLE_CLIENT_ID || '').trim();
+    if (!expectedClientId) {
+      res.status(400).json({ error: 'Google Client ID is not configured yet.' });
+      return;
+    }
+    const credential = String(req.body?.credential || '').trim();
+    const referralCodeInput = String(req.body?.referralCode || '').trim().toUpperCase();
+    if (!credential) {
+      res.status(400).json({ error: 'Missing Google sign-in token' });
+      return;
+    }
+
+    try {
+      const verifyResp = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+      );
+      if (!verifyResp.ok) {
+        res.status(401).json({ error: 'Google sign-in token could not be verified' });
+        return;
+      }
+      const info = (await verifyResp.json()) as {
+        aud?: string;
+        email?: string;
+        email_verified?: string | boolean;
+        name?: string;
+        picture?: string;
+        exp?: string;
+      };
+      const email = String(info.email || '').trim().toLowerCase();
+      const verified = info.email_verified === true || info.email_verified === 'true';
+      const expMs = info.exp ? Number(info.exp) * 1000 : Date.now() + 60_000;
+      if (!email || !verified || info.aud !== expectedClientId || expMs < Date.now()) {
+        res.status(401).json({ error: 'Google token verification failed or mismatched Client ID' });
+        return;
+      }
+
+      const existing = store.db.users.find((u) => u.email.toLowerCase() === email);
+      if (existing) {
+        if (existing.status === 'suspended') {
+          res.status(403).json({ error: 'This account is suspended. Reach out to support.' });
+          return;
+        }
+        if (settings.maintenanceMode && existing.role !== 'admin') {
+          res.status(503).json({ error: 'Maintenance mode is active. Only our team can sign in right now.' });
+          return;
+        }
+        existing.lastLoginAt = new Date().toISOString();
+        existing.emailVerified = true;
+        if (!existing.avatarUrl && info.picture) {
+          existing.avatarUrl = info.picture;
+        }
+        store.save();
+        const token = signToken(existing.id);
+        res.json({ token, user: toPublicUser(existing) });
+        return;
+      }
+
+      if (settings.maintenanceMode) {
+        res.status(503).json({ error: 'Registrations are paused during maintenance.' });
+        return;
+      }
+      if (settings.allowNewSignups === false) {
+        res.status(403).json({ error: 'New account registrations are currently paused.' });
+        return;
+      }
+
+      const newUser = createRegisteredUserRecord({
+        name: String(info.name || email.split('@')[0]).trim(),
+        email,
+        passwordHash: hashPassword(crypto.randomBytes(24).toString('hex')),
+        referralCodeInput,
+        authProvider: 'google',
+        avatarUrl: info.picture,
+      });
+      const token = signToken(newUser.id);
+      res.status(201).json({ token, user: toPublicUser(newUser) });
+    } catch (err) {
+      console.error('Google tokeninfo verification error:', err);
+      res.status(502).json({ error: 'Could not reach Google verification service. Try again.' });
+    }
   });
 
   app.get('/api/auth/me', (req: AuthedRequest, res) => {
@@ -622,6 +953,8 @@ async function startServer() {
     const user = req.currentUser!;
     const serviceId = String(req.body?.serviceId || '');
     const countryId = String(req.body?.countryId || '');
+    const tier = req.body?.tier === 'alternate' ? 'alternate' : 'prime';
+    const promoCodeStr = String(req.body?.promoCode || '').trim().toUpperCase();
 
     const service = store.db.smsServices.find((s) => s.id === serviceId && s.active);
     const country = store.db.smsCountries.find((c) => c.id === countryId && c.active);
@@ -630,7 +963,35 @@ async function startServer() {
       return;
     }
 
-    const price = Math.round(service.basePrice * country.multiplier);
+    const basePrice = Math.round(service.basePrice * country.multiplier);
+    const altDiscountPct = Math.max(
+      0,
+      Math.min(70, Number(store.db.settings.smsAlternateDiscountPct ?? 15)),
+    );
+    const tierPrice =
+      tier === 'alternate' ? Math.max(50, Math.round(basePrice * (1 - altDiscountPct / 100))) : basePrice;
+
+    let price = tierPrice;
+    let appliedPromo: PromoCode | undefined;
+    if (promoCodeStr) {
+      if (store.db.settings.allowPromoCodes === false) {
+        res.status(403).json({ error: 'Promo codes are currently disabled.' });
+        return;
+      }
+      appliedPromo = store.db.promoCodes.find(
+        (p) => p.active && p.code.toUpperCase() === promoCodeStr && p.uses < p.maxUses,
+      );
+      if (!appliedPromo) {
+        res.status(400).json({ error: 'Coupon code is invalid or expired' });
+        return;
+      }
+      if (appliedPromo.discountType === 'percent') {
+        price = Math.max(50, Math.round(tierPrice * (1 - appliedPromo.value / 100)));
+      } else {
+        price = Math.max(50, tierPrice - appliedPromo.value);
+      }
+    }
+
     if (user.balance < price) {
       res.status(400).json({
         error: `Insufficient wallet balance. You need ${store.db.settings.currencySymbol}${price.toLocaleString()}.`,
@@ -651,6 +1012,12 @@ async function startServer() {
 
     user.balance -= price;
     if (service.stock > 0) service.stock -= 1;
+    if (appliedPromo) appliedPromo.uses += 1;
+
+    const tierLabel =
+      tier === 'alternate'
+        ? store.db.settings.smsAlternateLabel || 'Alternate'
+        : store.db.settings.smsPrimeLabel || 'Prime';
 
     const order: (typeof store.db.smsOrders)[number] = {
       id: orderId,
@@ -680,6 +1047,7 @@ async function startServer() {
     store.db.smsOrders.unshift(order);
     const smsTxId = makeId('tx');
     const smsNowIso = new Date(now).toISOString();
+    const descSuffix = `${tierLabel}${appliedPromo ? ` · ${appliedPromo.code}` : ''}`;
     store.db.transactions.unshift({
       id: smsTxId,
       userId: user.id,
@@ -688,7 +1056,7 @@ async function startServer() {
       type: 'purchase',
       amount: price,
       status: 'completed',
-      description: `SMS Rental: ${service.name} (${country.name})`,
+      description: `SMS Rental: ${service.name} (${country.name}) [${descSuffix}]`,
       createdAt: smsNowIso,
     });
     store.recordAccountingEntry({
@@ -699,7 +1067,7 @@ async function startServer() {
       userName: user.name,
       userEmail: user.email,
       title: `${service.name} (${country.name})`,
-      detail: `Number: ${phoneNumber}`,
+      detail: `Number: ${phoneNumber} · ${descSuffix}`,
       amount: price,
       status: order.status,
       createdAt: smsNowIso,
@@ -712,14 +1080,14 @@ async function startServer() {
       userName: user.name,
       userEmail: user.email,
       title: 'SMS RENTAL',
-      detail: `SMS Rental: ${service.name} (${country.name})`,
+      detail: `SMS Rental: ${service.name} (${country.name}) [${descSuffix}]`,
       amount: price,
       status: 'completed',
       createdAt: smsNowIso,
     });
     store.addAdminAlert(
       'New SMS Number Rented',
-      `${user.email} rented ${service.name} (${country.name}) · ${phoneNumber}`,
+      `${user.email} rented ${service.name} (${country.name} · ${tierLabel}) · ${phoneNumber}`,
       'order',
     );
     store.save();
@@ -1502,6 +1870,19 @@ async function startServer() {
       res.status(403).json({ error: 'Access denied' });
       return;
     }
+    if (
+      user.role === 'admin' &&
+      !isMainAdminUser(user) &&
+      user.allowedAdminTab &&
+      user.allowedAdminTab !== 'support' &&
+      user.allowedAdminTab !== 'live' &&
+      ticket.userId !== user.id
+    ) {
+      res.status(403).json({
+        error: `Access restricted: your admin account is assigned to "${user.allowedAdminTab}" only.`,
+      });
+      return;
+    }
 
     const now = new Date().toISOString();
     ticket.messages.push({
@@ -1547,6 +1928,10 @@ async function startServer() {
           return;
         }
         user.email = email;
+        if (isMainAdminUser(user)) {
+          user.isMainAdmin = true;
+          store.db.settings.mainAdminEmail = email;
+        }
       }
     }
     if (typeof req.body?.avatarUrl === 'string') {
@@ -1624,9 +2009,15 @@ async function startServer() {
   // GOD-MODE ADMIN PANEL APIs
   // ============================================================================
 
-  app.get('/api/admin/overview', requireAuth, requireAdmin, (_req, res) => {
+  app.get('/api/admin/overview', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
     expireTimedOutSmsOrders();
     const db = store.db;
+    const caller = req.currentUser!;
+    const main = isMainAdminUser(caller);
+    const scope = caller.allowedAdminTab;
+    const isScoped = !main && Boolean(scope);
+    const allow = (tabs: AdminFeatureTab[]) => !isScoped || (scope !== undefined && tabs.includes(scope));
+
     const visibleTransactions = db.transactions.filter((t) => !t.adminCleared);
     const visibleSmsOrders = db.smsOrders.filter((s) => !s.adminCleared);
     const visibleBoostingOrders = db.boostingOrders.filter((b) => !b.adminCleared);
@@ -1655,8 +2046,15 @@ async function startServer() {
     const openTickets = db.tickets.filter((t) => t.status === 'open' || t.status === 'in_progress');
     const unreadAlerts = db.adminAlerts.filter((a) => !a.read).length;
 
+    const {
+      smtpPass: _smtpPass,
+      resendApiKey: _resendApiKey,
+      mainAdminEmail: _mainEmail,
+      ...redactedSettings
+    } = db.settings;
+
     res.json({
-      settings: db.settings,
+      settings: main || scope === 'settings' ? db.settings : redactedSettings,
       metrics: {
         totalUsers: db.users.length,
         totalRevenue,
@@ -1670,32 +2068,210 @@ async function startServer() {
         openTickets: openTickets.length,
         unreadAlerts,
       },
-      users: db.users.map(toPublicUser),
-      transactions: visibleTransactions,
-      smsOrders: visibleSmsOrders,
-      smsPool: db.smsPool,
+      users: allow(['overview', 'users']) ? db.users.map(toPublicUser) : [],
+      transactions: allow(['overview', 'revenue', 'live', 'users', 'orders', 'accounting'])
+        ? visibleTransactions
+        : [],
+      smsOrders: allow(['overview', 'revenue', 'live', 'users', 'orders']) ? visibleSmsOrders : [],
+      smsPool: allow(['overview', 'orders', 'catalog']) ? db.smsPool : [],
       smsServices: db.smsServices,
       smsCountries: db.smsCountries,
-      boostingOrders: visibleBoostingOrders,
+      boostingOrders: allow(['overview', 'revenue', 'live', 'users', 'orders'])
+        ? visibleBoostingOrders
+        : [],
       boostingServices: db.boostingServices,
       marketplaceCategories: db.marketplaceCategories,
       marketplaceListings: db.marketplaceListings,
-      vaultItems: visibleVaultItems,
+      vaultItems: allow(['overview', 'revenue', 'live', 'users', 'orders']) ? visibleVaultItems : [],
       customSections: db.customSections,
-      notifications: db.notifications,
-      emailLogs: db.emailLogs,
+      notifications: allow(['overview', 'notifications']) ? db.notifications : [],
+      emailLogs: allow(['overview', 'notifications']) ? db.emailLogs : [],
       tutorials: db.tutorials,
-      tickets: db.tickets,
+      tickets: allow(['overview', 'live', 'support']) ? db.tickets : [],
       adminAlerts: db.adminAlerts,
       promoCodes: db.promoCodes,
-      auditLogs: db.auditLogs,
-      accountingRecords: db.accountingRecords || [],
+      auditLogs: allow(['overview', 'audit']) ? db.auditLogs : [],
+      accountingRecords: allow(['overview', 'revenue', 'accounting'])
+        ? db.accountingRecords || []
+        : [],
       visitorStats: db.visitorStats || { totalVisits: 0, recentSessions: [] },
     });
   });
 
+  // --- LIVE MONITOR FEED ---
+  app.get('/api/admin/live', requireAuth, requireAdminScope('overview', 'live'), (_req, res) => {
+    expireTimedOutSmsOrders();
+    const db = store.db;
+    const nowMs = Date.now();
+    const recentSessions = (db.visitorStats?.recentSessions || []).slice(0, 30);
+    const activeVisitors5m = recentSessions.filter(
+      (s) => nowMs - new Date(s.visitedAt).getTime() <= 5 * 60 * 1000,
+    ).length;
+    res.json({
+      serverTime: new Date(nowMs).toISOString(),
+      totalVisits: db.visitorStats?.totalVisits || 0,
+      activeVisitors5m,
+      recentSessions,
+      waitingSms: db.smsOrders.filter((o) => !o.adminCleared && o.status === 'waiting').slice(0, 25),
+      activeBoosting: db.boostingOrders
+        .filter(
+          (o) =>
+            !o.adminCleared &&
+            (o.status === 'pending' || o.status === 'processing' || o.status === 'refilling'),
+        )
+        .slice(0, 25),
+      pendingDeposits: db.transactions
+        .filter((t) => !t.adminCleared && t.type === 'deposit' && t.status === 'pending')
+        .slice(0, 25),
+      openTickets: db.tickets
+        .filter((t) => t.status === 'open' || t.status === 'in_progress')
+        .slice(0, 20),
+      recentUsers: [...db.users]
+        .sort(
+          (a, b) =>
+            new Date(b.lastLoginAt || b.createdAt).getTime() -
+            new Date(a.lastLoginAt || a.createdAt).getTime(),
+        )
+        .slice(0, 15)
+        .map(toPublicUser),
+      recentAlerts: db.adminAlerts.slice(0, 25),
+    });
+  });
+
+  // --- MAIN ADMIN IDENTITY & SINGLE-FEATURE SUB-ADMIN MANAGEMENT ---
+  app.post('/api/admin/main-admin/change-email', requireAuth, requireMainAdmin, (req: AuthedRequest, res) => {
+    const mainAdmin = req.currentUser!;
+    const newEmail = String(req.body?.newEmail || '').trim().toLowerCase();
+    const currentPassword = String(req.body?.currentPassword || '');
+    if (!verifyPassword(currentPassword, mainAdmin.passwordHash)) {
+      res.status(400).json({ error: 'Current password verification failed' });
+      return;
+    }
+    if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      res.status(400).json({ error: 'Please enter a valid email address' });
+      return;
+    }
+    const conflict = store.db.users.some(
+      (u) => u.id !== mainAdmin.id && u.email.toLowerCase() === newEmail,
+    );
+    if (conflict) {
+      res.status(409).json({ error: 'Another account already uses this email address' });
+      return;
+    }
+    const oldEmail = mainAdmin.email;
+    mainAdmin.email = newEmail;
+    mainAdmin.isMainAdmin = true;
+    mainAdmin.allowedAdminTab = undefined;
+    store.db.settings.mainAdminEmail = newEmail;
+    store.logAudit(
+      newEmail,
+      'MAIN_ADMIN_EMAIL_CHANGE',
+      oldEmail,
+      `Main Admin email updated from ${oldEmail} to ${newEmail}`,
+    );
+    store.save();
+    res.json({ user: toPublicUser(mainAdmin), settings: store.db.settings });
+  });
+
+  app.get('/api/admin/sub-admins', requireAuth, requireMainAdmin, (_req, res) => {
+    const mainAdmin = store.db.users.find((u) => isMainAdminUser(u));
+    const subAdmins = store.db.users
+      .filter((u) => u.role === 'admin' && !isMainAdminUser(u))
+      .map(toPublicUser);
+    res.json({
+      mainAdmin: mainAdmin ? toPublicUser(mainAdmin) : null,
+      subAdmins,
+      delegatableTabs: DELEGATABLE_ADMIN_TABS,
+    });
+  });
+
+  app.post('/api/admin/sub-admins', requireAuth, requireMainAdmin, (req: AuthedRequest, res) => {
+    const allowedAdminTab = String(req.body?.allowedAdminTab || '') as AdminFeatureTab;
+    if (!DELEGATABLE_ADMIN_TABS.includes(allowedAdminTab)) {
+      res.status(400).json({ error: 'Select one valid single admin feature to delegate' });
+      return;
+    }
+    const userId = String(req.body?.userId || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const name = String(req.body?.name || '').trim();
+    const password = String(req.body?.password || '');
+
+    let target: StoredUser | undefined;
+    if (userId) {
+      target = store.db.users.find((u) => u.id === userId);
+      if (!target) {
+        res.status(404).json({ error: 'Selected user not found' });
+        return;
+      }
+    } else if (email) {
+      target = store.db.users.find((u) => u.email.toLowerCase() === email);
+      if (!target) {
+        if (!name || name.length < 2 || password.length < 6) {
+          res.status(400).json({ error: 'Name (min 2 chars) and password (min 6 chars) are required for a new sub-admin' });
+          return;
+        }
+        target = {
+          id: makeId('usr'),
+          name,
+          email,
+          passwordHash: hashPassword(password),
+          role: 'admin',
+          isMainAdmin: false,
+          allowedAdminTab,
+          authProvider: 'email',
+          emailVerified: true,
+          balance: 0,
+          status: 'active',
+          referralCode: `SD${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
+          createdAt: new Date().toISOString(),
+        };
+        store.db.users.push(target);
+      }
+    } else {
+      res.status(400).json({ error: 'Provide an existing user or email to assign a sub-admin' });
+      return;
+    }
+
+    if (isMainAdminUser(target)) {
+      res.status(400).json({ error: 'Cannot restrict or modify the protected Main Admin account' });
+      return;
+    }
+
+    target.role = 'admin';
+    target.isMainAdmin = false;
+    target.status = 'active';
+    target.allowedAdminTab = allowedAdminTab;
+
+    store.logAudit(
+      req.currentUser!.email,
+      'DELEGATE_SUB_ADMIN',
+      target.email,
+      `Assigned single admin feature: ${allowedAdminTab}`,
+    );
+    store.save();
+    res.json({ user: toPublicUser(target) });
+  });
+
+  app.delete('/api/admin/sub-admins/:id', requireAuth, requireMainAdmin, (req: AuthedRequest, res) => {
+    const target = store.db.users.find((u) => u.id === req.params.id);
+    if (!target) {
+      res.status(404).json({ error: 'Sub-admin not found' });
+      return;
+    }
+    if (isMainAdminUser(target)) {
+      res.status(403).json({ error: 'Main Admin is permanently protected and cannot be revoked' });
+      return;
+    }
+    target.role = 'user';
+    target.isMainAdmin = false;
+    target.allowedAdminTab = undefined;
+    store.logAudit(req.currentUser!.email, 'REVOKE_SUB_ADMIN', target.email, 'Reverted sub-admin back to standard user');
+    store.save();
+    res.json({ ok: true });
+  });
+
   // --- IMMUTABLE ACCOUNTING LEDGER CONTROLS ---
-  app.delete('/api/admin/accounting/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/accounting/:id', requireAuth, requireAdminScope('accounting'), (req: AuthedRequest, res) => {
     const before = (store.db.accountingRecords || []).length;
     const target = (store.db.accountingRecords || []).find((r) => r.id === req.params.id);
     if (!target) {
@@ -1713,7 +2289,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/accounting/clear', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/accounting/clear', requireAuth, requireAdminScope('accounting'), (req: AuthedRequest, res) => {
     const scope = String(req.body?.scope || 'all');
     const current = store.db.accountingRecords || [];
     let removed = 0;
@@ -1740,7 +2316,7 @@ async function startServer() {
   });
 
   // --- SOFT REFRESH WEBSITE (OPERATIONAL RESET PRESERVING USERS, BALANCES, SETTINGS, CATALOG & ACCOUNTING) ---
-  app.post('/api/admin/system/refresh-ops', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/system/refresh-ops', requireAuth, requireAdminScope('overview', 'settings'), (req: AuthedRequest, res) => {
     const db = store.db;
     const counts = {
       smsOrders: db.smsOrders.length,
@@ -1792,7 +2368,7 @@ async function startServer() {
   });
 
   // --- ADMIN DIRECT LANDING VIDEO FILE UPLOAD ---
-  app.post('/api/admin/upload-video', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/upload-video', requireAuth, requireAdminScope('cms', 'settings'), (req: AuthedRequest, res) => {
     const dataUrl = String(req.body?.videoDataUrl || '');
     const fileName = String(req.body?.fileName || 'video.mp4');
     const match = dataUrl.match(/^data:(video\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
@@ -1819,11 +2395,15 @@ async function startServer() {
   });
 
   // --- ADMIN USERS & BALANCES ---
-  app.post('/api/admin/users', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/users', requireAuth, requireAdminScope('users'), (req: AuthedRequest, res) => {
     const name = String(req.body?.name || '').trim();
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || 'SureDeal123!');
     const role = req.body?.role === 'admin' ? 'admin' : 'user';
+    if (role === 'admin' && !isMainAdminUser(req.currentUser!)) {
+      res.status(403).json({ error: 'Only Main Admin can create administrator accounts' });
+      return;
+    }
     const balance = Math.max(0, Number(req.body?.balance || 0));
 
     if (!name || !email.includes('@')) {
@@ -1841,6 +2421,9 @@ async function startServer() {
       email,
       passwordHash: hashPassword(password),
       role,
+      isMainAdmin: false,
+      allowedAdminTab: role === 'admin' ? 'overview' : undefined,
+      emailVerified: true,
       balance,
       status: 'active',
       referralCode: `SD${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
@@ -1852,10 +2435,14 @@ async function startServer() {
     res.status(201).json({ user: toPublicUser(newUser) });
   });
 
-  app.post('/api/admin/users/:id/balance', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/users/:id/balance', requireAuth, requireAdminScope('users'), (req: AuthedRequest, res) => {
     const target = store.db.users.find((u) => u.id === req.params.id);
     if (!target) {
       res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    if (isMainAdminUser(target) && !isMainAdminUser(req.currentUser!)) {
+      res.status(403).json({ error: 'Main Admin account is permanently protected and cannot be modified' });
       return;
     }
     const mode = String(req.body?.mode || 'credit');
@@ -1914,22 +2501,31 @@ async function startServer() {
     res.json({ user: toPublicUser(target) });
   });
 
-  app.patch('/api/admin/users/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.patch('/api/admin/users/:id', requireAuth, requireAdminScope('users'), (req: AuthedRequest, res) => {
     const target = store.db.users.find((u) => u.id === req.params.id);
     if (!target) {
       res.status(404).json({ error: 'User not found' });
       return;
     }
+    const targetIsMain = isMainAdminUser(target);
+    const callerIsMain = isMainAdminUser(req.currentUser!);
+    if (targetIsMain && !callerIsMain) {
+      res.status(403).json({ error: 'Main Admin account is permanently protected and cannot be modified' });
+      return;
+    }
+    if (!callerIsMain && (target.role === 'admin' || req.body?.role === 'admin')) {
+      res.status(403).json({ error: 'Only Main Admin can modify administrator roles' });
+      return;
+    }
     if (typeof req.body?.name === 'string' && req.body.name.trim()) {
       target.name = req.body.name.trim();
     }
-    if (typeof req.body?.email === 'string' && req.body.email.includes('@')) {
+    if (typeof req.body?.email === 'string' && req.body.email.includes('@') && !targetIsMain) {
       target.email = req.body.email.trim().toLowerCase();
     }
-    const isHeadAdmin = target.email.toLowerCase() === 'chibuikeexcellent592@gmail.com';
-    const isTargetAdmin = target.role === 'admin' || isHeadAdmin;
-    if (isHeadAdmin && req.body?.role === 'user') {
-      res.status(400).json({ error: 'Cannot remove admin role from the Head Admin account' });
+    const isTargetAdmin = target.role === 'admin' || targetIsMain;
+    if (targetIsMain && req.body?.role === 'user') {
+      res.status(400).json({ error: 'Cannot remove admin role from the Main Admin account' });
       return;
     }
     if (isTargetAdmin && req.body?.status === 'suspended') {
@@ -1940,6 +2536,8 @@ async function startServer() {
       target.role = req.body.role;
       if (target.role === 'admin') {
         target.status = 'active';
+      } else {
+        target.allowedAdminTab = undefined;
       }
     }
     if (req.body?.status === 'active' || req.body?.status === 'suspended') {
@@ -1977,20 +2575,24 @@ async function startServer() {
     }
     if (typeof req.body?.newPassword === 'string' && req.body.newPassword.length >= 6) {
       target.passwordHash = hashPassword(req.body.newPassword);
-      store.logAudit(req.currentUser!.email, 'RESET_PASSWORD', target.email, 'Password updated by Head Admin');
+      store.logAudit(req.currentUser!.email, 'RESET_PASSWORD', target.email, 'Password updated by Admin');
     }
     store.save();
     res.json({ user: toPublicUser(target) });
   });
 
-  app.delete('/api/admin/users/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/users/:id', requireAuth, requireAdminScope('users'), (req: AuthedRequest, res) => {
     const target = store.db.users.find((u) => u.id === req.params.id);
     if (!target) {
       res.status(404).json({ error: 'User not found' });
       return;
     }
-    if (target.id === req.currentUser!.id || target.email.toLowerCase() === 'chibuikeexcellent592@gmail.com') {
-      res.status(400).json({ error: 'Cannot permanently delete the Head Admin account' });
+    if (target.id === req.currentUser!.id || isMainAdminUser(target)) {
+      res.status(403).json({ error: 'Cannot permanently delete the Main Admin account' });
+      return;
+    }
+    if (target.role === 'admin' && !isMainAdminUser(req.currentUser!)) {
+      res.status(403).json({ error: 'Only Main Admin can delete administrator accounts' });
       return;
     }
     const targetEmail = target.email.toLowerCase();
@@ -2014,7 +2616,7 @@ async function startServer() {
   });
 
   // --- ADMIN RECEIPT & ORDER DECISIONS ---
-  app.post('/api/admin/transactions/:id/decision', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/transactions/:id/decision', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
     const tx = store.db.transactions.find((t) => t.id === req.params.id);
     if (!tx || tx.type !== 'deposit') {
       res.status(404).json({ error: 'Deposit transaction not found' });
@@ -2071,7 +2673,7 @@ async function startServer() {
     res.json({ transaction: tx });
   });
 
-  app.post('/api/admin/transactions/bulk-approve-matched', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/transactions/bulk-approve-matched', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
     const matched = store.db.transactions.filter(
       (t) =>
         !t.adminCleared &&
@@ -2114,7 +2716,7 @@ async function startServer() {
     res.json({ approvedCount: matched.length, totalCredited });
   });
 
-  app.post('/api/admin/boosting-orders/bulk-status', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/boosting-orders/bulk-status', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
     const fromStatus = String(req.body?.fromStatus || '');
     const toStatus = String(req.body?.toStatus || '');
     if (
@@ -2148,7 +2750,7 @@ async function startServer() {
     res.json({ updatedCount });
   });
 
-  app.patch('/api/admin/boosting-orders/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/boosting-orders/:id', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req, res) => {
     const order = store.db.boostingOrders.find((o) => o.id === req.params.id);
     if (!order) {
       res.status(404).json({ error: 'Boosting order not found' });
@@ -2208,7 +2810,7 @@ async function startServer() {
     res.json({ order });
   });
 
-  app.post('/api/admin/sms-orders/:id/assign-number', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/sms-orders/:id/assign-number', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
     expireTimedOutSmsOrders();
     const order = store.db.smsOrders.find((o) => o.id === req.params.id);
     if (!order) {
@@ -2247,7 +2849,7 @@ async function startServer() {
     res.json({ order });
   });
 
-  app.post('/api/admin/sms-orders/:id/deliver', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/sms-orders/:id/deliver', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
     expireTimedOutSmsOrders();
     const order = store.db.smsOrders.find((o) => o.id === req.params.id);
     if (!order) {
@@ -2292,7 +2894,7 @@ async function startServer() {
     res.json({ order });
   });
 
-  app.post('/api/admin/sms-pool', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/sms-pool', requireAuth, requireAdminScope('orders', 'catalog'), (req, res) => {
     const phoneNumber = String(req.body?.phoneNumber || '').trim();
     const countryId = String(req.body?.countryId || 'cnt_us');
     const serviceId = String(req.body?.serviceId || '');
@@ -2315,13 +2917,13 @@ async function startServer() {
     res.status(201).json({ item });
   });
 
-  app.delete('/api/admin/sms-pool/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/sms-pool/:id', requireAuth, requireAdminScope('orders', 'catalog'), (req, res) => {
     store.db.smsPool = store.db.smsPool.filter((p) => p.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/orders/clear', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/orders/clear', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
     const scope = String(req.body?.scope || 'completed');
     if (scope === 'all') {
       for (const s of store.db.smsOrders) s.adminCleared = true;
@@ -2353,7 +2955,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete('/api/admin/sms-orders/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/sms-orders/:id', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
     const target = store.db.smsOrders.find((o) => o.id === req.params.id && !o.adminCleared);
     if (!target) {
       res.status(404).json({ error: 'SMS order not found' });
@@ -2370,7 +2972,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete('/api/admin/boosting-orders/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/boosting-orders/:id', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
     const target = store.db.boostingOrders.find((o) => o.id === req.params.id && !o.adminCleared);
     if (!target) {
       res.status(404).json({ error: 'Boosting order not found' });
@@ -2387,7 +2989,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete('/api/admin/vault-items/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/vault-items/:id', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
     const target = store.db.vaultItems.find((v) => v.id === req.params.id && !v.adminCleared);
     if (!target) {
       res.status(404).json({ error: 'Vault delivery record not found' });
@@ -2404,7 +3006,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete('/api/admin/transactions/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/transactions/:id', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
     const target = store.db.transactions.find((t) => t.id === req.params.id && !t.adminCleared);
     if (!target) {
       res.status(404).json({ error: 'Transaction record not found' });
@@ -2421,7 +3023,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/transactions/clear', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/transactions/clear', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
     const scope = String(req.body?.scope || 'all');
     let removed = 0;
     const matchesScope = (t: (typeof store.db.transactions)[number]) => {
@@ -2459,7 +3061,7 @@ async function startServer() {
   });
 
   // --- ADMIN CATALOG CRUD ---
-  app.post('/api/admin/sms-services', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/sms-services', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const svc: SmsService = {
       id: makeId('svc'),
       name: String(req.body?.name || 'New Service').trim(),
@@ -2475,7 +3077,7 @@ async function startServer() {
     res.status(201).json({ service: svc });
   });
 
-  app.patch('/api/admin/sms-services/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/sms-services/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const svc = store.db.smsServices.find((s) => s.id === req.params.id);
     if (!svc) {
       res.status(404).json({ error: 'SMS service not found' });
@@ -2503,13 +3105,13 @@ async function startServer() {
     res.json({ service: svc });
   });
 
-  app.delete('/api/admin/sms-services/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/sms-services/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     store.db.smsServices = store.db.smsServices.filter((s) => s.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/sms-countries', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/sms-countries', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const country: SmsCountry = {
       id: makeId('cnt'),
       name: String(req.body?.name || 'New Country').trim(),
@@ -2523,7 +3125,7 @@ async function startServer() {
     res.status(201).json({ country });
   });
 
-  app.patch('/api/admin/sms-countries/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/sms-countries/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const country = store.db.smsCountries.find((c) => c.id === req.params.id);
     if (!country) {
       res.status(404).json({ error: 'Country not found' });
@@ -2543,13 +3145,13 @@ async function startServer() {
     res.json({ country });
   });
 
-  app.delete('/api/admin/sms-countries/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/sms-countries/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     store.db.smsCountries = store.db.smsCountries.filter((c) => c.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/boosting-services', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/boosting-services', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const item: BoostingService = {
       id: makeId('bst'),
       platform: String(req.body?.platform || 'Instagram').trim(),
@@ -2567,7 +3169,7 @@ async function startServer() {
     res.status(201).json({ service: item });
   });
 
-  app.patch('/api/admin/boosting-services/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/boosting-services/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const item = store.db.boostingServices.find((b) => b.id === req.params.id);
     if (!item) {
       res.status(404).json({ error: 'Boosting service not found' });
@@ -2597,13 +3199,13 @@ async function startServer() {
     res.json({ service: item });
   });
 
-  app.delete('/api/admin/boosting-services/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/boosting-services/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     store.db.boostingServices = store.db.boostingServices.filter((b) => b.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/marketplace-categories', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/marketplace-categories', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const name = String(req.body?.name || '').trim();
     if (!name) {
       res.status(400).json({ error: 'Category name is required' });
@@ -2619,7 +3221,7 @@ async function startServer() {
     res.status(201).json({ category: cat });
   });
 
-  app.patch('/api/admin/marketplace-categories/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/marketplace-categories/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     const cat = store.db.marketplaceCategories.find((c) => c.id === req.params.id);
     if (!cat) {
       res.status(404).json({ error: 'Category not found' });
@@ -2641,7 +3243,7 @@ async function startServer() {
     res.json({ category: cat });
   });
 
-  app.delete('/api/admin/marketplace-categories/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/marketplace-categories/:id', requireAuth, requireAdminScope('catalog'), (req, res) => {
     store.db.marketplaceCategories = store.db.marketplaceCategories.filter(
       (c) => c.id !== req.params.id,
     );
@@ -2649,7 +3251,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/catalog/reorder', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/catalog/reorder', requireAuth, requireAdminScope('catalog', 'cms'), (req: AuthedRequest, res) => {
     const rawKind = String(req.body?.kind || req.body?.entity || '').trim();
     const orderedIds = Array.isArray(req.body?.orderedIds)
       ? req.body.orderedIds.map(String)
@@ -2689,7 +3291,7 @@ async function startServer() {
     res.json({ ok: true, kind: rawKind });
   });
 
-  app.post('/api/admin/catalog/bulk', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/catalog/bulk', requireAuth, requireAdminScope('catalog'), (req: AuthedRequest, res) => {
     const target = String(req.body?.target || '').trim();
     const action = String(req.body?.action || '').trim();
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
@@ -2765,7 +3367,7 @@ async function startServer() {
     res.json({ ok: true, affected });
   });
 
-  app.post('/api/admin/catalog/duplicate', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/catalog/duplicate', requireAuth, requireAdminScope('catalog', 'cms'), (req: AuthedRequest, res) => {
     const target = String(req.body?.target || '').trim();
     const id = String(req.body?.id || '').trim();
     if (!id) {
@@ -2831,7 +3433,7 @@ async function startServer() {
     res.status(400).json({ error: 'Unsupported duplicate target' });
   });
 
-  app.post('/api/admin/marketplace-listings', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/marketplace-listings', requireAuth, requireAdminScope('catalog'), (req: AuthedRequest, res) => {
     const featuresRaw = req.body?.features;
     const features = Array.isArray(featuresRaw)
       ? featuresRaw.map(String)
@@ -2884,9 +3486,7 @@ async function startServer() {
         '/src/assets/images/marketplace_digital_vault_1794869408342.jpg',
       logoUrl: String(req.body?.logoUrl || '').trim(),
       bounceLogo: Boolean(req.body?.bounceLogo),
-      credentialTemplate: String(
-        req.body?.credentialTemplate || 'LICENSE-{{KEY4}}-{{KEY4}}-{{RAND4}}',
-      ),
+      credentialTemplate: String(req.body?.credentialTemplate || 'LICENSE-{{KEY4}}-{{KEY4}}-{{RAND4}}'),
       stockKeys,
       soldCount: 0,
       active: req.body?.active !== false,
@@ -2902,7 +3502,7 @@ async function startServer() {
     res.status(201).json({ listing });
   });
 
-  app.patch('/api/admin/marketplace-listings/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.patch('/api/admin/marketplace-listings/:id', requireAuth, requireAdminScope('catalog'), (req: AuthedRequest, res) => {
     const item = store.db.marketplaceListings.find((l) => l.id === req.params.id);
     if (!item) {
       res.status(404).json({ error: 'Listing not found' });
@@ -2975,7 +3575,7 @@ async function startServer() {
     res.json({ listing: item });
   });
 
-  app.delete('/api/admin/marketplace-listings/:id', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.delete('/api/admin/marketplace-listings/:id', requireAuth, requireAdminScope('catalog'), (req: AuthedRequest, res) => {
     const target = store.db.marketplaceListings.find((l) => l.id === req.params.id);
     store.db.marketplaceListings = store.db.marketplaceListings.filter(
       (l) => l.id !== req.params.id,
@@ -2988,7 +3588,7 @@ async function startServer() {
   });
 
   // --- ADMIN CUSTOM SECTIONS & PRODUCTS ---
-  app.post('/api/admin/sections/ai-setup', requireAuth, requireAdmin, async (req, res) => {
+  app.post('/api/admin/sections/ai-setup', requireAuth, requireAdminScope('cms', 'catalog'), async (req, res) => {
     const name = String(req.body?.name || '').trim();
     if (!name) {
       res.status(400).json({ error: 'Section name is required for AI setup' });
@@ -3003,7 +3603,7 @@ async function startServer() {
     res.json({ setup });
   });
 
-  app.post('/api/admin/sections', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/sections', requireAuth, requireAdminScope('cms', 'catalog'), (req, res) => {
     const starterProductsRaw = Array.isArray(req.body?.products) ? req.body.products : [];
     const secId = makeId('sec');
     const section: CustomSection = {
@@ -3043,7 +3643,7 @@ async function startServer() {
     res.status(201).json({ section });
   });
 
-  app.patch('/api/admin/sections/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/sections/:id', requireAuth, requireAdminScope('cms', 'catalog'), (req, res) => {
     const section = store.db.customSections.find((s) => s.id === req.params.id);
     if (!section) {
       res.status(404).json({ error: 'Section not found' });
@@ -3069,13 +3669,13 @@ async function startServer() {
     res.json({ section });
   });
 
-  app.delete('/api/admin/sections/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/sections/:id', requireAuth, requireAdminScope('cms', 'catalog'), (req, res) => {
     store.db.customSections = store.db.customSections.filter((s) => s.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/section-products', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/section-products', requireAuth, requireAdminScope('cms', 'catalog'), (req, res) => {
     const sectionId = String(req.body?.sectionId || '');
     const section = store.db.customSections.find((s) => s.id === sectionId);
     if (!section) {
@@ -3112,7 +3712,7 @@ async function startServer() {
     res.status(201).json({ product });
   });
 
-  app.patch('/api/admin/section-products/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/section-products/:id', requireAuth, requireAdminScope('cms', 'catalog'), (req, res) => {
     let targetProduct: CustomSectionProduct | undefined;
     for (const s of store.db.customSections) {
       const found = s.products.find((p) => p.id === req.params.id);
@@ -3166,7 +3766,7 @@ async function startServer() {
     res.json({ product: targetProduct });
   });
 
-  app.delete('/api/admin/section-products/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/section-products/:id', requireAuth, requireAdminScope('cms', 'catalog'), (req, res) => {
     store.db.customSections.forEach((s) => {
       s.products = s.products.filter((p) => p.id !== req.params.id);
     });
@@ -3175,7 +3775,7 @@ async function startServer() {
   });
 
   // --- ADMIN PROMO CODES ---
-  app.post('/api/admin/promo-codes', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/promo-codes', requireAuth, requireAdminScope('promos', 'catalog'), (req, res) => {
     const code = String(req.body?.code || '').trim().toUpperCase();
     if (!code) {
       res.status(400).json({ error: 'Promo code text is required' });
@@ -3196,7 +3796,7 @@ async function startServer() {
     res.status(201).json({ promo });
   });
 
-  app.patch('/api/admin/promo-codes/:id/toggle', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.patch('/api/admin/promo-codes/:id/toggle', requireAuth, requireAdminScope('promos', 'catalog'), (req: AuthedRequest, res) => {
     const promo = store.db.promoCodes.find((p) => p.id === req.params.id);
     if (!promo) {
       res.status(404).json({ error: 'Promo code not found' });
@@ -3208,14 +3808,14 @@ async function startServer() {
     res.json({ promo });
   });
 
-  app.delete('/api/admin/promo-codes/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/promo-codes/:id', requireAuth, requireAdminScope('promos', 'catalog'), (req, res) => {
     store.db.promoCodes = store.db.promoCodes.filter((p) => p.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
   // --- OVERWATCH CREATOR TOOLKIT ENDPOINTS ---
-  app.post('/api/admin/users/airdrop-bonus', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/users/airdrop-bonus', requireAuth, requireAdminScope('users'), (req: AuthedRequest, res) => {
     const amount = Number(req.body?.amount || 0);
     const title = String(req.body?.title || 'Creator Wallet Bonus').trim();
     const message = String(req.body?.message || '').trim();
@@ -3277,7 +3877,7 @@ async function startServer() {
     res.json({ creditedCount: activeUsers.length, totalDistributed: activeUsers.length * amount });
   });
 
-  app.post('/api/admin/audit-logs/clear', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/audit-logs/clear', requireAuth, requireAdminScope('audit'), (req: AuthedRequest, res) => {
     const count = store.db.auditLogs.length;
     store.db.auditLogs = [];
     store.logAudit(req.currentUser!.email, 'CLEAR_AUDIT_LOGS', 'Audit Trail', `Cleared ${count} older logs`);
@@ -3286,7 +3886,7 @@ async function startServer() {
   });
 
   // --- ADMIN BROADCASTS, DIRECT EMAILS, TUTORIALS, TICKETS ---
-  app.post('/api/admin/notifications', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/notifications', requireAuth, requireAdminScope('notifications'), (req, res) => {
     const item = {
       id: makeId('ntf'),
       title: String(req.body?.title || 'Platform Notice').trim(),
@@ -3307,13 +3907,13 @@ async function startServer() {
     res.status(201).json({ notification: item });
   });
 
-  app.delete('/api/admin/notifications/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/notifications/:id', requireAuth, requireAdminScope('notifications'), (req, res) => {
     store.db.notifications = store.db.notifications.filter((n) => n.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.post('/api/admin/email', requireAuth, requireAdmin, async (req: AuthedRequest, res) => {
+  app.post('/api/admin/email', requireAuth, requireAdminScope('notifications'), async (req: AuthedRequest, res) => {
     const to = String(req.body?.to || '').trim().toLowerCase();
     const subject = String(req.body?.subject || '').trim();
     const body = String(req.body?.body || '').trim();
@@ -3357,7 +3957,7 @@ async function startServer() {
     res.status(201).json({ log });
   });
 
-  app.post('/api/admin/tutorials', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/tutorials', requireAuth, requireAdminScope('tutorials'), (req, res) => {
     const tutorial = {
       id: makeId('tut'),
       title: String(req.body?.title || 'New Guide').trim(),
@@ -3373,7 +3973,7 @@ async function startServer() {
     res.status(201).json({ tutorial });
   });
 
-  app.patch('/api/admin/tutorials/:id', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/tutorials/:id', requireAuth, requireAdminScope('tutorials'), (req, res) => {
     const tutorial = store.db.tutorials.find((t) => t.id === req.params.id);
     if (!tutorial) {
       res.status(404).json({ error: 'Tutorial not found' });
@@ -3401,13 +4001,13 @@ async function startServer() {
     res.json({ tutorial });
   });
 
-  app.delete('/api/admin/tutorials/:id', requireAuth, requireAdmin, (req, res) => {
+  app.delete('/api/admin/tutorials/:id', requireAuth, requireAdminScope('tutorials'), (req, res) => {
     store.db.tutorials = store.db.tutorials.filter((t) => t.id !== req.params.id);
     store.save();
     res.json({ ok: true });
   });
 
-  app.patch('/api/admin/tickets/:id/status', requireAuth, requireAdmin, (req, res) => {
+  app.patch('/api/admin/tickets/:id/status', requireAuth, requireAdminScope('support', 'live'), (req, res) => {
     const ticket = store.db.tickets.find((t) => t.id === req.params.id);
     if (!ticket) {
       res.status(404).json({ error: 'Ticket not found' });
@@ -3421,7 +4021,7 @@ async function startServer() {
     res.json({ ticket });
   });
 
-  app.post('/api/admin/activity/refresh', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.post('/api/admin/activity/refresh', requireAuth, requireAdminScope('audit', 'overview'), (req: AuthedRequest, res) => {
     store.db.adminAlerts = [];
     store.db.auditLogs = [];
     store.db.emailLogs = [];
@@ -3430,14 +4030,141 @@ async function startServer() {
   });
 
   // --- ADMIN PLATFORM SETTINGS (GOD-MODE GLOBAL EDITOR) ---
-  app.patch('/api/admin/settings', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
+  app.patch('/api/admin/settings', requireAuth, requireAdminScope('settings', 'cms', 'copy', 'revenue', 'catalog'), (req: AuthedRequest, res) => {
     const s = store.db.settings;
-    const body = req.body || {};
+    const body = (req.body || {}) as Record<string, unknown>;
+    const caller = req.currentUser!;
+    if (!isMainAdminUser(caller) && caller.allowedAdminTab && caller.allowedAdminTab !== 'settings') {
+      const copyAllowedKeys = [
+        'dashboardNoticeEnabled',
+        'dashboardNoticeText',
+        'dashboardNoticeTone',
+        'dashboardWalletBadge',
+        'dashboardWalletTitle',
+        'dashboardWalletSubtitle',
+        'dashboardBalanceLabel',
+        'dashboardFundButtonLabel',
+        'dashboardHistoryButtonLabel',
+        'walletPageTitle',
+        'walletPageSubtitle',
+        'walletNoticeText',
+        'walletCardHeader',
+        'walletFormTitle',
+        'walletUploadHint',
+        'walletSubmitButtonLabel',
+        'walletActivityTitle',
+        'walletEmptyActivityText',
+        'marketplaceTitle',
+        'marketplaceSubtitle',
+        'marketplacePausedText',
+        'defaultBuyWarning',
+        'defaultBuyWarningLevel',
+        'smsTitle',
+        'smsSubtitle',
+        'smsSessionNote',
+        'smsInboxTitle',
+        'smsRentButtonLabel',
+        'smsPausedText',
+        'boostingTitle',
+        'boostingSubtitle',
+        'boostingHistoryTitle',
+        'boostingEmptyText',
+        'boostingPausedText',
+        'ordersTitle',
+        'ordersSubtitle',
+        'transactionsTitle',
+        'transactionsSubtitle',
+        'referralTitle',
+        'referralSubtitle',
+        'referralCardBadge',
+        'referralCardHeadline',
+        'referralCardDesc',
+        'tutorialsTitle',
+        'tutorialsSubtitle',
+        'supportTitle',
+        'supportSubtitle',
+        'notificationsTitle',
+        'notificationsSubtitle',
+        'settingsTitle',
+        'settingsSubtitle',
+      ];
+      const tabWhitelists: Record<string, Set<string>> = {
+        revenue: new Set([
+          'profitCostPercentMarketplace',
+          'profitCostPercentSms',
+          'profitCostPercentBoosting',
+        ]),
+        catalog: new Set([
+          'smsPrimeLabel',
+          'smsAlternateLabel',
+          'smsAlternateDiscountPct',
+          'defaultBuyWarning',
+          'defaultBuyWarningLevel',
+        ]),
+        copy: new Set(copyAllowedKeys),
+        cms: new Set([
+          ...copyAllowedKeys,
+          'siteLogoUrl',
+          'clearSiteLogo',
+          'landingVideoUrl',
+          'heroKicker',
+          'heroHeadline',
+          'heroSecondaryHeadline',
+          'heroSubheadline',
+          'heroPrimaryCta',
+          'heroSecondaryCta',
+          'snapshotKicker',
+          'snapshotTitle',
+          'snapshotBadge',
+          'snapshotFooterText',
+          'servicesKicker',
+          'servicesTitle',
+          'landingStats',
+          'landingShowcaseCards',
+          'dashboardBanners',
+          'workflowKicker',
+          'workflowTitle',
+          'workflowSubtitle',
+          'workflowSteps',
+          'ctaKicker',
+          'ctaTitle',
+          'ctaSubtitle',
+          'maintenanceHeadline',
+          'maintenanceMessage',
+          'footerTagline',
+          'creatorName',
+          'creatorUrl',
+          'announcementBanner',
+          'pinnedTickerEnabled',
+          'pinnedTickerText',
+          'pinnedTickerTheme',
+          'showLandingShowcase',
+          'showLandingRates',
+          'communityChannelEnabled',
+          'communityChannelPlatform',
+          'communityChannelTitle',
+          'communityChannelSubtitle',
+          'communityChannelUrl',
+          'communityChannelCta',
+        ]),
+      };
+      const allowedKeys = tabWhitelists[caller.allowedAdminTab];
+      const forbiddenKeys = Object.keys(body).filter((k) => !allowedKeys || !allowedKeys.has(k));
+      if (forbiddenKeys.length > 0) {
+        res.status(403).json({
+          error: `Access restricted: "${caller.allowedAdminTab}" sub-admin cannot modify settings fields (${forbiddenKeys.join(', ')}).`,
+        });
+        return;
+      }
+    }
     if (typeof body.siteName === 'string' && body.siteName.trim()) {
       s.siteName = body.siteName.trim();
     }
     if (typeof body.siteTagline === 'string') {
       s.siteTagline = body.siteTagline.trim();
+    }
+    if (body.siteNameColorMode === 'solid' || body.siteNameColorMode === 'split' || body.siteNameColorMode === 'gradient') {
+      s.siteNameColorMode = body.siteNameColorMode;
     }
     if (body.clearSiteLogo === true) {
       s.siteLogoUrl = '';
@@ -3471,6 +4198,8 @@ async function startServer() {
       typeof v === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v.trim());
     if (isHex(body.brandColor)) s.brandColor = body.brandColor.trim().toUpperCase();
     if (isHex(body.accentColor)) s.accentColor = body.accentColor.trim().toUpperCase();
+    if (isHex(body.siteNameColor1)) s.siteNameColor1 = body.siteNameColor1.trim().toUpperCase();
+    if (isHex(body.siteNameColor2)) s.siteNameColor2 = body.siteNameColor2.trim().toUpperCase();
     if (isHex(body.surfaceBgLight)) s.surfaceBgLight = body.surfaceBgLight.trim().toUpperCase();
     if (isHex(body.surfaceBgDark)) s.surfaceBgDark = body.surfaceBgDark.trim().toUpperCase();
     if (typeof body.colorPreset === 'string' && body.colorPreset.trim()) {
@@ -3479,6 +4208,17 @@ async function startServer() {
     if (typeof body.maintenanceMode === 'boolean') s.maintenanceMode = body.maintenanceMode;
     if (typeof body.supportEmail === 'string') s.supportEmail = body.supportEmail.trim();
     if (typeof body.supportWhatsapp === 'string') s.supportWhatsapp = body.supportWhatsapp.trim();
+    if (typeof body.supportTelegram === 'string') s.supportTelegram = body.supportTelegram.trim();
+    if (body.supportPrimaryChannel === 'whatsapp' || body.supportPrimaryChannel === 'telegram' || body.supportPrimaryChannel === 'both') {
+      s.supportPrimaryChannel = body.supportPrimaryChannel;
+    }
+    if (body.supportGroupPlatform === 'whatsapp' || body.supportGroupPlatform === 'telegram') {
+      s.supportGroupPlatform = body.supportGroupPlatform;
+    }
+    if (typeof body.supportGroupName === 'string') s.supportGroupName = body.supportGroupName.trim();
+    if (typeof body.supportGroupUrl === 'string') s.supportGroupUrl = body.supportGroupUrl.trim();
+    if (typeof body.supportDeskNote === 'string') s.supportDeskNote = body.supportDeskNote.trim();
+    if (typeof body.supportAllowTickets === 'boolean') s.supportAllowTickets = body.supportAllowTickets;
     if (typeof body.showFloatingWhatsapp === 'boolean') {
       s.showFloatingWhatsapp = body.showFloatingWhatsapp;
     }
@@ -3506,6 +4246,15 @@ async function startServer() {
     if (typeof body.creatorName === 'string') s.creatorName = body.creatorName.trim();
     if (typeof body.creatorUrl === 'string') s.creatorUrl = body.creatorUrl.trim();
     if (typeof body.allowNewSignups === 'boolean') s.allowNewSignups = body.allowNewSignups;
+    if (typeof body.requireEmailVerification === 'boolean') {
+      s.requireEmailVerification = body.requireEmailVerification;
+    }
+    if (typeof body.googleAuthEnabled === 'boolean') {
+      s.googleAuthEnabled = body.googleAuthEnabled;
+    }
+    if (typeof body.googleClientId === 'string') {
+      s.googleClientId = body.googleClientId.trim();
+    }
     if (typeof body.enableSmsService === 'boolean') s.enableSmsService = body.enableSmsService;
     if (typeof body.enableBoostingService === 'boolean') {
       s.enableBoostingService = body.enableBoostingService;
@@ -3613,6 +4362,47 @@ async function startServer() {
           }),
         );
     }
+    if (Array.isArray(body.dashboardBanners)) {
+      s.dashboardBanners = body.dashboardBanners
+        .slice(0, 12)
+        .map(
+          (
+            b: {
+              id?: unknown;
+              title?: unknown;
+              imageUrl?: unknown;
+              linkUrl?: unknown;
+              active?: unknown;
+            },
+            idx: number,
+          ) => ({
+            id: String(b?.id || `bnr_${idx + 1}`).trim(),
+            title: String(b?.title || '').trim(),
+            imageUrl: String(b?.imageUrl || '').trim(),
+            linkUrl: String(b?.linkUrl || '').trim() || undefined,
+            active: b?.active !== false,
+          }),
+        )
+        .filter((b: { imageUrl: string }) => Boolean(b.imageUrl));
+    }
+    if (typeof body.smsPrimeLabel === 'string' && body.smsPrimeLabel.trim()) {
+      s.smsPrimeLabel = body.smsPrimeLabel.trim().slice(0, 24);
+    }
+    if (typeof body.smsAlternateLabel === 'string' && body.smsAlternateLabel.trim()) {
+      s.smsAlternateLabel = body.smsAlternateLabel.trim().slice(0, 24);
+    }
+    if (typeof body.smsAlternateDiscountPct === 'number' && Number.isFinite(body.smsAlternateDiscountPct)) {
+      s.smsAlternateDiscountPct = Math.max(0, Math.min(70, Math.round(body.smsAlternateDiscountPct)));
+    }
+    if (typeof body.profitCostPercentMarketplace === 'number' && Number.isFinite(body.profitCostPercentMarketplace)) {
+      s.profitCostPercentMarketplace = Math.max(0, Math.min(100, Math.round(body.profitCostPercentMarketplace)));
+    }
+    if (typeof body.profitCostPercentSms === 'number' && Number.isFinite(body.profitCostPercentSms)) {
+      s.profitCostPercentSms = Math.max(0, Math.min(100, Math.round(body.profitCostPercentSms)));
+    }
+    if (typeof body.profitCostPercentBoosting === 'number' && Number.isFinite(body.profitCostPercentBoosting)) {
+      s.profitCostPercentBoosting = Math.max(0, Math.min(100, Math.round(body.profitCostPercentBoosting)));
+    }
     if (typeof body.workflowKicker === 'string') s.workflowKicker = body.workflowKicker.trim();
     if (typeof body.workflowTitle === 'string') s.workflowTitle = body.workflowTitle.trim();
     if (typeof body.workflowSubtitle === 'string') s.workflowSubtitle = body.workflowSubtitle.trim();
@@ -3635,14 +4425,16 @@ async function startServer() {
       s.maintenanceMessage = body.maintenanceMessage.trim();
     }
     if (typeof body.footerTagline === 'string') s.footerTagline = body.footerTagline.trim();
-    if (typeof body.smtpHost === 'string') s.smtpHost = body.smtpHost.trim();
-    if (typeof body.smtpPort === 'number' && Number.isFinite(body.smtpPort)) {
-      s.smtpPort = Math.max(1, body.smtpPort);
+    if (isMainAdminUser(req.currentUser!) || req.currentUser?.allowedAdminTab === 'settings') {
+      if (typeof body.smtpHost === 'string') s.smtpHost = body.smtpHost.trim();
+      if (typeof body.smtpPort === 'number' && Number.isFinite(body.smtpPort)) {
+        s.smtpPort = Math.max(1, body.smtpPort);
+      }
+      if (typeof body.smtpUser === 'string') s.smtpUser = body.smtpUser.trim();
+      if (typeof body.smtpPass === 'string') s.smtpPass = body.smtpPass.trim();
+      if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
+      if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
     }
-    if (typeof body.smtpUser === 'string') s.smtpUser = body.smtpUser.trim();
-    if (typeof body.smtpPass === 'string') s.smtpPass = body.smtpPass.trim();
-    if (typeof body.smtpFrom === 'string') s.smtpFrom = body.smtpFrom.trim();
-    if (typeof body.resendApiKey === 'string') s.resendApiKey = body.resendApiKey.trim();
 
     if (typeof body.dashboardNoticeEnabled === 'boolean') {
       s.dashboardNoticeEnabled = body.dashboardNoticeEnabled;
