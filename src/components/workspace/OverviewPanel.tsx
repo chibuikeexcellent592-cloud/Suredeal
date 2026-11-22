@@ -50,7 +50,7 @@ function getSafeExternalUrl(raw?: string): string | null {
 }
 
 export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
-  const { user, catalog } = useApp();
+  const { user, catalog, impersonatingFromAdmin } = useApp();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [hideBalance, setHideBalance] = useState(false);
@@ -110,6 +110,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
   const horizontalKpis = [
     {
       label: 'Active OTP Numbers',
+      subtitle: 'Live virtual SMS sessions waiting for codes',
       value: loading ? '—' : String(data?.stats.activeSmsCount ?? 0),
       cta: 'Rent Number',
       tab: 'sms',
@@ -118,6 +119,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
     },
     {
       label: 'Active Boosting',
+      subtitle: 'Ongoing social growth & engagement orders',
       value: loading ? '—' : String(data?.stats.activeBoostingCount ?? 0),
       cta: 'Launch Campaign',
       tab: 'boosting',
@@ -126,6 +128,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
     },
     {
       label: 'Vault Credentials',
+      subtitle: 'Delivered digital accounts & instant keys',
       value: loading ? '—' : String(data?.stats.vaultCount ?? 0),
       cta: 'Open Vault',
       tab: 'marketplace',
@@ -133,7 +136,8 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
       iconClass: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400',
     },
     {
-      label: 'Deposit Wallet',
+      label: 'Referral Invites',
+      subtitle: 'Invite friends & unlock wallet commission rewards',
       value: loading ? '—' : `${data?.stats.referralsCount ?? 0} Invites`,
       cta: 'Refer & Earn',
       tab: 'referral',
@@ -156,7 +160,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
 
       {/* Quick Action Pills Row (Open Overwatch on the Left for Admins) */}
       <div className="flex items-center gap-2.5 overflow-x-auto pb-1">
-        {user?.role === 'admin' && (
+        {(user?.role === 'admin' || Boolean(impersonatingFromAdmin)) && (
           <button
             type="button"
             onClick={() => onNavigate('admin')}
@@ -165,7 +169,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
             <span className="w-7 h-7 rounded-full bg-white/15 flex items-center justify-center text-white shrink-0">
               <ShieldCheck className="w-4 h-4" />
             </span>
-            <span>Open Overwatch</span>
+            <span>{impersonatingFromAdmin ? 'Exit to Overwatch' : 'Open Overwatch'}</span>
           </button>
         )}
         <button
@@ -266,38 +270,48 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
         </div>
       </section>
 
-      {/* 4 Horizontal KPI Blocks */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* 4 Elongated Horizontal KPI Strips */}
+      <div className="grid grid-cols-1 gap-3">
         {horizontalKpis.map((item) => {
           const Icon = item.icon;
           return (
             <div
               key={item.label}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 shadow-2xs"
+              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 py-4 min-h-[76px] flex items-center justify-between gap-4 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
             >
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <span
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${item.iconClass}`}
+                  className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${item.iconClass}`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-5 h-5" />
                 </span>
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
-                    {item.label}
-                  </p>
-                  <p className="font-mono text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white leading-tight tabular-nums truncate">
-                    {item.value}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                    <p className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
+                      {item.label}
+                    </p>
+                    <p className="hidden sm:block text-xs text-slate-500 dark:text-slate-400 truncate">
+                      · {item.subtitle}
+                    </p>
+                  </div>
+                  <p className="sm:hidden text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                    {item.subtitle}
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => onNavigate(item.tab)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-950 text-xs font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-              >
-                <span>{item.cta}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-3 sm:gap-5 shrink-0">
+                <p className="font-mono text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white leading-tight tabular-nums">
+                  {item.value}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onNavigate(item.tab)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-950 text-xs font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                >
+                  <span>{item.cta}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           );
         })}

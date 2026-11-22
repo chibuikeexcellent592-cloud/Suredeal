@@ -124,6 +124,7 @@ interface RevenuePanelProps {
   settings: PlatformSettings;
   accountingRecords: AccountingRecord[];
   transactions: WalletTransaction[];
+  users?: PublicUser[];
   onRefresh: () => Promise<void>;
 }
 
@@ -131,6 +132,7 @@ export function AdminRevenueProfitPanel({
   settings,
   accountingRecords,
   transactions,
+  users = [],
   onRefresh,
 }: RevenuePanelProps) {
   const { notify, refreshCatalog } = useApp();
@@ -145,6 +147,14 @@ export function AdminRevenueProfitPanel({
   );
   const [savingRates, setSavingRates] = useState(false);
 
+  const [timeframe, setTimeframe] = useState<'today' | '7d' | '30d' | 'all' | 'custom'>('30d');
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().slice(0, 10);
+  });
+  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+
   useEffect(() => {
     setMktCostPct(settings.profitCostPercentMarketplace ?? 65);
     setSmsCostPct(settings.profitCostPercentSms ?? 60);
@@ -155,16 +165,42 @@ export function AdminRevenueProfitPanel({
     settings.profitCostPercentBoosting,
   ]);
 
+  const inSelectedRange = (iso: string): boolean => {
+    if (timeframe === 'all') return true;
+    const ms = new Date(iso).getTime();
+    if (!Number.isFinite(ms)) return false;
+    const now = new Date();
+    if (timeframe === 'today') {
+      const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      return ms >= startToday;
+    }
+    if (timeframe === '7d') {
+      return ms >= Date.now() - 7 * 24 * 60 * 60 * 1000;
+    }
+    if (timeframe === '30d') {
+      return ms >= Date.now() - 30 * 24 * 60 * 60 * 1000;
+    }
+    if (timeframe === 'custom') {
+      const fromMs = customFrom ? new Date(`${customFrom}T00:00:00`).getTime() : 0;
+      const toMs = customTo ? new Date(`${customTo}T23:59:59.999`).getTime() : Infinity;
+      return ms >= fromMs && ms <= toMs;
+    }
+    return true;
+  };
+
   const validOrders = accountingRecords.filter(
-    (r) => r.kind === 'order' && !['cancelled', 'expired', 'refunded'].includes(r.status),
+    (r) =>
+      r.kind === 'order' &&
+      !['cancelled', 'expired', 'refunded'].includes(r.status) &&
+      inSelectedRange(r.createdAt),
   );
 
-  // Fallback to completed purchase transactions if accountingRecords is empty on fresh store
-  const useArchive = validOrders.length > 0 || accountingRecords.length > 0;
+  // Fallback to completed purchase transactions only when no accounting archive records exist yet
+  const useArchive = accountingRecords.length > 0;
   const orderEntries = useArchive
     ? validOrders
     : transactions
-        .filter((t) => t.type === 'purchase' && t.status === 'completed')
+        .filter((t) => t.type === 'purchase' && t.status === 'completed' && inSelectedRange(t.createdAt))
         .map((t) => ({
           id: t.id,
           kind: 'order' as const,
@@ -214,42 +250,89 @@ export function AdminRevenueProfitPanel({
 
   const grossSales = categoryRows.reduce((s, r) => s + r.sales, 0);
   const totalEstimatedCost = categoryRows.reduce((s, r) => s + r.estimatedCost, 0);
-  const totalEstimatedProfit = grossSales - totalEstimatedCost;
-  const overallMarginPct =
-    grossSales > 0 ? ((totalEstimatedProfit / grossSales) * 100).toFixed(1) : '0.0';
+  const totalGrossProfit = grossSales - totalEstimatedCost;
+  const grossMarginPct =
+    grossSales > 0 ? ((totalGrossProfit / grossSales) * 100).toFixed(1) : '0.0';
 
-  const verifiedDeposits = accountingRecords.length
+  const verifiedDeposits = useArchive
+    ? accountingRecords
+        .filter(
+          (r) =>
+            r.kind === 'transaction' &&
+            r.category === 'deposit' &&
+            r.status === 'verified' &&
+            inSelectedRange(r.createdAt),
+        )
+        .reduce((s, r) => s + r.amount, 0)
+    : transactions
+        .filter((t) => t.type === 'deposit' && t.status === 'verified' && inSelectedRange(t.createdAt))
+        .reduce((s, t) => s + t.amount, 0);
+
+  const refundsAmount = useArchive
+    ? accountingRecords
+        .filter(
+          (r) =>
+            r.kind === 'transaction' &&
+            r.category === 'refund' &&
+            inSelectedRange(r.createdAt),
+        )
+        .reduce((s, r) => s + r.amount, 0)
+    : transactions
+        .filter((t) => t.type === 'refund' && inSelectedRange(t.createdAt))
+        .reduce((s, t) => s + t.amount, 0);
+
+  const bonusesIssued = useArchive
+    ? accountingRecords
+        .filter(
+          (r) =>
+            r.kind === 'transaction' &&
+            ['admin_credit', 'referral_bonus', 'welcome_bonus'].includes(r.category) &&
+            inSelectedRange(r.createdAt),
+        )
+        .reduce((s, r) => s + r.amount, 0)
+    : transactions
+        .filter(
+          (t) =>
+            ['admin_credit', 'referral_bonus', 'welcome_bonus'].includes(t.type) &&
+            inSelectedRange(t.createdAt),
+        )
+        .reduce((s, t) => s + t.amount, 0);
+
+  const refundsAndBonuses = refundsAmount + bonusesIssued;
+  const netOperatingProfit = totalGrossProfit - bonusesIssued;
+  const netOperatingMarginPct =
+    grossSales > 0 ? ((netOperatingProfit / grossSales) * 100).toFixed(1) : '0.0';
+
+  const averageOrderValue =
+    orderEntries.length > 0 ? Math.round(grossSales / orderEntries.length) : 0;
+  const payingCustomerCount = new Set(
+    orderEntries.map((o) => o.userId || o.userEmail).filter(Boolean),
+  ).size;
+
+  const totalUserBalances = users
+    .filter((u) => u.role !== 'admin')
+    .reduce((s, u) => s + (Number(u.balance) || 0), 0);
+  const allTimeDeposits = useArchive
     ? accountingRecords
         .filter((r) => r.kind === 'transaction' && r.category === 'deposit' && r.status === 'verified')
         .reduce((s, r) => s + r.amount, 0)
     : transactions
         .filter((t) => t.type === 'deposit' && t.status === 'verified')
         .reduce((s, t) => s + t.amount, 0);
+  const netCashFlow = verifiedDeposits - refundsAndBonuses;
 
-  const refundsAndBonuses = accountingRecords.length
-    ? accountingRecords
-        .filter(
-          (r) =>
-            r.kind === 'transaction' &&
-            ['refund', 'admin_credit', 'referral_bonus', 'welcome_bonus'].includes(r.category),
-        )
-        .reduce((s, r) => s + r.amount, 0)
-    : transactions
-        .filter((t) =>
-          ['refund', 'admin_credit', 'referral_bonus', 'welcome_bonus'].includes(t.type),
-        )
-        .reduce((s, t) => s + t.amount, 0);
-
-  // 7-day Revenue & Profit breakdown
-  const dailyRows = Array.from({ length: 7 }, (_, i) => {
+  // Daily breakdown (14 days for 30d/all/custom, 7 days for 7d, 1 day for today)
+  const dayWindowCount = timeframe === 'today' ? 1 : timeframe === '7d' ? 7 : 10;
+  const dailyRows = Array.from({ length: dayWindowCount }, (_, i) => {
     const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
+    d.setDate(d.getDate() - (dayWindowCount - 1 - i));
     const dateKey = d.toISOString().slice(0, 10);
     const label = d.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
     });
+    const shortLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const dayOrders = orderEntries.filter((o) => o.createdAt.startsWith(dateKey));
     let sales = 0;
     let cost = 0;
@@ -264,12 +347,70 @@ export function AdminRevenueProfitPanel({
     return {
       dateKey,
       label,
+      shortLabel,
       orders: dayOrders.length,
       sales,
       cost: Math.round(cost),
       profit,
     };
   });
+
+  const maxDailySale = Math.max(1, ...dailyRows.map((d) => d.sales));
+
+  // Top Performing Services & Products
+  const serviceMap = new Map<
+    string,
+    { title: string; module: 'marketplace' | 'sms' | 'boosting'; count: number; sales: number; profit: number }
+  >();
+  for (const ord of orderEntries) {
+    const mod = classifyAccountingCategory(ord.category);
+    const costPct = mod === 'sms' ? smsCostPct : mod === 'boosting' ? boostCostPct : mktCostPct;
+    const key = `${mod}::${ord.title || 'Order'}`;
+    const existing = serviceMap.get(key) || {
+      title: ord.title || 'Order',
+      module: mod,
+      count: 0,
+      sales: 0,
+      profit: 0,
+    };
+    existing.count += 1;
+    existing.sales += ord.amount;
+    existing.profit += Math.round(ord.amount * (1 - Math.min(100, Math.max(0, costPct)) / 100));
+    serviceMap.set(key, existing);
+  }
+  const topServices = Array.from(serviceMap.values())
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 6);
+
+  // Top Customers
+  const customerMap = new Map<
+    string,
+    { userId: string; userName: string; userEmail: string; orders: number; spent: number }
+  >();
+  for (const ord of orderEntries) {
+    const key = ord.userId || ord.userEmail || 'guest';
+    const cur = customerMap.get(key) || {
+      userId: ord.userId,
+      userName: ord.userName || 'Customer',
+      userEmail: ord.userEmail || '',
+      orders: 0,
+      spent: 0,
+    };
+    cur.orders += 1;
+    cur.spent += ord.amount;
+    customerMap.set(key, cur);
+  }
+  const topCustomers = Array.from(customerMap.values())
+    .sort((a, b) => b.spent - a.spent)
+    .slice(0, 6);
+
+  const applyMarginPreset = (targetMarginPct: number) => {
+    const cost = Math.max(0, Math.min(100, 100 - targetMarginPct));
+    setMktCostPct(cost);
+    setSmsCostPct(cost);
+    setBoostCostPct(cost);
+    notify(`Preset loaded (${targetMarginPct}% margin / ${cost}% cost). Click Save Cost Rates to persist.`, 'info');
+  };
 
   const handleSaveCostRates = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,18 +435,18 @@ export function AdminRevenueProfitPanel({
   };
 
   const handleExportCsv = () => {
-    const header = 'Date,Orders,GrossSales,EstimatedCost,EstimatedProfit';
+    const header = 'Date,Orders,GrossSales,EstimatedCost,GrossProfit';
     const lines = dailyRows.map(
       (r) => `"${r.label}",${r.orders},${r.sales},${r.cost},${r.profit}`,
     );
-    const summary = `"TOTAL",${orderEntries.length},${grossSales},${totalEstimatedCost},${totalEstimatedProfit}`;
+    const summary = `"TOTAL (${timeframe.toUpperCase()})",${orderEntries.length},${grossSales},${totalEstimatedCost},${totalGrossProfit}`;
     const blob = new Blob([[header, ...lines, summary].join('\n')], {
       type: 'text/csv;charset=utf-8;',
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `suredeal-revenue-profit-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `suredeal-revenue-profit-${timeframe}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     notify('Revenue & Profit CSV exported', 'success');
@@ -313,82 +454,230 @@ export function AdminRevenueProfitPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Executive Header + Timeframe Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-emerald-600" />
-            Revenue &amp; Profit Analytics
+            Financial Intelligence &amp; Profit Desk
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real-time store turnover, provider cost ratio estimator, profit margins &amp; deposit inflows.
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Gross turnover, provider COGS, net operating profit after promos, wallet liability &amp; top earners.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-        >
-          <Download className="w-3.5 h-3.5" />
-          Export Revenue CSV
-        </button>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex flex-wrap items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 gap-1">
+            {(
+              [
+                { id: 'today', label: 'Today' },
+                { id: '7d', label: '7 Days' },
+                { id: '30d', label: '30 Days' },
+                { id: 'all', label: 'All Time' },
+                { id: 'custom', label: 'Custom' },
+              ] as const
+            ).map((tf) => (
+              <button
+                key={tf.id}
+                type="button"
+                onClick={() => setTimeframe(tf.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  timeframe === tf.id
+                    ? 'bg-slate-900 text-white dark:bg-blue-600'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-800'
+                }`}
+              >
+                {tf.label}
+              </button>
+            ))}
+          </div>
+          {timeframe === 'custom' && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono text-xs"
+              />
+              <span className="text-slate-400">to</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono text-xs"
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export CSV
+          </button>
+        </div>
       </div>
 
-      {/* KPI Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+      {/* Primary Executive KPI Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
           <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
             Gross Sales Revenue
           </p>
-          <p className="font-display text-xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
+          <p className="font-display text-2xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
             {formatNaira(grossSales, symbol)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-0.5">{orderEntries.length} fulfilled orders</p>
+          <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
+            {orderEntries.length} orders · AOV {formatNaira(averageOrderValue, symbol)}
+          </p>
         </div>
 
-        <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl p-4">
+        <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl p-4">
           <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-            Estimated Net Profit
+            Gross Product Profit
           </p>
-          <p className="font-display text-xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1 tabular-nums">
-            {formatNaira(totalEstimatedProfit, symbol)}
+          <p className="font-display text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1 tabular-nums">
+            {formatNaira(totalGrossProfit, symbol)}
           </p>
-          <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400 mt-0.5 tabular-nums">
-            {overallMarginPct}% net profit margin
+          <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400 mt-1 tabular-nums">
+            {grossMarginPct}% margin after {formatNaira(totalEstimatedCost, symbol)} COGS
           </p>
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
           <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Est. Provider Cost
+            Net Operating Profit
           </p>
-          <p className="font-display text-xl font-extrabold text-slate-700 dark:text-slate-200 mt-1 tabular-nums">
-            {formatNaira(totalEstimatedCost, symbol)}
+          <p
+            className={`font-display text-2xl font-extrabold mt-1 tabular-nums ${
+              netOperatingProfit >= 0
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-rose-600 dark:text-rose-400'
+            }`}
+          >
+            {formatNaira(netOperatingProfit, symbol)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Based on module cost %</p>
+          <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
+            {netOperatingMarginPct}% net after {formatNaira(bonusesIssued, symbol)} credits/bonuses
+          </p>
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
           <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Verified Deposits
+            Verified Deposits &amp; Customers
           </p>
-          <p className="font-display text-xl font-extrabold text-blue-600 dark:text-blue-400 mt-1 tabular-nums">
+          <p className="font-display text-2xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
             {formatNaira(verifiedDeposits, symbol)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Total wallet inflows</p>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Refunds &amp; Bonuses
+          <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
+            {payingCustomerCount} paying buyers · Net inflow {formatNaira(netCashFlow, symbol)}
           </p>
-          <p className="font-display text-xl font-extrabold text-amber-600 dark:text-amber-400 mt-1 tabular-nums">
-            {formatNaira(refundsAndBonuses, symbol)}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Credits &amp; promos issued</p>
         </div>
       </div>
 
-      {/* Cost Ratio Calibration Form */}
+      {/* Wallet Liability & Solvency Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Refunds Issued (Period)
+            </p>
+            <p className="font-mono text-base font-extrabold text-amber-600 dark:text-amber-400 mt-0.5 tabular-nums">
+              {formatNaira(refundsAmount, symbol)}
+            </p>
+          </div>
+          <span className="text-[11px] text-slate-500">SMS/Boost reversals</span>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Outstanding Wallet Float
+            </p>
+            <p className="font-mono text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+              {formatNaira(totalUserBalances, symbol)}
+            </p>
+          </div>
+          <span className="text-[11px] text-slate-500">All user wallet balances</span>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Deposit Coverage Ratio
+            </p>
+            <p className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">
+              {totalUserBalances > 0
+                ? `${Math.min(9999, Math.round((allTimeDeposits / totalUserBalances) * 100))}%`
+                : '100%'}
+            </p>
+          </div>
+          <span className="text-[11px] text-slate-500">All-time deposits vs float</span>
+        </div>
+      </div>
+
+      {/* Comparative Visual Bar Chart */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+              Daily Revenue vs Cost vs Profit Trend
+            </h3>
+            <p className="text-xs text-slate-500">
+              Recent {dayWindowCount}-day visual breakdown across all modules
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] font-semibold">
+            <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+              <span className="w-2.5 h-2.5 rounded-sm bg-blue-600 inline-block" />
+              Gross Sales
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+              <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
+              Est. Profit
+            </span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2.5 items-end pt-2">
+          {dailyRows.map((d) => {
+            const salesPct = Math.max(4, Math.round((d.sales / maxDailySale) * 100));
+            const profitPct = Math.max(
+              d.profit > 0 ? 4 : 0,
+              Math.round((Math.max(0, d.profit) / maxDailySale) * 100),
+            );
+            return (
+              <div
+                key={d.dateKey}
+                className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 space-y-2"
+              >
+                <div className="h-24 flex items-end justify-center gap-1.5">
+                  <div
+                    className="w-4 rounded-t-md bg-blue-600/85 transition-all"
+                    style={{ height: `${d.sales > 0 ? salesPct : 3}%` }}
+                    title={`Sales: ${formatNaira(d.sales, symbol)}`}
+                  />
+                  <div
+                    className="w-4 rounded-t-md bg-emerald-500 transition-all"
+                    style={{ height: `${d.profit > 0 ? profitPct : 3}%` }}
+                    title={`Profit: ${formatNaira(d.profit, symbol)}`}
+                  />
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] font-bold text-slate-700 dark:text-slate-200 truncate">
+                    {d.shortLabel}
+                  </p>
+                  <p className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400 font-bold truncate tabular-nums">
+                    {formatNaira(d.profit, symbol)}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Cost Ratio Calibration Form with 1-Click Presets */}
       <form
         onSubmit={handleSaveCostRates}
         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4"
@@ -399,16 +688,39 @@ export function AdminRevenueProfitPanel({
               Module Cost-of-Goods (%) Calibration
             </h3>
             <p className="text-xs text-slate-500">
-              Set the approximate wholesale cost percentage (0–100%) per service so profit margins calculate automatically.
+              Set wholesale cost percentage (0–100%) per service or load a quick margin preset.
             </p>
           </div>
-          <button
-            type="submit"
-            disabled={savingRates}
-            className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer disabled:opacity-60"
-          >
-            {savingRates ? 'Saving...' : 'Save Cost Rates'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => applyMarginPreset(15)}
+              className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              15% Margin
+            </button>
+            <button
+              type="button"
+              onClick={() => applyMarginPreset(35)}
+              className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              35% Margin
+            </button>
+            <button
+              type="button"
+              onClick={() => applyMarginPreset(55)}
+              className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              55% Margin
+            </button>
+            <button
+              type="submit"
+              disabled={savingRates}
+              className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer disabled:opacity-60"
+            >
+              {savingRates ? 'Saving...' : 'Save Cost Rates'}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -465,7 +777,7 @@ export function AdminRevenueProfitPanel({
         </div>
       </form>
 
-      {/* Category & 7-Day Breakdown */}
+      {/* Module Breakdown & Daily Ledger Table */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
           <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
@@ -479,7 +791,7 @@ export function AdminRevenueProfitPanel({
                   <th className="py-2 px-2 text-right">Orders</th>
                   <th className="py-2 px-2 text-right">Sales</th>
                   <th className="py-2 px-2 text-right">Est. Cost</th>
-                  <th className="py-2 pl-2 text-right">Net Profit</th>
+                  <th className="py-2 pl-2 text-right">Gross Profit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -510,7 +822,7 @@ export function AdminRevenueProfitPanel({
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
           <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-            Last 7 Days Revenue vs Profit
+            Daily Sales vs Profit Ledger
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
@@ -540,6 +852,87 @@ export function AdminRevenueProfitPanel({
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* Top Performing Products/Services & Top Customers */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+          <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+            Top Performing Services &amp; Products
+          </h3>
+          {topServices.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4">No completed orders in this timeframe.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-[11px] uppercase text-slate-400">
+                    <th className="py-2 pr-2">Item</th>
+                    <th className="py-2 px-2 text-right">Qty</th>
+                    <th className="py-2 px-2 text-right">Revenue</th>
+                    <th className="py-2 pl-2 text-right">Profit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {topServices.map((item, idx) => (
+                    <tr key={`${item.title}-${idx}`}>
+                      <td className="py-2.5 pr-2 font-semibold text-slate-900 dark:text-white truncate max-w-[200px]">
+                        {item.title}
+                        <span className="block text-[10px] uppercase font-normal text-slate-400">
+                          {item.module}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-mono tabular-nums">{item.count}</td>
+                      <td className="py-2.5 px-2 text-right font-mono font-semibold tabular-nums">
+                        {formatNaira(item.sales, symbol)}
+                      </td>
+                      <td className="py-2.5 pl-2 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        {formatNaira(item.profit, symbol)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+          <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+            Top Spending Customers
+          </h3>
+          {topCustomers.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4">No customer spend recorded in this timeframe.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-[11px] uppercase text-slate-400">
+                    <th className="py-2 pr-2">Customer</th>
+                    <th className="py-2 px-2 text-right">Orders</th>
+                    <th className="py-2 pl-2 text-right">Total Spent</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {topCustomers.map((c) => (
+                    <tr key={c.userId || c.userEmail}>
+                      <td className="py-2.5 pr-2">
+                        <p className="font-semibold text-slate-900 dark:text-white truncate max-w-[200px]">
+                          {c.userName}
+                        </p>
+                        <p className="text-[10px] text-slate-500 truncate max-w-[200px]">{c.userEmail}</p>
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-mono tabular-nums">{c.orders}</td>
+                      <td className="py-2.5 pl-2 text-right font-mono font-bold text-blue-600 dark:text-blue-400 tabular-nums">
+                        {formatNaira(c.spent, symbol)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

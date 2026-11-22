@@ -183,6 +183,9 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   const [smsAlternateLabel, setSmsAlternateLabel] = useState(
     data.settings.smsAlternateLabel || 'Alternate',
   );
+  const [smsAlternateMode, setSmsAlternateMode] = useState<'discount' | 'markup'>(
+    data.settings.smsAlternateMode === 'markup' ? 'markup' : 'discount',
+  );
   const [smsAlternateDiscountPct, setSmsAlternateDiscountPct] = useState(
     data.settings.smsAlternateDiscountPct ?? 15,
   );
@@ -191,10 +194,12 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
   useEffect(() => {
     setSmsPrimeLabel(data.settings.smsPrimeLabel || 'Prime');
     setSmsAlternateLabel(data.settings.smsAlternateLabel || 'Alternate');
+    setSmsAlternateMode(data.settings.smsAlternateMode === 'markup' ? 'markup' : 'discount');
     setSmsAlternateDiscountPct(data.settings.smsAlternateDiscountPct ?? 15);
   }, [
     data.settings.smsPrimeLabel,
     data.settings.smsAlternateLabel,
+    data.settings.smsAlternateMode,
     data.settings.smsAlternateDiscountPct,
   ]);
 
@@ -1848,14 +1853,14 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
       {subTab === 'sms' && (
         <div className="space-y-6">
           {/* Quick SMS Panel Tier Configuration (Prime vs Alternate) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-                  SMS Panel Tier Labels &amp; Discount (Prime / Alternate)
+                  SMS Panel Tier Labels &amp; Alternate Pricing Direction
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Configure the segmented tier switcher shown at the top of the user SMS &ldquo;Place an order&rdquo; panel.
+                  Choose whether the Alternate tier sells cheaper (discount) or higher (premium markup) than Prime.
                 </p>
               </div>
               <button
@@ -1863,13 +1868,16 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 disabled={savingSmsTiers}
                 onClick={async () => {
                   setSavingSmsTiers(true);
+                  const maxPct = smsAlternateMode === 'markup' ? 500 : 90;
+                  const cleanPct = Math.max(0, Math.min(maxPct, Math.round(Number(smsAlternateDiscountPct) || 0)));
                   try {
                     await apiFetch('/api/admin/settings', {
                       method: 'PATCH',
                       body: JSON.stringify({
                         smsPrimeLabel: smsPrimeLabel.trim() || 'Prime',
                         smsAlternateLabel: smsAlternateLabel.trim() || 'Alternate',
-                        smsAlternateDiscountPct: Math.max(0, Math.min(80, Number(smsAlternateDiscountPct) || 0)),
+                        smsAlternateMode,
+                        smsAlternateDiscountPct: cleanPct,
                       }),
                     });
                     notify('SMS Panel tiers saved permanently!', 'success');
@@ -1885,7 +1893,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 {savingSmsTiers ? 'Saving...' : 'Save Tier Config'}
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block text-[11px] font-semibold mb-1">Primary Tier Label</label>
                 <input
@@ -1907,17 +1915,73 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-semibold mb-1">Alternate Discount (%)</label>
+                <label className="block text-[11px] font-semibold mb-1">Alternate Pricing Mode</label>
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSmsAlternateMode('discount');
+                      setSmsAlternateDiscountPct((p) => Math.min(90, Math.max(0, Number(p) || 0)));
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                      smsAlternateMode === 'discount'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    Sell Lower (-)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSmsAlternateMode('markup')}
+                    className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                      smsAlternateMode === 'markup'
+                        ? 'bg-amber-600 text-white'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    Sell Higher (+)
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold mb-1">
+                  {smsAlternateMode === 'markup'
+                    ? 'Alternate Markup (+% up to 500%)'
+                    : 'Alternate Discount (-% up to 90%)'}
+                </label>
                 <input
                   type="number"
                   min={0}
-                  max={80}
+                  max={smsAlternateMode === 'markup' ? 500 : 90}
                   value={smsAlternateDiscountPct}
                   onChange={(e) => setSmsAlternateDiscountPct(Number(e.target.value))}
                   className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                 />
               </div>
             </div>
+            {(() => {
+              const sampleBase = 1000;
+              const maxPct = smsAlternateMode === 'markup' ? 500 : 90;
+              const pct = Math.max(0, Math.min(maxPct, Math.round(Number(smsAlternateDiscountPct) || 0)));
+              const sampleAlt =
+                smsAlternateMode === 'markup'
+                  ? Math.max(50, Math.round(sampleBase * (1 + pct / 100)))
+                  : Math.max(50, Math.round(sampleBase * (1 - pct / 100)));
+              return (
+                <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    Live Rate Preview on a {symbol}1,000 service:
+                  </span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white tabular-nums">
+                    {smsPrimeLabel || 'Prime'}: {symbol}1,000 · {smsAlternateLabel || 'Alternate'}:{' '}
+                    <span className={smsAlternateMode === 'markup' ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}>
+                      {symbol}{sampleAlt.toLocaleString()} ({smsAlternateMode === 'markup' ? `+${pct}%` : `-${pct}%`})
+                    </span>
+                  </span>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -4227,6 +4291,7 @@ export function AdminCommsAndSettingsPanel({
     dashboardBanners: s.dashboardBanners ?? [],
     smsPrimeLabel: s.smsPrimeLabel ?? 'Prime',
     smsAlternateLabel: s.smsAlternateLabel ?? 'Alternate',
+    smsAlternateMode: s.smsAlternateMode ?? 'discount',
     smsAlternateDiscountPct: s.smsAlternateDiscountPct ?? 15,
     profitCostPercentMarketplace: s.profitCostPercentMarketplace ?? 65,
     profitCostPercentSms: s.profitCostPercentSms ?? 60,

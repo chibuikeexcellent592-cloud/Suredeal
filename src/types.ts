@@ -154,6 +154,7 @@ export interface PlatformSettings {
   // SMS Panel Tier Settings
   smsPrimeLabel?: string;
   smsAlternateLabel?: string;
+  smsAlternateMode?: 'discount' | 'markup';
   smsAlternateDiscountPct?: number;
 
   // Revenue & Profit Estimation Settings

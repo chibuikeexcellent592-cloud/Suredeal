@@ -23,6 +23,13 @@ export interface SignupResult {
   message?: string;
 }
 
+export interface ImpersonationSessionInfo {
+  backupToken: string;
+  adminName: string;
+  adminEmail: string;
+  targetName: string;
+}
+
 interface AppContextValue {
   user: PublicUser | null;
   authLoading: boolean;
@@ -56,6 +63,9 @@ interface AppContextValue {
     error?: string;
   }>;
   updateLocalBalance: (nextBalance: number) => void;
+  impersonatingFromAdmin: { adminName: string; adminEmail: string; targetName: string } | null;
+  startImpersonatingUser: (userId: string) => Promise<PublicUser>;
+  exitImpersonation: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -70,6 +80,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [impersonationMeta, setImpersonationMeta] = useState<ImpersonationSessionInfo | null>(null);
   const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
     try {
       const saved = localStorage.getItem(THEME_KEY);
@@ -332,6 +343,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    setImpersonationMeta(null);
     setStoredToken('');
     setUser(null);
   }, []);
@@ -339,6 +351,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateLocalBalance = useCallback((nextBalance: number) => {
     setUser((prev) => (prev ? { ...prev, balance: nextBalance } : prev));
   }, []);
+
+  const startImpersonatingUser = useCallback(
+    async (userId: string) => {
+      const currentToken = getStoredToken();
+      if (!currentToken || !user || user.role !== 'admin') {
+        throw new Error('Administrator session is required to open a live user account.');
+      }
+      const res = await apiFetch<{ token: string; user: PublicUser }>(
+        `/api/admin/users/${encodeURIComponent(userId)}/impersonate`,
+        { method: 'POST' },
+      );
+      setImpersonationMeta((prev) => ({
+        backupToken: prev?.backupToken || currentToken,
+        adminName: prev?.adminName || user.name,
+        adminEmail: prev?.adminEmail || user.email,
+        targetName: res.user.name,
+      }));
+      setStoredToken(res.token);
+      setUser(res.user);
+      await refreshCatalog();
+      return res.user;
+    },
+    [user, refreshCatalog],
+  );
+
+  const exitImpersonation = useCallback(async () => {
+    const backup = impersonationMeta?.backupToken;
+    setImpersonationMeta(null);
+    if (backup) {
+      setStoredToken(backup);
+      await Promise.all([refreshUser(), refreshCatalog()]);
+    }
+  }, [impersonationMeta, refreshUser, refreshCatalog]);
+
+  const impersonatingFromAdmin = impersonationMeta
+    ? {
+        adminName: impersonationMeta.adminName,
+        adminEmail: impersonationMeta.adminEmail,
+        targetName: impersonationMeta.targetName,
+      }
+    : null;
 
   return (
     <AppContext.Provider
@@ -363,6 +416,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshCatalog,
         checkMaintenanceStatus,
         updateLocalBalance,
+        impersonatingFromAdmin,
+        startImpersonatingUser,
+        exitImpersonation,
       }}
     >
       {children}

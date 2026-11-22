@@ -66,10 +66,12 @@ import type {
   AdminFeatureTab,
   AuditLogEntry,
   BoostingOrder,
+  NotificationItem,
   PromoCode,
   PublicUser,
   SmsOrder,
   SmsPoolNumber,
+  SupportTicket,
   VaultItem,
   VisitorStats,
   WalletTransaction,
@@ -169,7 +171,16 @@ export function AdminDashboard({
   onOpenWorkspace,
   onPreviewMaintenance,
 }: AdminDashboardProps) {
-  const { user, theme, toggleTheme, logout, notify, refreshCatalog, refreshUser } = useApp();
+  const {
+    user,
+    theme,
+    toggleTheme,
+    logout,
+    notify,
+    refreshCatalog,
+    refreshUser,
+    startImpersonatingUser,
+  } = useApp();
   const [cachedInitial] = useState<FullAdminOverview | null>(() => readOverwatchCache());
   const [data, setData] = useState<FullAdminOverview | null>(cachedInitial);
   const [loading, setLoading] = useState(!cachedInitial);
@@ -249,6 +260,41 @@ export function AdminDashboard({
   const [editUserPass, setEditUserPass] = useState('');
   const [savingUserEdit, setSavingUserEdit] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [bulkUserAmount, setBulkUserAmount] = useState(1000);
+  const [bulkUserTitle, setBulkUserTitle] = useState('');
+  const [bulkUserBusy, setBulkUserBusy] = useState(false);
+  const [sweepingSms, setSweepingSms] = useState(false);
+  const [inspectTab, setInspectTab] = useState<
+    'summary' | 'wallet' | 'sms' | 'boosting' | 'vault' | 'tickets' | 'timeline'
+  >('summary');
+  const [loadingUserActivity, setLoadingUserActivity] = useState(false);
+  const [userActivityError, setUserActivityError] = useState<string | null>(null);
+  const [impersonatingBusy, setImpersonatingBusy] = useState(false);
+  const [userFullActivity, setUserFullActivity] = useState<{
+    user: PublicUser;
+    stats: {
+      totalDeposits: number;
+      totalPurchases: number;
+      totalRefunds: number;
+      totalAdminCredits: number;
+      smsCount: number;
+      boostingCount: number;
+      vaultCount: number;
+      ticketsCount: number;
+      referralsCount: number;
+      clearedRecordsCount: number;
+    };
+    transactions: WalletTransaction[];
+    smsOrders: SmsOrder[];
+    boostingOrders: BoostingOrder[];
+    vaultItems: VaultItem[];
+    tickets: SupportTicket[];
+    notifications: NotificationItem[];
+    referrals: PublicUser[];
+    accountingRecords: AccountingRecord[];
+    auditLogs: AuditLogEntry[];
+  } | null>(null);
 
   const loadAdmin = useCallback(async () => {
     setSyncingLive(true);
@@ -316,6 +362,37 @@ export function AdminDashboard({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!inspectUserId) {
+      setUserFullActivity(null);
+      setUserActivityError(null);
+      return;
+    }
+    let cancelled = false;
+    setInspectTab('summary');
+    setLoadingUserActivity(true);
+    setUserActivityError(null);
+    apiFetch<NonNullable<typeof userFullActivity>>(
+      `/api/admin/users/${encodeURIComponent(inspectUserId)}/full-activity`,
+    )
+      .then((res) => {
+        if (!cancelled) setUserFullActivity(res);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setUserActivityError(
+            err instanceof Error ? err.message : 'Failed to load full account history',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingUserActivity(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectUserId]);
 
   if (!data && loading) {
     return (
@@ -660,10 +737,13 @@ export function AdminDashboard({
       | 'welcomePromoEnabled'
       | 'pinnedTickerEnabled'
       | 'allowNewSignups'
+      | 'requireEmailVerification'
+      | 'googleAuthEnabled'
       | 'enableSmsService'
       | 'enableBoostingService'
       | 'enableMarketplace'
       | 'allowPromoCodes'
+      | 'supportAllowTickets'
       | 'showFloatingWhatsapp'
       | 'showLandingShowcase'
       | 'showLandingRates',
@@ -679,6 +759,73 @@ export function AdminDashboard({
       notify('Overwatch control saved permanently', 'success');
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to update', 'error');
+    }
+  };
+
+  const handleSweepExpiredSms = async () => {
+    setSweepingSms(true);
+    try {
+      const res = await apiFetch<{ ok: boolean; refundedCount: number }>(
+        '/api/admin/tools/sweep-expired-sms',
+        { method: 'POST' },
+      );
+      if (res.refundedCount > 0) {
+        notify(`Swept & auto-refunded ${res.refundedCount} timed-out SMS order(s).`, 'success');
+        await loadAdmin();
+      } else {
+        notify('All SMS timers are current — no timed-out orders found.', 'info');
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Sweep failed', 'error');
+    } finally {
+      setSweepingSms(false);
+    }
+  };
+
+  const handleBulkUserAction = async (
+    action: 'credit' | 'debit' | 'suspend' | 'activate' | 'notify',
+  ) => {
+    if (selectedUserIds.length === 0) return;
+    setBulkUserBusy(true);
+    try {
+      const res = await apiFetch<{ ok: boolean; affectedCount: number; skippedCount: number }>(
+        '/api/admin/users/bulk-action',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            userIds: selectedUserIds,
+            action,
+            amount: action === 'credit' || action === 'debit' ? Number(bulkUserAmount) : undefined,
+            title: action === 'notify' ? bulkUserTitle.trim() || 'Notice from Support' : undefined,
+            message: action === 'notify' ? bulkUserTitle.trim() || 'Please check your account dashboard.' : undefined,
+            note: bulkUserTitle.trim() || undefined,
+          }),
+        },
+      );
+      notify(
+        `Bulk ${action} applied to ${res.affectedCount} account(s)${res.skippedCount > 0 ? ` (${res.skippedCount} protected skipped)` : ''}.`,
+        'success',
+      );
+      setSelectedUserIds([]);
+      setBulkUserTitle('');
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk action failed', 'error');
+    } finally {
+      setBulkUserBusy(false);
+    }
+  };
+
+  const handleOpenLiveUserAccount = async (target: PublicUser) => {
+    setImpersonatingBusy(true);
+    try {
+      await startImpersonatingUser(target.id);
+      setInspectUserId(null);
+      notify(`Viewing ${target.name} (${target.email}) live account`, 'info');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not open live user account', 'error');
+    } finally {
+      setImpersonatingBusy(false);
     }
   };
 
@@ -1249,6 +1396,15 @@ export function AdminDashboard({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      disabled={sweepingSms}
+                      onClick={() => void handleSweepExpiredSms()}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 text-[11px] font-semibold hover:bg-amber-100 cursor-pointer disabled:opacity-60"
+                    >
+                      <Clock className="w-3 h-3" />
+                      {sweepingSms ? 'Sweeping...' : 'Sweep Expired SMS'}
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleExportAccountingCsv}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
                     >
@@ -1262,6 +1418,14 @@ export function AdminDashboard({
                     >
                       <Download className="w-3 h-3 text-blue-600" />
                       Users CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportJsonBackup}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                    >
+                      <Archive className="w-3 h-3 text-purple-600" />
+                      Full Backup JSON
                     </button>
                     {onOpenWorkspace && (
                       <button
@@ -1382,6 +1546,34 @@ export function AdminDashboard({
                         desc: 'Show scrolling top announcement bar',
                         val: data.settings.pinnedTickerEnabled,
                         onColor: 'bg-blue-600 text-white',
+                      },
+                      {
+                        key: 'requireEmailVerification' as const,
+                        title: 'Email Code Verification',
+                        desc: 'Require 6-digit email OTP on signup',
+                        val: data.settings.requireEmailVerification !== false,
+                        onColor: 'bg-emerald-600 text-white',
+                      },
+                      {
+                        key: 'googleAuthEnabled' as const,
+                        title: 'Google One-Tap Sign-In',
+                        desc: 'Allow users to sign up via Google',
+                        val: Boolean(data.settings.googleAuthEnabled),
+                        onColor: 'bg-blue-600 text-white',
+                      },
+                      {
+                        key: 'allowPromoCodes' as const,
+                        title: 'Promo & Coupon Codes',
+                        desc: 'Allow discount codes at checkout',
+                        val: data.settings.allowPromoCodes !== false,
+                        onColor: 'bg-purple-600 text-white',
+                      },
+                      {
+                        key: 'supportAllowTickets' as const,
+                        title: 'Support Ticket Form',
+                        desc: 'Allow users to open help tickets',
+                        val: data.settings.supportAllowTickets !== false,
+                        onColor: 'bg-emerald-600 text-white',
                       },
                     ].map((sw) => (
                       <div
@@ -1990,41 +2182,140 @@ export function AdminDashboard({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {(
-                    [
-                      { id: 'all', label: `All (${data.users.length})` },
-                      { id: 'active', label: `Active (${activeUsersCount})` },
-                      { id: 'suspended', label: `Suspended (${suspendedUsersCount})` },
-                      {
-                        id: 'admin',
-                        label: `Admins (${data.users.filter((u) => u.role === 'admin').length})`,
-                      },
-                    ] as const
-                  ).map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setUserRoleFilter(f.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
-                        userRoleFilter === f.id
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'all', label: `All (${data.users.length})` },
+                        { id: 'active', label: `Active (${activeUsersCount})` },
+                        { id: 'suspended', label: `Suspended (${suspendedUsersCount})` },
+                        {
+                          id: 'admin',
+                          label: `Admins (${data.users.filter((u) => u.role === 'admin').length})`,
+                        },
+                      ] as const
+                    ).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setUserRoleFilter(f.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                          userRoleFilter === f.id
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectableIds = filteredUsers
+                        .filter((u) => !(isUserMainAdmin(u) && !isMainAdmin))
+                        .map((u) => u.id);
+                      const allSelected =
+                        selectableIds.length > 0 &&
+                        selectableIds.every((id) => selectedUserIds.includes(id));
+                      setSelectedUserIds(allSelected ? [] : selectableIds);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    {selectedUserIds.length > 0 ? `Clear Selection (${selectedUserIds.length})` : 'Select All Visible'}
+                  </button>
                 </div>
+
+                {selectedUserIds.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-blue-50/80 dark:bg-blue-950/35 border border-blue-200 dark:border-blue-900/70 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold">
+                        {selectedUserIds.length} Selected
+                      </span>
+                      <input
+                        type="number"
+                        value={bulkUserAmount}
+                        onChange={(e) => setBulkUserAmount(Number(e.target.value))}
+                        placeholder="Amount"
+                        className="w-28 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                      />
+                      <input
+                        type="text"
+                        value={bulkUserTitle}
+                        onChange={(e) => setBulkUserTitle(e.target.value)}
+                        placeholder="Reason / Notification message..."
+                        className="w-48 sm:w-56 px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={bulkUserBusy}
+                        onClick={() => void handleBulkUserAction('credit')}
+                        className="px-2.5 py-1.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        + Bulk Credit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={bulkUserBusy}
+                        onClick={() => void handleBulkUserAction('debit')}
+                        className="px-2.5 py-1.5 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        - Bulk Debit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={bulkUserBusy}
+                        onClick={() => void handleBulkUserAction('notify')}
+                        className="px-2.5 py-1.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        Notify Selected
+                      </button>
+                      <button
+                        type="button"
+                        disabled={bulkUserBusy}
+                        onClick={() => void handleBulkUserAction('suspend')}
+                        className="px-2.5 py-1.5 text-[11px] font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        Suspend
+                      </button>
+                      <button
+                        type="button"
+                        disabled={bulkUserBusy}
+                        onClick={() => void handleBulkUserAction('activate')}
+                        className="px-2.5 py-1.5 text-[11px] font-bold bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 text-white rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredUsers.map((u) => {
                     const targetIsMain = isUserMainAdmin(u);
                     const targetProtected = targetIsMain && !isMainAdmin;
+                    const isChecked = selectedUserIds.includes(u.id);
                     return (
                     <div key={u.id} className="py-4 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
+                          {!targetProtected && (
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                setSelectedUserIds((prev) =>
+                                  e.target.checked
+                                    ? [...prev, u.id]
+                                    : prev.filter((id) => id !== u.id),
+                                );
+                              }}
+                              aria-label={`Select ${u.email}`}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer shrink-0"
+                            />
+                          )}
                           <UserAvatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
@@ -2212,11 +2503,23 @@ export function AdminDashboard({
                         <button
                           type="button"
                           onClick={() => setInspectUserId(u.id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                         >
                           <Eye className="w-3 h-3" />
-                          Inspect 360°
+                          Full Activity
                         </button>
+
+                        {(isMainAdmin || u.role !== 'admin') && (
+                          <button
+                            type="button"
+                            disabled={impersonatingBusy}
+                            onClick={() => void handleOpenLiveUserAccount(u)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 cursor-pointer disabled:opacity-60"
+                          >
+                            <LayoutDashboard className="w-3 h-3" />
+                            Open Account
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -3975,6 +4278,7 @@ export function AdminDashboard({
               settings={data.settings}
               accountingRecords={accountingRecordsList}
               transactions={data.transactions}
+              users={data.users}
               onRefresh={loadAdmin}
             />
           )}
@@ -4023,160 +4327,509 @@ export function AdminDashboard({
         </div>
       </div>
 
-      {/* User 360° Inspector Modal */}
+      {/* Full User Account 360° Activity Console Modal */}
       {inspectedUser && (
         <div
           className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
           onClick={() => setInspectUserId(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl my-auto"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-5 shadow-2xl my-auto max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-display text-lg font-extrabold text-slate-900 dark:text-white">
-                    {inspectedUser.name}
-                  </h3>
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
-                    {inspectedUser.role}
-                  </span>
-                  <span
-                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                      inspectedUser.status === 'active'
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                    }`}
-                  >
-                    {inspectedUser.status}
-                  </span>
+            {/* Header */}
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <UserAvatar name={inspectedUser.name} avatarUrl={inspectedUser.avatarUrl} size="sm" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-display text-lg font-extrabold text-slate-900 dark:text-white truncate">
+                      {inspectedUser.name}
+                    </h3>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                      {inspectedUser.role}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                        inspectedUser.status === 'active'
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                      }`}
+                    >
+                      {inspectedUser.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                    {inspectedUser.email} · ID: <span className="font-mono">{inspectedUser.id}</span> · Ref:{' '}
+                    <span className="font-mono">{inspectedUser.referralCode}</span>
+                  </p>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  {inspectedUser.email} · ID: <span className="font-mono">{inspectedUser.id}</span> · Ref:{' '}
-                  <span className="font-mono">{inspectedUser.referralCode}</span>
-                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setInspectUserId(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-white cursor-pointer"
-                aria-label="Close inspector"
-              >
-                <X className="w-5 h-5" />
-              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {(isMainAdmin || inspectedUser.role !== 'admin') && (
+                  <button
+                    type="button"
+                    disabled={impersonatingBusy}
+                    onClick={() => void handleOpenLiveUserAccount(inspectedUser)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer disabled:opacity-60"
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5" />
+                    {impersonatingBusy ? 'Opening...' : 'Open Live Account'}
+                  </button>
+                )}
+                {userFullActivity && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const blob = new Blob([JSON.stringify(userFullActivity, null, 2)], {
+                        type: 'application/json',
+                      });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `user-activity-${inspectedUser.email}-${new Date().toISOString().slice(0, 10)}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      notify('User full activity JSON downloaded', 'success');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export JSON
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setInspectUserId(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                  aria-label="Close inspector"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            {(() => {
-              const userTx = data.transactions.filter((t) => t.userId === inspectedUser.id);
-              const totalDeposits = userTx
-                .filter((t) => t.type === 'deposit' && t.status === 'verified')
-                .reduce((s, t) => s + t.amount, 0);
-              const totalSpent = userTx
-                .filter((t) => t.type === 'purchase' && t.status === 'completed')
-                .reduce((s, t) => s + t.amount, 0);
-              const userSms = data.smsOrders.filter((s) => s.userId === inspectedUser.id).length;
-              const userBoost = data.boostingOrders.filter((b) => b.userId === inspectedUser.id).length;
-              return (
-                <>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                      <p className="text-[11px] text-slate-500">Wallet Balance</p>
-                      <p className="font-mono text-base font-extrabold text-blue-600 dark:text-blue-400 mt-0.5 tabular-nums">
-                        {formatNaira(inspectedUser.balance, symbol)}
-                      </p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                      <p className="text-[11px] text-slate-500">Verified Deposits</p>
-                      <p className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">
-                        {formatNaira(totalDeposits, symbol)}
-                      </p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                      <p className="text-[11px] text-slate-500">Total Spent</p>
-                      <p className="font-mono text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
-                        {formatNaira(totalSpent, symbol)}
-                      </p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                      <p className="text-[11px] text-slate-500">Orders Placed</p>
-                      <p className="font-bold text-slate-900 dark:text-white mt-1">
-                        {userSms} SMS · {userBoost} Boosts
-                      </p>
-                    </div>
-                  </div>
+            {/* Navigation Tabs */}
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              {(
+                [
+                  { id: 'summary', label: 'Summary' },
+                  {
+                    id: 'wallet',
+                    label: `Wallet & Ledger (${userFullActivity?.transactions.length ?? 0})`,
+                  },
+                  {
+                    id: 'sms',
+                    label: `SMS & OTPs (${userFullActivity?.smsOrders.length ?? 0})`,
+                  },
+                  {
+                    id: 'boosting',
+                    label: `Boosting (${userFullActivity?.boostingOrders.length ?? 0})`,
+                  },
+                  {
+                    id: 'vault',
+                    label: `Marketplace Vault (${userFullActivity?.vaultItems.length ?? 0})`,
+                  },
+                  {
+                    id: 'tickets',
+                    label: `Tickets & Referrals (${(userFullActivity?.tickets.length ?? 0) + (userFullActivity?.referrals.length ?? 0)})`,
+                  },
+                  { id: 'timeline', label: 'Full Timeline' },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setInspectTab(t.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                    inspectTab === t.id
+                      ? 'bg-slate-900 text-white dark:bg-blue-600'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                      Recent Activity ({userTx.length} transactions)
-                    </h4>
-                    {userTx.length === 0 ? (
-                      <p className="text-xs text-slate-500 py-4 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                        No transactions recorded yet for this account.
-                      </p>
-                    ) : (
-                      <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-52 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl px-3">
-                        {userTx.slice(0, 8).map((tx) => (
-                          <div key={tx.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-slate-900 dark:text-white truncate">
-                                {tx.description}
-                              </p>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {loadingUserActivity ? (
+                <div className="py-12 text-center text-xs text-slate-500">
+                  Loading complete account history across all services...
+                </div>
+              ) : userActivityError ? (
+                <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
+                  {userActivityError}
+                </div>
+              ) : userFullActivity ? (
+                <>
+                  {inspectTab === 'summary' && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Wallet Balance</p>
+                          <p className="font-mono text-base font-extrabold text-blue-600 dark:text-blue-400 mt-0.5 tabular-nums">
+                            {formatNaira(userFullActivity.user.balance, symbol)}
+                          </p>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Verified Deposits</p>
+                          <p className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">
+                            {formatNaira(userFullActivity.stats.totalDeposits, symbol)}
+                          </p>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Total Spent</p>
+                          <p className="font-mono text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                            {formatNaira(userFullActivity.stats.totalPurchases, symbol)}
+                          </p>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Refunds &amp; Credits</p>
+                          <p className="font-mono text-base font-extrabold text-amber-600 dark:text-amber-400 mt-0.5 tabular-nums">
+                            {formatNaira(
+                              userFullActivity.stats.totalRefunds + userFullActivity.stats.totalAdminCredits,
+                              symbol,
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">SMS Orders</p>
+                          <p className="font-mono font-bold text-sm mt-0.5">{userFullActivity.stats.smsCount}</p>
+                        </div>
+                        <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Boosting Orders</p>
+                          <p className="font-mono font-bold text-sm mt-0.5">{userFullActivity.stats.boostingCount}</p>
+                        </div>
+                        <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Vault Keys Delivered</p>
+                          <p className="font-mono font-bold text-sm mt-0.5">{userFullActivity.stats.vaultCount}</p>
+                        </div>
+                        <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                          <p className="text-[11px] text-slate-500">Referrals / Tickets</p>
+                          <p className="font-mono font-bold text-sm mt-0.5">
+                            {userFullActivity.stats.referralsCount} refs · {userFullActivity.stats.ticketsCount} tkt
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="text-slate-500">Joined:</span>{' '}
+                          <span className="font-semibold">
+                            {new Date(userFullActivity.user.createdAt).toLocaleString()}
+                          </span>
+                          {userFullActivity.user.lastLoginAt && (
+                            <>
+                              <span className="mx-2 text-slate-300">|</span>
+                              <span className="text-slate-500">Last Login:</span>{' '}
+                              <span className="font-semibold">
+                                {new Date(userFullActivity.user.lastLoginAt).toLocaleString()}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        {userFullActivity.stats.clearedRecordsCount > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] font-bold">
+                            Includes {userFullActivity.stats.clearedRecordsCount} Overwatch-cleared record(s)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {inspectTab === 'wallet' && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl px-4">
+                      {userFullActivity.transactions.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-8 text-center">No wallet transactions recorded.</p>
+                      ) : (
+                        userFullActivity.transactions.map((tx) => (
+                          <div key={tx.id} className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px] uppercase font-bold">
+                                  {tx.type}
+                                </span>
+                                <span className="font-semibold text-slate-900 dark:text-white">
+                                  {tx.description}
+                                </span>
+                                {tx.adminCleared && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                    Cleared from Overwatch
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-[11px] text-slate-500">
-                                {new Date(tx.createdAt).toLocaleString()} · {tx.status}
+                                {tx.id} · {new Date(tx.createdAt).toLocaleString()} · {tx.status}
+                                {tx.aiAudit?.extractedReference ? ` · Ref: ${tx.aiAudit.extractedReference}` : ''}
                               </p>
                             </div>
-                            <span className="font-mono font-bold text-slate-900 dark:text-white shrink-0 tabular-nums">
+                            <span className="font-mono font-extrabold text-slate-900 dark:text-white tabular-nums">
                               {formatNaira(tx.amount, symbol)}
                             </span>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const target = inspectedUser;
-                          setInspectUserId(null);
-                          openEditUser(target);
-                        }}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl cursor-pointer"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                        Edit User
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNotifyTargetUserId(inspectedUser.id);
-                          setInspectUserId(null);
-                          setTab('notifications');
-                        }}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        Send Direct Alert
-                      </button>
+                        ))
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserSearch(inspectedUser.email);
-                        setInspectUserId(null);
-                        setTab('users');
-                      }}
-                      className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
-                    >
-                      Manage in Directory
-                    </button>
-                  </div>
+                  )}
+
+                  {inspectTab === 'sms' && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl px-4">
+                      {userFullActivity.smsOrders.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-8 text-center">No SMS verification rentals recorded.</p>
+                      ) : (
+                        userFullActivity.smsOrders.map((ord) => (
+                          <div key={ord.id} className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-slate-900 dark:text-white">
+                                  {ord.serviceName} ({ord.countryName})
+                                </span>
+                                <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">
+                                  {ord.phoneNumber}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold uppercase">
+                                  {ord.status}
+                                </span>
+                                {ord.adminCleared && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                    Cleared
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500">
+                                {ord.id} · {new Date(ord.createdAt).toLocaleString()}
+                                {ord.otpCode ? ` · OTP: ${ord.otpCode}` : ''}
+                              </p>
+                            </div>
+                            <span className="font-mono font-extrabold tabular-nums">
+                              {formatNaira(ord.price, symbol)}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {inspectTab === 'boosting' && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl px-4">
+                      {userFullActivity.boostingOrders.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-8 text-center">No boosting campaigns ordered.</p>
+                      ) : (
+                        userFullActivity.boostingOrders.map((ord) => (
+                          <div key={ord.id} className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-slate-900 dark:text-white">
+                                  {ord.platform} · {ord.serviceName}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold uppercase">
+                                  {ord.status}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 truncate max-w-lg">
+                                Qty: {ord.quantity.toLocaleString()} · Remains: {ord.remains.toLocaleString()} · Link: {ord.targetUrl}
+                              </p>
+                            </div>
+                            <span className="font-mono font-extrabold tabular-nums">
+                              {formatNaira(ord.amount, symbol)}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {inspectTab === 'vault' && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl px-4">
+                      {userFullActivity.vaultItems.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-8 text-center">No Marketplace Vault deliveries recorded.</p>
+                      ) : (
+                        userFullActivity.vaultItems.map((v) => (
+                          <div key={v.id} className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="font-bold text-slate-900 dark:text-white">
+                                {v.title} · <span className="text-slate-500 font-normal">{v.category}</span>
+                              </p>
+                              <p className="font-mono text-[11px] text-slate-500 truncate max-w-xl">
+                                {v.deliveredCredential}
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                {v.id} · {new Date(v.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                            <span className="font-mono font-extrabold tabular-nums">
+                              {formatNaira(v.price, symbol)}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {inspectTab === 'tickets' && (
+                    <div className="space-y-4">
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Support Tickets ({userFullActivity.tickets.length})
+                        </h4>
+                        {userFullActivity.tickets.length === 0 ? (
+                          <p className="text-xs text-slate-500">No support tickets opened.</p>
+                        ) : (
+                          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {userFullActivity.tickets.map((t) => (
+                              <div key={t.id} className="py-2.5 text-xs space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-bold">{t.subject}</span>
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold uppercase">
+                                    {t.status}
+                                  </span>
+                                </div>
+                                <p className="text-slate-500">
+                                  {t.messages && t.messages.length > 0
+                                    ? `${t.messages[t.messages.length - 1].text} (${t.messages.length} msg${t.messages.length === 1 ? '' : 's'})`
+                                    : 'No messages'}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Invited Referrals ({userFullActivity.referrals.length})
+                        </h4>
+                        {userFullActivity.referrals.length === 0 ? (
+                          <p className="text-xs text-slate-500">No users referred yet.</p>
+                        ) : (
+                          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {userFullActivity.referrals.map((refUser) => (
+                              <div key={refUser.id} className="py-2 flex items-center justify-between text-xs">
+                                <span>
+                                  <strong>{refUser.name}</strong> · {refUser.email}
+                                </span>
+                                <span className="text-[11px] text-slate-400">
+                                  {new Date(refUser.createdAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {inspectTab === 'timeline' && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl px-4">
+                      {(() => {
+                        const events = [
+                          ...userFullActivity.transactions.map((t) => ({
+                            id: `tx_${t.id}`,
+                            at: t.createdAt,
+                            tag: `TX · ${t.type.toUpperCase()}`,
+                            title: t.description,
+                            meta: `${formatNaira(t.amount, symbol)} · ${t.status}`,
+                          })),
+                          ...userFullActivity.smsOrders.map((s) => ({
+                            id: `sms_${s.id}`,
+                            at: s.createdAt,
+                            tag: 'SMS OTP',
+                            title: `${s.serviceName} (${s.countryName}) · ${s.phoneNumber}`,
+                            meta: `${formatNaira(s.price, symbol)} · ${s.status}`,
+                          })),
+                          ...userFullActivity.boostingOrders.map((b) => ({
+                            id: `bst_${b.id}`,
+                            at: b.createdAt,
+                            tag: 'BOOSTING',
+                            title: `${b.platform} · ${b.serviceName} (${b.quantity.toLocaleString()})`,
+                            meta: `${formatNaira(b.amount, symbol)} · ${b.status}`,
+                          })),
+                          ...userFullActivity.vaultItems.map((v) => ({
+                            id: `vlt_${v.id}`,
+                            at: v.createdAt,
+                            tag: 'VAULT',
+                            title: `${v.title} (${v.category})`,
+                            meta: formatNaira(v.price, symbol),
+                          })),
+                          ...userFullActivity.auditLogs.map((a) => ({
+                            id: `aud_${a.id}`,
+                            at: a.createdAt,
+                            tag: 'AUDIT',
+                            title: `${a.action}: ${a.detail}`,
+                            meta: `by ${a.actorEmail}`,
+                          })),
+                        ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+                        if (events.length === 0) {
+                          return <p className="text-xs text-slate-500 py-8 text-center">No events recorded yet.</p>;
+                        }
+                        return events.map((ev) => (
+                          <div key={ev.id} className="py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="min-w-0">
+                              <span className="inline-block mr-2 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px] font-bold">
+                                {ev.tag}
+                              </span>
+                              <span className="font-semibold text-slate-900 dark:text-white">{ev.title}</span>
+                              <p className="text-[11px] text-slate-500 mt-0.5">{ev.meta}</p>
+                            </div>
+                            <span className="font-mono text-[11px] text-slate-400">
+                              {new Date(ev.at).toLocaleString()}
+                            </span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  )}
                 </>
-              );
-            })()}
+              ) : null}
+            </div>
+
+            {/* Footer Quick Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-800 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = inspectedUser;
+                    setInspectUserId(null);
+                    openEditUser(target);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit User
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotifyTargetUserId(inspectedUser.id);
+                    setInspectUserId(null);
+                    setTab('notifications');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Send Direct Alert
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setUserSearch(inspectedUser.email);
+                  setInspectUserId(null);
+                  setTab('users');
+                }}
+                className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                Manage in Directory
+              </button>
+            </div>
           </div>
         </div>
       )}

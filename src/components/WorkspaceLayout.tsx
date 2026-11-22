@@ -55,7 +55,7 @@ interface WorkspaceLayoutProps {
 }
 
 export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProps) {
-  const { user, catalog, theme, toggleTheme, logout } = useApp();
+  const { user, catalog, theme, toggleTheme, logout, impersonatingFromAdmin } = useApp();
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false);
@@ -268,11 +268,11 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
           </div>
         </div>
 
-        {/* Overwatch -> Opens creator management console */}
-        {user?.role === 'admin' && onOpenAdmin && (
+        {/* Overwatch -> Opens creator management console or exits impersonation */}
+        {(user?.role === 'admin' || Boolean(impersonatingFromAdmin)) && onOpenAdmin && (
           <div className="px-4 pt-4">
             <p className="px-2 pb-1.5 text-[11px] font-semibold tracking-wider uppercase text-slate-400">
-              Creator Console
+              {impersonatingFromAdmin ? 'Overwatch Session' : 'Creator Console'}
             </p>
             <button
               type="button"
@@ -282,7 +282,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               }}
               className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-950 transition-colors cursor-pointer"
             >
-              <span className="flex items-center gap-3">
+              <span className="flex items-center gap-3 min-w-0">
                 <span className="w-5 h-5 rounded-md bg-gradient-to-br from-blue-600 to-sky-500 text-white flex items-center justify-center shrink-0">
                   <svg
                     viewBox="0 0 24 24"
@@ -298,7 +298,9 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                     <path d="M9.5 12.2l1.8 1.8 3.4-3.6" />
                   </svg>
                 </span>
-                <span>Overwatch</span>
+                <span className="truncate">
+                  {impersonatingFromAdmin ? 'Exit to Overwatch' : 'Overwatch'}
+                </span>
               </span>
             </button>
           </div>
@@ -551,22 +553,6 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
           </header>
 
           <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-5">
-            {user?.role === 'admin' && onOpenAdmin && (
-              <div className="rounded-2xl border border-blue-200 dark:border-blue-900/70 bg-blue-50/80 dark:bg-blue-950/35 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-blue-900 dark:text-blue-200">
-                  <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-sky-400 shrink-0" />
-                  <span>Full User View Active — browsing live user experience</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={onOpenAdmin}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Return to Overwatch
-                </button>
-              </div>
-            )}
             {activeTab === 'overview' && <PinnedMarquee />}
             {activeTab === 'overview' && <OverviewPanel onNavigate={selectTab} />}
             {activeTab === 'orders' && <OrdersPanel onNavigate={selectTab} />}
@@ -682,14 +668,14 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                   <span>Payment Methods</span>
                 </button>
 
-                {user?.role === 'admin' && onOpenAdmin && (
+                {(user?.role === 'admin' || Boolean(impersonatingFromAdmin)) && onOpenAdmin && (
                   <button
                     type="button"
                     onClick={() => selectTab('admin')}
                     className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-950/60 text-sm font-bold text-purple-700 dark:text-purple-300 transition-colors cursor-pointer"
                   >
                     <ShieldCheck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                    <span>Overwatch Console</span>
+                    <span>{impersonatingFromAdmin ? 'Exit to Overwatch' : 'Overwatch Console'}</span>
                   </button>
                 )}
               </nav>

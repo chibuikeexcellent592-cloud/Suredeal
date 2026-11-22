@@ -52,7 +52,7 @@ class AppErrorBoundary extends Component<
 }
 
 function AppRouter() {
-  const { user, authLoading, catalog } = useApp();
+  const { user, authLoading, catalog, impersonatingFromAdmin, exitImpersonation } = useApp();
   const [view, setView] = useState<'landing' | 'auth' | 'workspace' | 'admin'>('landing');
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [previewMaintenance, setPreviewMaintenance] = useState(false);
@@ -114,7 +114,9 @@ function AppRouter() {
   }, []);
 
   const isMaintenanceLocked =
-    Boolean(catalog?.settings?.maintenanceMode) && user?.role !== 'admin';
+    Boolean(catalog?.settings?.maintenanceMode) &&
+    user?.role !== 'admin' &&
+    !impersonatingFromAdmin;
 
   useEffect(() => {
     if (!authLoading && user && view === 'auth') {
@@ -129,10 +131,12 @@ function AppRouter() {
   }, [authLoading, user, view, isMaintenanceLocked, catalog?.settings?.maintenanceMode]);
 
   useEffect(() => {
-    if (view === 'admin' && user && user.role !== 'admin') {
+    if (impersonatingFromAdmin && view === 'admin') {
+      setView('workspace');
+    } else if (view === 'admin' && user && user.role !== 'admin') {
       setView('workspace');
     }
-  }, [view, user]);
+  }, [view, user, impersonatingFromAdmin]);
 
   useEffect(() => {
     if (user?.role !== 'admin' && previewMaintenance) {
@@ -150,6 +154,13 @@ function AppRouter() {
 
   const showMaintenanceScreen =
     (isMaintenanceLocked || (user?.role === 'admin' && previewMaintenance)) && view !== 'auth';
+
+  const handleReturnToOverwatch = async () => {
+    if (impersonatingFromAdmin) {
+      await exitImpersonation();
+    }
+    setView('admin');
+  };
 
   return (
     <>
@@ -180,7 +191,13 @@ function AppRouter() {
       ) : view === 'workspace' && user ? (
         <WorkspaceLayout
           onBackHome={() => setView('landing')}
-          onOpenAdmin={user.role === 'admin' ? () => setView('admin') : undefined}
+          onOpenAdmin={
+            user.role === 'admin' || impersonatingFromAdmin
+              ? () => {
+                  void handleReturnToOverwatch();
+                }
+              : undefined
+          }
         />
       ) : view === 'auth' ? (
         <AuthView

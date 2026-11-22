@@ -851,16 +851,16 @@ async function startServer() {
     });
   });
 
-  function expireTimedOutSmsOrders(): boolean {
+  function expireTimedOutSmsOrders(): number {
     const now = Date.now();
-    let changed = false;
+    let expiredCount = 0;
     for (const order of store.db.smsOrders) {
       if (order.status !== 'waiting') continue;
       const expMs = new Date(order.expiresAt).getTime();
       if (!Number.isFinite(expMs) || now < expMs) continue;
 
       order.status = 'expired';
-      changed = true;
+      expiredCount += 1;
 
       const user = store.db.users.find((u) => u.id === order.userId);
       if (user) {
@@ -909,10 +909,10 @@ async function startServer() {
         poolItem.assignedOrderId = undefined;
       }
     }
-    if (changed) {
+    if (expiredCount > 0) {
       store.save();
     }
-    return changed;
+    return expiredCount;
   }
 
   const expiryInterval = setInterval(() => {
@@ -964,12 +964,15 @@ async function startServer() {
     }
 
     const basePrice = Math.round(service.basePrice * country.multiplier);
-    const altDiscountPct = Math.max(
-      0,
-      Math.min(70, Number(store.db.settings.smsAlternateDiscountPct ?? 15)),
-    );
+    const altMode = store.db.settings.smsAlternateMode === 'markup' ? 'markup' : 'discount';
+    const rawAltPct = Math.max(0, Number(store.db.settings.smsAlternateDiscountPct ?? 15));
+    const altPct = Math.min(altMode === 'markup' ? 500 : 90, rawAltPct);
     const tierPrice =
-      tier === 'alternate' ? Math.max(50, Math.round(basePrice * (1 - altDiscountPct / 100))) : basePrice;
+      tier === 'alternate'
+        ? altMode === 'markup'
+          ? Math.max(50, Math.round(basePrice * (1 + altPct / 100)))
+          : Math.max(50, Math.round(basePrice * (1 - altPct / 100)))
+        : basePrice;
 
     let price = tierPrice;
     let appliedPromo: PromoCode | undefined;
@@ -2351,6 +2354,20 @@ async function startServer() {
     });
   });
 
+  app.post('/api/admin/tools/sweep-expired-sms', requireAuth, requireAdminScope('overview', 'orders', 'live'), (req: AuthedRequest, res) => {
+    const refundedCount = expireTimedOutSmsOrders();
+    if (refundedCount > 0) {
+      store.logAudit(
+        req.currentUser!.email,
+        'SWEEP_EXPIRED_SMS',
+        `${refundedCount} SMS order(s)`,
+        `Swept and auto-refunded ${refundedCount} timed-out SMS order(s)`,
+      );
+      store.save();
+    }
+    res.json({ ok: true, refundedCount });
+  });
+
   app.post('/api/admin/alerts/read-all', requireAuth, requireAdmin, (_req, res) => {
     store.db.adminAlerts.forEach((a) => {
       a.read = true;
@@ -2613,6 +2630,215 @@ async function startServer() {
     store.logAudit(req.currentUser!.email, 'DELETE_USER_PERMANENT', target.email, 'Permanently deleted user & all records');
     store.save();
     res.json({ ok: true });
+  });
+
+  // --- FULL USER ACCOUNT 360 ACTIVITY, LIVE IMPERSONATION & BULK ACTIONS ---
+  app.get('/api/admin/users/:id/full-activity', requireAuth, requireAdminScope('users', 'overview', 'live', 'accounting'), (req, res) => {
+    expireTimedOutSmsOrders();
+    const target = store.db.users.find((u) => u.id === req.params.id);
+    if (!target) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    const db = store.db;
+    const transactions = db.transactions.filter((t) => t.userId === target.id);
+    const smsOrders = db.smsOrders.filter((s) => s.userId === target.id);
+    const boostingOrders = db.boostingOrders.filter((b) => b.userId === target.id);
+    const vaultItems = db.vaultItems.filter((v) => v.userId === target.id);
+    const tickets = db.tickets.filter((t) => t.userId === target.id);
+    const notifications = db.notifications.filter(
+      (n) => n.targetUserId === target.id || n.targetUserId === 'all',
+    );
+    const referrals = db.users.filter((u) => u.referredBy === target.id).map(toPublicUser);
+    const accountingRecords = (db.accountingRecords || []).filter((r) => r.userId === target.id);
+    const targetEmailLower = target.email.toLowerCase();
+    const auditLogs = db.auditLogs.filter(
+      (a) =>
+        a.target.toLowerCase() === targetEmailLower ||
+        a.actorEmail.toLowerCase() === targetEmailLower ||
+        a.detail.toLowerCase().includes(targetEmailLower),
+    );
+
+    const totalDeposits = transactions
+      .filter((t) => t.type === 'deposit' && t.status === 'verified')
+      .reduce((s, t) => s + t.amount, 0);
+    const totalPurchases = transactions
+      .filter((t) => t.type === 'purchase' && t.status === 'completed')
+      .reduce((s, t) => s + t.amount, 0);
+    const totalRefunds = transactions
+      .filter((t) => t.type === 'refund')
+      .reduce((s, t) => s + t.amount, 0);
+    const totalAdminCredits = transactions
+      .filter((t) => t.type === 'admin_credit' || t.type === 'welcome_bonus' || t.type === 'referral_bonus')
+      .reduce((s, t) => s + t.amount, 0);
+    const clearedRecordsCount =
+      transactions.filter((t) => t.adminCleared).length +
+      smsOrders.filter((s) => s.adminCleared).length +
+      boostingOrders.filter((b) => b.adminCleared).length +
+      vaultItems.filter((v) => v.adminCleared).length;
+
+    res.json({
+      user: toPublicUser(target),
+      stats: {
+        totalDeposits,
+        totalPurchases,
+        totalRefunds,
+        totalAdminCredits,
+        smsCount: smsOrders.length,
+        boostingCount: boostingOrders.length,
+        vaultCount: vaultItems.length,
+        ticketsCount: tickets.length,
+        referralsCount: referrals.length,
+        clearedRecordsCount,
+      },
+      transactions,
+      smsOrders,
+      boostingOrders,
+      vaultItems,
+      tickets,
+      notifications,
+      referrals,
+      accountingRecords,
+      auditLogs,
+    });
+  });
+
+  app.post('/api/admin/users/:id/impersonate', requireAuth, requireAdminScope('users', 'overview'), (req: AuthedRequest, res) => {
+    const target = store.db.users.find((u) => u.id === req.params.id);
+    if (!target) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    const callerIsMain = isMainAdminUser(req.currentUser!);
+    if (isMainAdminUser(target) && !callerIsMain) {
+      res.status(403).json({ error: 'Main Admin account is permanently protected and cannot be impersonated' });
+      return;
+    }
+    if (!callerIsMain && target.role === 'admin' && target.id !== req.currentUser!.id) {
+      res.status(403).json({ error: 'Only Main Admin can open another administrator account' });
+      return;
+    }
+    store.logAudit(
+      req.currentUser!.email,
+      'IMPERSONATE_USER',
+      target.email,
+      `Opened live user account session from Overwatch (${target.id})`,
+    );
+    store.save();
+    res.json({
+      token: signToken(target.id),
+      user: toPublicUser(target),
+    });
+  });
+
+  app.post('/api/admin/users/bulk-action', requireAuth, requireAdminScope('users'), (req: AuthedRequest, res) => {
+    const userIds = Array.isArray(req.body?.userIds)
+      ? Array.from(new Set(req.body.userIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)))
+      : [];
+    const action = String(req.body?.action || '');
+    if (userIds.length === 0) {
+      res.status(400).json({ error: 'Select at least one user account' });
+      return;
+    }
+    if (!['credit', 'debit', 'suspend', 'activate', 'notify'].includes(action)) {
+      res.status(400).json({ error: 'Invalid bulk user action' });
+      return;
+    }
+    const amount = Number(req.body?.amount || 0);
+    if ((action === 'credit' || action === 'debit') && (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000)) {
+      res.status(400).json({ error: 'Enter a valid amount between 1 and 10,000,000' });
+      return;
+    }
+    const title = String(req.body?.title || '').trim();
+    const message = String(req.body?.message || '').trim();
+    const note = String(req.body?.note || '').trim();
+    if (action === 'notify' && !title && !message) {
+      res.status(400).json({ error: 'Notification title or message is required' });
+      return;
+    }
+
+    const callerIsMain = isMainAdminUser(req.currentUser!);
+    const now = new Date().toISOString();
+    let affectedCount = 0;
+    let skippedCount = 0;
+
+    for (const id of userIds) {
+      const target = store.db.users.find((u) => u.id === id);
+      if (!target) {
+        skippedCount += 1;
+        continue;
+      }
+      const targetIsMain = isMainAdminUser(target);
+      if (targetIsMain && !callerIsMain) {
+        skippedCount += 1;
+        continue;
+      }
+      if (!callerIsMain && target.role === 'admin' && action !== 'notify') {
+        skippedCount += 1;
+        continue;
+      }
+      if (action === 'suspend' && (targetIsMain || target.role === 'admin')) {
+        skippedCount += 1;
+        continue;
+      }
+
+      if (action === 'credit' || action === 'debit') {
+        const delta = action === 'debit' ? Math.min(target.balance, amount) : amount;
+        target.balance =
+          action === 'debit' ? Math.max(0, target.balance - amount) : target.balance + amount;
+        const txType = action === 'debit' ? 'admin_debit' : 'admin_credit';
+        const txDesc = note || (action === 'debit' ? 'Overwatch Bulk Debit' : 'Overwatch Bulk Credit');
+        const txId = makeId('tx');
+        store.db.transactions.unshift({
+          id: txId,
+          userId: target.id,
+          userName: target.name,
+          userEmail: target.email,
+          type: txType,
+          amount: delta,
+          status: 'completed',
+          description: txDesc,
+          createdAt: now,
+        });
+        store.recordAccountingEntry({
+          kind: 'transaction',
+          sourceId: txId,
+          category: txType,
+          userId: target.id,
+          userName: target.name,
+          userEmail: target.email,
+          title: action === 'debit' ? 'BULK DEBIT' : 'BULK CREDIT',
+          detail: txDesc,
+          amount: delta,
+          status: 'completed',
+          createdAt: now,
+        });
+      } else if (action === 'suspend') {
+        target.status = 'suspended';
+      } else if (action === 'activate') {
+        target.status = 'active';
+      } else if (action === 'notify') {
+        store.db.notifications.unshift({
+          id: makeId('ntf'),
+          title: title || 'Important Account Notice',
+          message: message || title,
+          type: 'info',
+          targetUserId: target.id,
+          readBy: [],
+          createdAt: now,
+        });
+      }
+      affectedCount += 1;
+    }
+
+    store.logAudit(
+      req.currentUser!.email,
+      `BULK_USER_${action.toUpperCase()}`,
+      `${affectedCount} user(s)`,
+      `Bulk ${action}${amount > 0 ? ` (${store.db.settings.currencySymbol}${amount.toLocaleString()})` : ''}; skipped ${skippedCount}`,
+    );
+    store.save();
+    res.json({ ok: true, affectedCount, skippedCount });
   });
 
   // --- ADMIN RECEIPT & ORDER DECISIONS ---
@@ -4097,6 +4323,7 @@ async function startServer() {
         catalog: new Set([
           'smsPrimeLabel',
           'smsAlternateLabel',
+          'smsAlternateMode',
           'smsAlternateDiscountPct',
           'defaultBuyWarning',
           'defaultBuyWarningLevel',
@@ -4391,8 +4618,15 @@ async function startServer() {
     if (typeof body.smsAlternateLabel === 'string' && body.smsAlternateLabel.trim()) {
       s.smsAlternateLabel = body.smsAlternateLabel.trim().slice(0, 24);
     }
+    if (body.smsAlternateMode === 'discount' || body.smsAlternateMode === 'markup') {
+      s.smsAlternateMode = body.smsAlternateMode;
+      if (s.smsAlternateMode === 'discount' && typeof s.smsAlternateDiscountPct === 'number' && s.smsAlternateDiscountPct > 90) {
+        s.smsAlternateDiscountPct = 90;
+      }
+    }
     if (typeof body.smsAlternateDiscountPct === 'number' && Number.isFinite(body.smsAlternateDiscountPct)) {
-      s.smsAlternateDiscountPct = Math.max(0, Math.min(70, Math.round(body.smsAlternateDiscountPct)));
+      const maxPct = s.smsAlternateMode === 'markup' ? 500 : 90;
+      s.smsAlternateDiscountPct = Math.max(0, Math.min(maxPct, Math.round(body.smsAlternateDiscountPct)));
     }
     if (typeof body.profitCostPercentMarketplace === 'number' && Number.isFinite(body.profitCostPercentMarketplace)) {
       s.profitCostPercentMarketplace = Math.max(0, Math.min(100, Math.round(body.profitCostPercentMarketplace)));

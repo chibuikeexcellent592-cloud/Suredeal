@@ -40,8 +40,9 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
 
   const primeLabel = settings?.smsPrimeLabel?.trim() || 'Prime';
   const alternateLabel = settings?.smsAlternateLabel?.trim() || 'Alternate';
-  const alternateDiscountPct = Math.min(
-    70,
+  const alternateMode = settings?.smsAlternateMode === 'markup' ? 'markup' : 'discount';
+  const alternatePct = Math.min(
+    alternateMode === 'markup' ? 500 : 90,
     Math.max(0, Number(settings?.smsAlternateDiscountPct ?? 15)),
   );
   const allowPromoCodes = settings?.allowPromoCodes !== false;
@@ -149,14 +150,18 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
   const activeService = services.find((s) => s.id === selectedServiceId);
   const activeCountry = countries.find((c) => c.id === selectedCountryId);
 
+  const calcTierPrice = (base: number) =>
+    tier === 'alternate'
+      ? alternateMode === 'markup'
+        ? Math.max(50, Math.round(base * (1 + alternatePct / 100)))
+        : Math.max(50, Math.round(base * (1 - alternatePct / 100)))
+      : base;
+
   const primePrice =
     activeService && activeCountry
       ? Math.round(activeService.basePrice * activeCountry.multiplier)
       : 0;
-  const computedPrice =
-    tier === 'alternate' && primePrice > 0
-      ? Math.max(50, Math.round(primePrice * ((100 - alternateDiscountPct) / 100)))
-      : primePrice;
+  const computedPrice = primePrice > 0 ? calcTierPrice(primePrice) : 0;
   const availableStock = activeService?.stock ?? 0;
   const shortfall = Math.max(0, computedPrice - walletBalance);
   const hasInsufficientBalance = computedPrice > 0 && walletBalance < computedPrice;
@@ -301,15 +306,17 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
               }`}
             >
               <span>{alternateLabel}</span>
-              {alternateDiscountPct > 0 && (
+              {alternatePct > 0 && (
                 <span
                   className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
                     tier === 'alternate'
                       ? 'bg-slate-950/15 text-slate-950'
-                      : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                      : alternateMode === 'markup'
+                        ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                        : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
                   }`}
                 >
-                  -{alternateDiscountPct}%
+                  {alternateMode === 'markup' ? `+${alternatePct}%` : `-${alternatePct}%`}
                 </span>
               )}
             </button>
@@ -382,10 +389,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 ) : (
                   filteredServices.map((svc) => {
                     const base = Math.round(svc.basePrice * (activeCountry?.multiplier || 1));
-                    const shown =
-                      tier === 'alternate'
-                        ? Math.max(50, Math.round(base * ((100 - alternateDiscountPct) / 100)))
-                        : base;
+                    const shown = calcTierPrice(base);
                     return (
                       <option key={svc.id} value={svc.id}>
                         {svc.name} · {formatNaira(shown, symbol)} ({svc.stock.toLocaleString()} ready)
@@ -405,7 +409,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 Payable Amount
               </span>
               <div className="text-right">
-                {tier === 'alternate' && primePrice > computedPrice && (
+                {tier === 'alternate' && primePrice !== computedPrice && (
                   <span className="font-mono text-xs line-through text-slate-400 mr-2 tabular-nums">
                     {formatNaira(primePrice, symbol)}
                   </span>

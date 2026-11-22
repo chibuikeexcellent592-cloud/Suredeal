@@ -80,6 +80,7 @@ export function createInitialDatabaseState(
       dashboardBanners: [],
       smsPrimeLabel: 'Prime',
       smsAlternateLabel: 'Alternate',
+      smsAlternateMode: 'discount',
       smsAlternateDiscountPct: 15,
       profitCostPercentMarketplace: 45,
       profitCostPercentSms: 55,
