@@ -4,6 +4,7 @@ import { AuthView } from './components/AuthView';
 import { FloatingWhatsAppButton } from './components/FloatingWhatsAppButton';
 import { LandingPage } from './components/LandingPage';
 import { MaintenanceScreen } from './components/MaintenanceScreen';
+import { SeasonalOverlay } from './components/SeasonalEffects';
 import { ToastContainer } from './components/ToastContainer';
 import { WorkspaceLayout } from './components/WorkspaceLayout';
 import { AppProvider, useApp } from './context/AppContext';
@@ -225,6 +226,7 @@ function AppRouter() {
           onPreviewMaintenance={() => setPreviewMaintenance(true)}
         />
       )}
+      {!showMaintenanceScreen && <SeasonalOverlay />}
       {view !== 'admin' && !showMaintenanceScreen && <FloatingWhatsAppButton />}
       <ToastContainer />
     </>

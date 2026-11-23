@@ -33,6 +33,7 @@ import { apiFetch, formatNaira } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
 import { BrandNameText } from './BrandNameText';
 import { PinnedMarquee } from './PinnedMarquee';
+import { SeasonalRibbon } from './SeasonalEffects';
 import { UserAvatar } from './UserAvatar';
 import { BoostingPanel } from './workspace/BoostingPanel';
 import { CustomSectionPanel, MarketplacePanel } from './workspace/MarketplacePanel';
@@ -459,6 +460,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--site-bg)] text-slate-900 dark:text-slate-100">
+      <SeasonalRibbon compact />
       <div className="flex-1 flex">
         {/* Desktop Sidebar */}
         <aside className="hidden lg:block w-72 shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 sticky top-0 h-screen">

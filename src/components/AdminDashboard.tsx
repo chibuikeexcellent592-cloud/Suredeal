@@ -87,6 +87,7 @@ import {
   AdminSubAdminsPanel,
 } from './admin/AdminOpsPanels';
 import { AdminSectionCopyPanel } from './admin/AdminSectionCopyPanel';
+import { SEASONAL_PRESETS, type SeasonalThemeId } from './SeasonalEffects';
 
 interface FullAdminOverview extends AdminOverviewPayload {
   metrics: {
@@ -235,6 +236,10 @@ export function AdminDashboard({
   const [poolCountry, setPoolCountry] = useState('cnt_us');
   const [poolService, setPoolService] = useState('');
   const [poolOtp, setPoolOtp] = useState('');
+  const [poolFilter, setPoolFilter] = useState<'all' | 'ready' | 'used'>('all');
+  const [bulkPoolText, setBulkPoolText] = useState('');
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [seasonSaving, setSeasonSaving] = useState(false);
   const [otpInputs, setOtpInputs] = useState<Record<string, string>>({});
   const [phoneInputs, setPhoneInputs] = useState<Record<string, string>>({});
 
@@ -782,6 +787,76 @@ export function AdminDashboard({
     }
   };
 
+  const handleQuickSeasonApply = async (nextSeason: SeasonalThemeId) => {
+    setSeasonSaving(true);
+    try {
+      const preset = SEASONAL_PRESETS[nextSeason];
+      await apiFetch('/api/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          seasonalTheme: nextSeason,
+          seasonalBannerTitle: preset.defaultHeadline,
+          seasonalEffectsEnabled: nextSeason !== 'none',
+        }),
+      });
+      await loadAdmin();
+      await refreshCatalog();
+      notify(
+        nextSeason === 'none'
+          ? 'Seasonal celebration disabled — storefront restored to standard.'
+          : `${preset.emoji} ${preset.label} activated across storefront & dashboard!`,
+        'success',
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to switch season', 'error');
+    } finally {
+      setSeasonSaving(false);
+    }
+  };
+
+  const handleBulkPoolImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkPoolText.trim() || !data) {
+      notify('Paste one or more phone numbers (e.g. +14155550199 | 482910) first', 'error');
+      return;
+    }
+    const activePoolCountry =
+      data.smsCountries.find((c) => c.id === poolCountry)?.id ||
+      data.smsCountries[0]?.id ||
+      poolCountry;
+    setBulkUploading(true);
+    try {
+      const res = await apiFetch<{ addedCount: number }>('/api/admin/sms-pool/bulk', {
+        method: 'POST',
+        body: JSON.stringify({
+          lines: bulkPoolText,
+          countryId: activePoolCountry,
+          serviceId: poolService,
+        }),
+      });
+      setBulkPoolText('');
+      notify(`Imported ${res.addedCount} number(s) into SMS pool!`, 'success');
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk import failed', 'error');
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
+  const handleClearSmsPool = async (scope: 'ready' | 'used' | 'all') => {
+    try {
+      const res = await apiFetch<{ removedCount: number }>('/api/admin/sms-pool/clear-ready', {
+        method: 'POST',
+        body: JSON.stringify({ scope }),
+      });
+      notify(`Cleared ${res.removedCount} ${scope} number(s) from pool`, 'info');
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to clear SMS pool', 'error');
+    }
+  };
+
   const handleBulkUserAction = async (
     action: 'credit' | 'debit' | 'suspend' | 'activate' | 'notify',
   ) => {
@@ -888,10 +963,13 @@ export function AdminDashboard({
       id: 'orders',
       label: 'Orders & Receipts',
       icon: Receipt,
-      badge:
-        data.metrics.pendingDepositsCount +
-        data.metrics.pendingBoostingCount +
-        data.metrics.activeSmsCount,
+      badge: data.metrics.pendingDepositsCount + data.metrics.pendingBoostingCount,
+    },
+    {
+      id: 'sms_numbers',
+      label: `SMS Numbers (${data.smsPool.filter((p) => !p.used).length})`,
+      icon: Smartphone,
+      badge: data.smsOrders.filter((s) => s.status === 'waiting').length,
     },
     {
       id: 'accounting',
@@ -1342,8 +1420,203 @@ export function AdminDashboard({
 
           <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
           {/* OVERVIEW TAB */}
-          {tab === 'overview' && (
+          {tab === 'overview' && (() => {
+            const currentSeasonId = (data.settings.seasonalTheme || 'none') as SeasonalThemeId;
+            const currentSeasonPreset = SEASONAL_PRESETS[currentSeasonId] || SEASONAL_PRESETS.none;
+            const readyPoolCount = data.smsPool.filter((p) => !p.used).length;
+            const waitingSmsCount = data.smsOrders.filter((s) => s.status === 'waiting').length;
+            const urgentTriageTotal =
+              data.metrics.pendingDepositsCount +
+              waitingSmsCount +
+              data.metrics.pendingBoostingCount +
+              data.metrics.openTickets;
+
+            return (
             <div className="space-y-6">
+              {/* Executive Operations HUD + Live Season Quick-Switcher */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-950 text-white p-5 sm:p-6 space-y-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-[11px] font-bold uppercase tracking-wider text-blue-300">
+                      <Crown className="w-3.5 h-3.5 text-amber-400" />
+                      Overwatch Master Command HUD
+                    </div>
+                    <h2 className="font-display text-lg sm:text-xl font-extrabold tracking-tight text-white">
+                      {siteName} Operations &amp; Seasonal Control Center
+                    </h2>
+                    <p className="text-xs text-slate-300 max-w-2xl">
+                      Real-time store telemetry, instant seasonal celebration switching, and 1-click readiness checks across wallet, SMS numbers, and AI verification.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => selectTab('live')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white cursor-pointer"
+                    >
+                      <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                      Live Monitor Pro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectTab('sms_numbers')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white cursor-pointer"
+                    >
+                      <Smartphone className="w-3.5 h-3.5" />
+                      SMS Numbers ({readyPoolCount} ready)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Urgent Triage Callout if queues have work */}
+                {urgentTriageTotal > 0 && (
+                  <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 text-xs text-amber-100">
+                      <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        <strong>{urgentTriageTotal} active queue item(s)</strong> need attention:{' '}
+                        {data.metrics.pendingDepositsCount} pending deposit(s),{' '}
+                        {waitingSmsCount} waiting SMS OTP,{' '}
+                        {data.metrics.pendingBoostingCount} boosting order(s),{' '}
+                        {data.metrics.openTickets} open ticket(s).
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {data.metrics.pendingDepositsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => selectTab('orders')}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 text-[11px] font-extrabold cursor-pointer"
+                        >
+                          Verify Receipts ({data.metrics.pendingDepositsCount})
+                        </button>
+                      )}
+                      {waitingSmsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => selectTab('sms_numbers')}
+                          className="px-2.5 py-1 rounded-lg bg-white text-slate-900 text-[11px] font-extrabold cursor-pointer"
+                        >
+                          Fulfill SMS ({waitingSmsCount})
+                        </button>
+                      )}
+                      {data.metrics.openTickets > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => selectTab('support')}
+                          className="px-2.5 py-1 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold cursor-pointer"
+                        >
+                          Reply Tickets ({data.metrics.openTickets})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick Season Mode Switcher */}
+                <div className="pt-2 border-t border-slate-800 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="font-bold text-slate-200">Instant Storefront Season:</span>
+                      <span className="px-2 py-0.5 rounded-md bg-white/10 text-slate-100 text-[11px] font-semibold">
+                        {currentSeasonPreset.emoji} {currentSeasonPreset.label}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => selectTab('cms')}
+                      className="text-[11px] font-semibold text-blue-300 hover:underline cursor-pointer"
+                    >
+                      Customize Season Headline &amp; Design →
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      ['none', 'christmas', 'new_year', 'valentine', 'ramadan_eid', 'black_friday', 'easter'] as SeasonalThemeId[]
+                    ).map((sid) => {
+                      const p = SEASONAL_PRESETS[sid];
+                      const active = currentSeasonId === sid;
+                      return (
+                        <button
+                          key={sid}
+                          type="button"
+                          disabled={seasonSaving}
+                          onClick={() => void handleQuickSeasonApply(sid)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer disabled:opacity-60 ${
+                            active
+                              ? 'bg-blue-600 text-white border border-blue-400'
+                              : 'bg-slate-900 text-slate-300 border border-slate-700 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <span>{p.emoji}</span>
+                          <span>{sid === 'none' ? 'Standard' : p.label.replace(' Season', '').replace(' Celebration', '')}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* System Readiness Matrix */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                  <div className="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Email Verification
+                    </p>
+                    <p className="text-xs font-bold mt-1 flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          data.settings.requireEmailVerification !== false
+                            ? 'bg-emerald-400'
+                            : 'bg-amber-400'
+                        }`}
+                      />
+                      {data.settings.requireEmailVerification !== false ? 'OTP Enforced' : 'Optional'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Google Sign-Up
+                    </p>
+                    <p className="text-xs font-bold mt-1 flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          data.settings.googleAuthEnabled ? 'bg-emerald-400' : 'bg-slate-500'
+                        }`}
+                      />
+                      {data.settings.googleAuthEnabled ? 'Enabled' : 'Paused'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      AI Receipt Audit
+                    </p>
+                    <p className="text-xs font-bold mt-1 flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          data.settings.autoApproveDeposits ? 'bg-emerald-400' : 'bg-amber-400'
+                        }`}
+                      />
+                      {data.settings.autoApproveDeposits ? 'Auto-Credit Live' : 'Manual Review'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      SMS Pool Health
+                    </p>
+                    <p className="text-xs font-bold mt-1 tabular-nums flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          readyPoolCount > 0 ? 'bg-emerald-400' : 'bg-rose-400'
+                        }`}
+                      />
+                      {readyPoolCount} Ready · {waitingSmsCount} Waiting
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -1443,15 +1716,15 @@ export function AdminDashboard({
                   {[
                     { label: 'Revenue & Profit', sub: `${accountingRecordsList.length} ledger`, tab: 'revenue' as AdminTab, icon: TrendingUp, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
                     { label: 'Live Monitor', sub: `${visitorStats.totalVisits} visits`, tab: 'live' as AdminTab, icon: Activity, tint: 'bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900/60' },
-                    { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
+                    { label: 'SMS Numbers', sub: `${readyPoolCount} pool · ${waitingSmsCount} wait`, tab: 'sms_numbers' as AdminTab, icon: Smartphone, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
+                    { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60' },
                     { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
-                    { label: 'Accounting', sub: `${accountingRecordsList.length} archived`, tab: 'accounting' as AdminTab, icon: Archive, tint: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60' },
+                    { label: 'Accounting', sub: `${accountingRecordsList.length} archived`, tab: 'accounting' as AdminTab, icon: Archive, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' },
                     { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-900/60' },
-                    { label: 'Landing & Banners', sub: 'Hero & user images', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
+                    { label: 'Landing & Seasons', sub: 'Theme, Hero & Banners', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
                     { label: 'Wallet & Copy', sub: 'Edit all write-ups', tab: 'copy' as AdminTab, icon: FileText, tint: 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/60' },
                     { label: 'Promo Codes', sub: `${data.promoCodes.length} active`, tab: 'promos' as AdminTab, icon: Tag, tint: 'bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-300 border-pink-200 dark:border-pink-900/60' },
-                    { label: 'Broadcasts & Mail', sub: `${data.notifications.length} notices`, tab: 'notifications' as AdminTab, icon: Bell, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
-                    { label: 'Support Desk', sub: `${data.metrics.openTickets} open tickets`, tab: 'support' as AdminTab, icon: LifeBuoy, tint: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900/60' },
+                    { label: 'Support Desk', sub: `${data.metrics.openTickets} open · Designer`, tab: 'support' as AdminTab, icon: LifeBuoy, tint: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900/60' },
                     ...(isMainAdmin
                       ? [{ label: 'Sub-Admins', sub: 'Delegate 1 feature', tab: 'team' as AdminTab, icon: ShieldCheck, tint: 'bg-slate-900 text-white dark:bg-slate-800 border-slate-700' }]
                       : [{ label: 'Master Controls', sub: data.settings.maintenanceMode ? 'Maintenance ON' : 'Live & online', tab: 'settings' as AdminTab, icon: Sliders, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' }]),
@@ -2064,7 +2337,8 @@ export function AdminDashboard({
                 </div>
               </div>
             </div>
-          )}
+          );
+          })()}
 
           {/* USERS & BALANCES TAB */}
           {tab === 'users' && (
@@ -2959,321 +3233,32 @@ export function AdminDashboard({
                 )}
               </div>
 
-              {/* SMS Orders & Pool */}
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                <div className="xl:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                      SMS Orders ({filteredSmsOrders.length} / {data.smsOrders.length})
-                    </h2>
-                    <div className="flex items-center gap-2">
-                      <div className="relative w-44">
-                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          value={smsSearch}
-                          onChange={(e) => setSmsSearch(e.target.value)}
-                          placeholder="Search SMS..."
-                          className="w-full pl-8 pr-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                        />
-                      </div>
-                      {data.smsOrders.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await apiFetch('/api/admin/orders/clear', {
-                                method: 'POST',
-                                body: JSON.stringify({ scope: 'sms' }),
-                              });
-                              notify('All SMS orders cleared', 'info');
-                              await loadAdmin();
-                            } catch (err) {
-                              notify(err instanceof Error ? err.message : 'Clear failed', 'error');
-                            }
-                          }}
-                          className="px-2.5 py-1 text-[11px] font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-lg cursor-pointer"
-                        >
-                          Clear SMS
-                        </button>
-                      )}
-                    </div>
+              {/* SMS Numbers & OTP Pool Summary Shortcut Card */}
+              <div className="bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                    <Smartphone className="w-5 h-5" />
                   </div>
-                  {filteredSmsOrders.length === 0 ? (
-                    <p className="text-xs text-slate-500 py-6 text-center">No matching SMS orders.</p>
-                  ) : (
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
-                      {filteredSmsOrders.map((ord) => {
-                        const isAwaitingNum =
-                          !ord.phoneNumber || ord.phoneNumber === 'Awaiting number';
-                        return (
-                        <div key={ord.id} className="py-3 space-y-2">
-                          <div className="flex items-center justify-between gap-2 text-xs">
-                            <span className="font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-1.5">
-                              <span>
-                                {ord.serviceName} ({ord.countryName}) ·
-                              </span>
-                              {isAwaitingNum ? (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 text-[10px] font-bold">
-                                  Awaiting #
-                                </span>
-                              ) : (
-                                <span className="font-mono">{ord.phoneNumber}</span>
-                              )}
-                            </span>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {ord.status === 'waiting' && (() => {
-                                const timer = formatCountdown(ord.expiresAt, nowMs);
-                                return (
-                                  <span
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold tabular-nums ${
-                                      timer.isUrgent
-                                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
-                                        : 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300'
-                                    }`}
-                                    title="15-minute SMS timer remaining"
-                                  >
-                                    <Clock className="w-3 h-3" />
-                                    {timer.remainingMs > 0 ? timer.label : '00:00'}
-                                  </span>
-                                );
-                              })()}
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                  ord.status === 'waiting'
-                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                                    : ord.status === 'received'
-                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                                }`}
-                              >
-                                {ord.status === 'waiting'
-                                  ? isAwaitingNum
-                                    ? 'Awaiting #'
-                                    : 'Waiting OTP'
-                                  : ord.status}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  try {
-                                    await apiFetch(`/api/admin/sms-orders/${ord.id}`, {
-                                      method: 'DELETE',
-                                    });
-                                    notify('SMS order removed', 'info');
-                                    await loadAdmin();
-                                  } catch (err) {
-                                    notify(err instanceof Error ? err.message : 'Remove failed', 'error');
-                                  }
-                                }}
-                                className="text-rose-500 hover:text-rose-600 p-1 cursor-pointer"
-                                title="Delete SMS order"
-                                aria-label="Delete SMS order"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-[11px] text-slate-500">
-                            {ord.userEmail}
-                            {ord.otpCode ? ` · Delivered OTP: ${ord.otpCode}` : ''}
-                          </p>
-                          {ord.status !== 'cancelled' && (
-                            <div className="flex flex-wrap gap-2">
-                              <input
-                                type="text"
-                                placeholder={isAwaitingNum ? 'Drop # (e.g. +1...)' : 'Override #'}
-                                value={phoneInputs[ord.id] || ''}
-                                onChange={(e) =>
-                                  setPhoneInputs({ ...phoneInputs, [ord.id]: e.target.value })
-                                }
-                                className="w-36 px-2.5 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                              />
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const num = phoneInputs[ord.id]?.trim();
-                                  if (!num) return;
-                                  try {
-                                    await apiFetch(`/api/admin/sms-orders/${ord.id}/assign-number`, {
-                                      method: 'POST',
-                                      body: JSON.stringify({ phoneNumber: num }),
-                                    });
-                                    setPhoneInputs((prev) => ({ ...prev, [ord.id]: '' }));
-                                    notify('Phone number updated', 'success');
-                                    await loadAdmin();
-                                  } catch (err) {
-                                    notify(err instanceof Error ? err.message : 'Assign failed', 'error');
-                                  }
-                                }}
-                                className="px-2.5 py-1 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer"
-                              >
-                                Assign #
-                              </button>
-                              <input
-                                type="text"
-                                placeholder={ord.status === 'received' ? 'New OTP code' : 'Enter OTP code'}
-                                value={otpInputs[ord.id] || ''}
-                                onChange={(e) =>
-                                  setOtpInputs({ ...otpInputs, [ord.id]: e.target.value })
-                                }
-                                className="w-32 px-2.5 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                              />
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const code = otpInputs[ord.id]?.trim();
-                                  if (!code) return;
-                                  const droppedPhone = phoneInputs[ord.id]?.trim() || undefined;
-                                  try {
-                                    await apiFetch(`/api/admin/sms-orders/${ord.id}/deliver`, {
-                                      method: 'POST',
-                                      body: JSON.stringify({
-                                        otpCode: code,
-                                        phoneNumber: droppedPhone,
-                                      }),
-                                    });
-                                    setOtpInputs((prev) => ({ ...prev, [ord.id]: '' }));
-                                    if (droppedPhone) {
-                                      setPhoneInputs((prev) => ({ ...prev, [ord.id]: '' }));
-                                    }
-                                    notify('OTP delivered to user inbox!', 'success');
-                                    await loadAdmin();
-                                  } catch (err) {
-                                    notify(err instanceof Error ? err.message : 'Delivery failed', 'error');
-                                  }
-                                }}
-                                className="px-3 py-1 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
-                              >
-                                {ord.status === 'received' ? 'Update OTP' : 'Deliver OTP'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="xl:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
                   <div>
-                    <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                      Overwatch SMS Number Pool ({data.smsPool.length})
+                    <h2 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                      SMS Numbers &amp; OTP Delivery Desk
                     </h2>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Add real numbers with an optional preset OTP, or leave OTP blank to send manually when bought.
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                      {data.smsOrders.filter((s) => s.status === 'waiting').length} waiting OTP order(s) ·{' '}
+                      {data.smsPool.filter((p) => !p.used).length} ready number(s) in pool ({data.smsPool.length} total).
                     </p>
                   </div>
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      const activePoolCountry =
-                        data.smsCountries.find((c) => c.id === poolCountry)?.id ||
-                        data.smsCountries[0]?.id ||
-                        poolCountry;
-                      try {
-                        await apiFetch('/api/admin/sms-pool', {
-                          method: 'POST',
-                          body: JSON.stringify({
-                            phoneNumber: poolNumber,
-                            countryId: activePoolCountry,
-                            serviceId: poolService,
-                            presetOtp: poolOtp,
-                          }),
-                        });
-                        setPoolNumber('');
-                        setPoolOtp('');
-                        notify('Added number to SMS pool', 'success');
-                        await loadAdmin();
-                      } catch (err) {
-                        notify(err instanceof Error ? err.message : 'Pool add failed', 'error');
-                      }
-                    }}
-                    className="space-y-2.5"
-                  >
-                    <input
-                      type="text"
-                      required
-                      value={poolNumber}
-                      onChange={(e) => setPoolNumber(e.target.value)}
-                      placeholder="Phone Number (e.g. +1 415 555 0199)"
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={
-                          data.smsCountries.find((c) => c.id === poolCountry)?.id ||
-                          data.smsCountries[0]?.id ||
-                          poolCountry
-                        }
-                        onChange={(e) => setPoolCountry(e.target.value)}
-                        className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                      >
-                        {data.smsCountries.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={poolService}
-                        onChange={(e) => setPoolService(e.target.value)}
-                        className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                      >
-                        <option value="">Any Service</option>
-                        {data.smsServices.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <input
-                      type="text"
-                      value={poolOtp}
-                      onChange={(e) => setPoolOtp(e.target.value)}
-                      placeholder="Optional Preset OTP (leave blank to send manually)"
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                    />
-                    <button
-                      type="submit"
-                      className="w-full py-2 text-xs font-bold text-white bg-blue-600 rounded-xl cursor-pointer inline-flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add to Pool
-                    </button>
-                  </form>
-
-                  <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-56 overflow-y-auto">
-                    {data.smsPool.map((p) => (
-                      <div key={p.id} className="py-2 flex items-center justify-between text-xs">
-                        <div>
-                          <p className="font-mono font-semibold">{p.phoneNumber}</p>
-                          <p className="text-[11px] text-slate-500">
-                            {p.used ? 'Assigned' : 'Ready'}{' '}
-                            {p.presetOtp ? `· OTP: ${p.presetOtp}` : ''}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await apiFetch(`/api/admin/sms-pool/${p.id}`, { method: 'DELETE' });
-                              notify('Removed number from pool', 'info');
-                              await loadAdmin();
-                            } catch (err) {
-                              notify(err instanceof Error ? err.message : 'Remove failed', 'error');
-                            }
-                          }}
-                          className="text-rose-500 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
                 </div>
+                {!allowedScopedTab && (
+                  <button
+                    type="button"
+                    onClick={() => selectTab('sms_numbers')}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    Open Dedicated SMS Numbers Desk →
+                  </button>
+                )}
               </div>
 
               {/* Boosting Fulfillment Desk */}
@@ -3790,6 +3775,517 @@ export function AdminDashboard({
               </div>
             </div>
           )}
+
+          {/* DEDICATED SMS NUMBERS & POOL TAB */}
+          {tab === 'sms_numbers' && (() => {
+            const readyCount = data.smsPool.filter((p) => !p.used).length;
+            const usedCount = data.smsPool.filter((p) => p.used).length;
+            const waitingQueueCount = data.smsOrders.filter((s) => s.status === 'waiting').length;
+            const awaitingNumCount = data.smsOrders.filter(
+              (s) => s.status === 'waiting' && (!s.phoneNumber || s.phoneNumber === 'Awaiting number'),
+            ).length;
+            const visiblePool = data.smsPool.filter((p) =>
+              poolFilter === 'all' ? true : poolFilter === 'ready' ? !p.used : p.used,
+            );
+            const activePoolCountry =
+              data.smsCountries.find((c) => c.id === poolCountry)?.id ||
+              data.smsCountries[0]?.id ||
+              poolCountry;
+            const altMode = data.settings.smsAlternateMode || 'discount';
+            const altPct = Number(data.settings.smsAlternateDiscountPct ?? 15);
+
+            return (
+              <div className="space-y-6">
+                {/* Summary Bar & Sweep Action */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Smartphone className="w-5 h-5 text-blue-600" />
+                      SMS Numbers Pool &amp; Live OTP Queue
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Load single or bulk virtual numbers, filter stock, assign phone numbers to awaiting orders, and drop OTP codes instantly.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={sweepingSms}
+                      onClick={() => void handleSweepExpiredSms()}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 text-xs font-bold cursor-pointer disabled:opacity-60"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      {sweepingSms ? 'Sweeping...' : 'Sweep Expired SMS Timers'}
+                    </button>
+                    {!allowedScopedTab && (
+                      <button
+                        type="button"
+                        onClick={() => selectTab('catalog')}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                      >
+                        <Sliders className="w-3.5 h-3.5 text-purple-600" />
+                        Alternate Tier: {altMode === 'markup' ? `+${altPct}% Higher` : `-${altPct}% Lower`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4 Top Stock & Queue KPIs */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Ready Pool Numbers
+                    </p>
+                    <p className="font-display text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">
+                      {readyCount}
+                    </p>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Assigned / Used Pool
+                    </p>
+                    <p className="font-display text-2xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
+                      {usedCount}
+                    </p>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Waiting OTP Orders
+                    </p>
+                    <p className="font-display text-2xl font-extrabold text-amber-600 dark:text-amber-400 mt-1 tabular-nums">
+                      {waitingQueueCount}
+                    </p>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Awaiting # Assignment
+                    </p>
+                    <p className="font-display text-2xl font-extrabold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
+                      {awaitingNumCount}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                  {/* Left: Active & Waiting SMS Orders Queue */}
+                  <div className="xl:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                        Active SMS Orders ({filteredSmsOrders.length} / {data.smsOrders.length})
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <div className="relative w-44 sm:w-56">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={smsSearch}
+                            onChange={(e) => setSmsSearch(e.target.value)}
+                            placeholder="Search email, country, #..."
+                            className="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                          />
+                        </div>
+                        {data.smsOrders.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiFetch('/api/admin/orders/clear', {
+                                  method: 'POST',
+                                  body: JSON.stringify({ scope: 'sms' }),
+                                });
+                                notify('All SMS orders cleared', 'info');
+                                await loadAdmin();
+                              } catch (err) {
+                                notify(err instanceof Error ? err.message : 'Clear failed', 'error');
+                              }
+                            }}
+                            className="px-2.5 py-1.5 text-[11px] font-semibold text-rose-600 border border-rose-200 dark:border-rose-900 rounded-lg cursor-pointer"
+                          >
+                            Clear SMS
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {filteredSmsOrders.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-10 text-center">
+                        No SMS orders matching your search right now.
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[640px] overflow-y-auto">
+                        {filteredSmsOrders.map((ord) => {
+                          const isAwaitingNum =
+                            !ord.phoneNumber || ord.phoneNumber === 'Awaiting number';
+                          return (
+                            <div key={ord.id} className="py-3.5 space-y-2">
+                              <div className="flex items-center justify-between gap-2 text-xs">
+                                <span className="font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-1.5">
+                                  <span>
+                                    {ord.serviceName} ({ord.countryName}) ·
+                                  </span>
+                                  {isAwaitingNum ? (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 text-[10px] font-bold">
+                                      Awaiting #
+                                    </span>
+                                  ) : (
+                                    <span className="font-mono text-blue-600 dark:text-blue-400">
+                                      {ord.phoneNumber}
+                                    </span>
+                                  )}
+                                </span>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {ord.status === 'waiting' && (() => {
+                                    const timer = formatCountdown(ord.expiresAt, nowMs);
+                                    return (
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold tabular-nums ${
+                                          timer.isUrgent
+                                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
+                                            : 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300'
+                                        }`}
+                                        title="15-minute SMS timer remaining"
+                                      >
+                                        <Clock className="w-3 h-3" />
+                                        {timer.remainingMs > 0 ? timer.label : '00:00'}
+                                      </span>
+                                    );
+                                  })()}
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                      ord.status === 'waiting'
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                                        : ord.status === 'received'
+                                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                          : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                    }`}
+                                  >
+                                    {ord.status === 'waiting'
+                                      ? isAwaitingNum
+                                        ? 'Awaiting #'
+                                        : 'Waiting OTP'
+                                      : ord.status}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await apiFetch(`/api/admin/sms-orders/${ord.id}`, {
+                                          method: 'DELETE',
+                                        });
+                                        notify('SMS order removed', 'info');
+                                        await loadAdmin();
+                                      } catch (err) {
+                                        notify(err instanceof Error ? err.message : 'Remove failed', 'error');
+                                      }
+                                    }}
+                                    className="text-rose-500 hover:text-rose-600 p-1 cursor-pointer"
+                                    title="Delete SMS order"
+                                    aria-label="Delete SMS order"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="text-[11px] text-slate-500">
+                                {ord.userEmail}
+                                {ord.otpCode ? ` · Delivered OTP: ${ord.otpCode}` : ''}
+                              </p>
+                              {ord.status !== 'cancelled' && (
+                                <div className="flex flex-wrap gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder={isAwaitingNum ? 'Drop # (e.g. +1...)' : 'Override #'}
+                                    value={phoneInputs[ord.id] || ''}
+                                    onChange={(e) =>
+                                      setPhoneInputs({ ...phoneInputs, [ord.id]: e.target.value })
+                                    }
+                                    className="w-36 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const num = phoneInputs[ord.id]?.trim();
+                                      if (!num) return;
+                                      try {
+                                        await apiFetch(`/api/admin/sms-orders/${ord.id}/assign-number`, {
+                                          method: 'POST',
+                                          body: JSON.stringify({ phoneNumber: num }),
+                                        });
+                                        setPhoneInputs((prev) => ({ ...prev, [ord.id]: '' }));
+                                        notify('Phone number updated', 'success');
+                                        await loadAdmin();
+                                      } catch (err) {
+                                        notify(err instanceof Error ? err.message : 'Assign failed', 'error');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer"
+                                  >
+                                    Assign #
+                                  </button>
+                                  <input
+                                    type="text"
+                                    placeholder={ord.status === 'received' ? 'New OTP code' : 'Enter OTP code'}
+                                    value={otpInputs[ord.id] || ''}
+                                    onChange={(e) =>
+                                      setOtpInputs({ ...otpInputs, [ord.id]: e.target.value })
+                                    }
+                                    className="w-32 px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const code = otpInputs[ord.id]?.trim();
+                                      if (!code) return;
+                                      const droppedPhone = phoneInputs[ord.id]?.trim() || undefined;
+                                      try {
+                                        await apiFetch(`/api/admin/sms-orders/${ord.id}/deliver`, {
+                                          method: 'POST',
+                                          body: JSON.stringify({
+                                            otpCode: code,
+                                            phoneNumber: droppedPhone,
+                                          }),
+                                        });
+                                        setOtpInputs((prev) => ({ ...prev, [ord.id]: '' }));
+                                        if (droppedPhone) {
+                                          setPhoneInputs((prev) => ({ ...prev, [ord.id]: '' }));
+                                        }
+                                        notify('OTP delivered to user inbox!', 'success');
+                                        await loadAdmin();
+                                      } catch (err) {
+                                        notify(err instanceof Error ? err.message : 'Delivery failed', 'error');
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                                  >
+                                    {ord.status === 'received' ? 'Update OTP' : 'Deliver OTP'}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Single + Bulk Number Pool Loader & Inventory */}
+                  <div className="xl:col-span-5 space-y-5">
+                    {/* Target Country & Service + Single Number Form */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+                      <div>
+                        <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                          Add Numbers to Pool
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Choose country &amp; service below, then drop a single number or paste up to 200 numbers in bulk.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={activePoolCountry}
+                          onChange={(e) => setPoolCountry(e.target.value)}
+                          className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        >
+                          {data.smsCountries.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={poolService}
+                          onChange={(e) => setPoolService(e.target.value)}
+                          className="px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        >
+                          <option value="">Any Service</option>
+                          {data.smsServices.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          try {
+                            await apiFetch('/api/admin/sms-pool', {
+                              method: 'POST',
+                              body: JSON.stringify({
+                                phoneNumber: poolNumber,
+                                countryId: activePoolCountry,
+                                serviceId: poolService,
+                                presetOtp: poolOtp,
+                              }),
+                            });
+                            setPoolNumber('');
+                            setPoolOtp('');
+                            notify('Added number to SMS pool', 'success');
+                            await loadAdmin();
+                          } catch (err) {
+                            notify(err instanceof Error ? err.message : 'Pool add failed', 'error');
+                          }
+                        }}
+                        className="space-y-2.5"
+                      >
+                        <input
+                          type="text"
+                          required
+                          value={poolNumber}
+                          onChange={(e) => setPoolNumber(e.target.value)}
+                          placeholder="Single Phone Number (e.g. +1 415 555 0199)"
+                          className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        />
+                        <input
+                          type="text"
+                          value={poolOtp}
+                          onChange={(e) => setPoolOtp(e.target.value)}
+                          placeholder="Optional Preset OTP (leave blank to send manually)"
+                          className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        />
+                        <button
+                          type="submit"
+                          className="w-full py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer inline-flex items-center justify-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Single Number
+                        </button>
+                      </form>
+
+                      {/* Bulk Multi-Line Pool Importer */}
+                      <form
+                        onSubmit={handleBulkPoolImport}
+                        className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                            Bulk Multi-Line Import
+                          </label>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            Format: +14155550199 | 482910
+                          </span>
+                        </div>
+                        <textarea
+                          rows={4}
+                          value={bulkPoolText}
+                          onChange={(e) => setBulkPoolText(e.target.value)}
+                          placeholder={'+14155550101\n+14155550102 | 739201\n+447700900123 | 192837'}
+                          className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        />
+                        <button
+                          type="submit"
+                          disabled={bulkUploading || !bulkPoolText.trim()}
+                          className="w-full py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          {bulkUploading ? 'Importing...' : 'Bulk Import Numbers'}
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Stored SMS Pool Directory with Ready/Used Filters & Clear Buttons */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                          Pool Directory ({visiblePool.length} / {data.smsPool.length})
+                        </h3>
+                        <div className="flex items-center gap-1">
+                          {(['all', 'ready', 'used'] as const).map((f) => (
+                            <button
+                              key={f}
+                              type="button"
+                              onClick={() => setPoolFilter(f)}
+                              className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase cursor-pointer ${
+                                poolFilter === f
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              {f}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {data.smsPool.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {readyCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void handleClearSmsPool('ready')}
+                              className="px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg cursor-pointer"
+                            >
+                              Clear Ready ({readyCount})
+                            </button>
+                          )}
+                          {usedCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void handleClearSmsPool('used')}
+                              className="px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer"
+                            >
+                              Clear Used ({usedCount})
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {visiblePool.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-6 text-center">
+                          No numbers in this pool filter yet.
+                        </p>
+                      ) : (
+                        <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto">
+                          {visiblePool.map((p) => {
+                            const cName =
+                              data.smsCountries.find((c) => c.id === p.countryId)?.name ||
+                              p.countryId;
+                            const sName = p.serviceId
+                              ? data.smsServices.find((s) => s.id === p.serviceId)?.name || p.serviceId
+                              : 'Any Service';
+                            return (
+                              <div key={p.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
+                                <div className="min-w-0">
+                                  <p className="font-mono font-semibold text-slate-900 dark:text-white truncate">
+                                    {p.phoneNumber}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500 truncate">
+                                    {cName} · {sName} ·{' '}
+                                    <span className={p.used ? 'text-slate-400' : 'text-emerald-600 font-semibold'}>
+                                      {p.used ? 'Used' : 'Ready'}
+                                    </span>
+                                    {p.presetOtp ? ` · OTP: ${p.presetOtp}` : ''}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await apiFetch(`/api/admin/sms-pool/${p.id}`, { method: 'DELETE' });
+                                      notify('Removed number from pool', 'info');
+                                      await loadAdmin();
+                                    } catch (err) {
+                                      notify(err instanceof Error ? err.message : 'Remove failed', 'error');
+                                    }
+                                  }}
+                                  className="text-rose-500 hover:text-rose-600 p-1 cursor-pointer shrink-0"
+                                  aria-label="Delete pool number"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* PROMO CODES TAB */}
           {tab === 'promos' && (
@@ -5094,6 +5590,31 @@ export function AdminDashboard({
                           id: 'act_refresh_ops',
                           label: 'Refresh Website Queues (Safe Preserve)',
                           run: () => void handleRefreshOpsSafe(),
+                        },
+                        {
+                          id: 'act_sms_desk',
+                          label: 'Open Dedicated SMS Numbers & Pool Desk',
+                          run: () => selectTab('sms_numbers'),
+                        },
+                        {
+                          id: 'act_theme_toggle',
+                          label: theme === 'dark' ? 'Switch Console & Site to Light Mode' : 'Switch Console & Site to Dark Mode',
+                          run: () => toggleTheme(),
+                        },
+                        {
+                          id: 'act_season_xmas',
+                          label: 'Apply Season: Christmas Celebration',
+                          run: () => void handleQuickSeasonApply('christmas'),
+                        },
+                        {
+                          id: 'act_season_newyear',
+                          label: 'Apply Season: New Year Celebration',
+                          run: () => void handleQuickSeasonApply('new_year'),
+                        },
+                        {
+                          id: 'act_season_clear',
+                          label: 'Disable Seasonal Mode (Return to Standard)',
+                          run: () => void handleQuickSeasonApply('none'),
                         },
                         ...(onOpenWorkspace
                           ? [

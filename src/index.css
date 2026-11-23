@@ -164,10 +164,36 @@ html.no-flex-gap .flex.flex-col.gap-6 > * + * { margin-left: 0; margin-top: 1.5r
   animation: typewriter-caret 0.9s step-end infinite;
 }
 
+@keyframes seasonal-fall {
+  0% {
+    opacity: 0;
+    -webkit-transform: translate3d(0, -8vh, 0) rotate(0deg);
+    transform: translate3d(0, -8vh, 0) rotate(0deg);
+  }
+  12% {
+    opacity: 0.78;
+  }
+  88% {
+    opacity: 0.75;
+  }
+  100% {
+    opacity: 0;
+    -webkit-transform: translate3d(24px, 108vh, 0) rotate(240deg);
+    transform: translate3d(24px, 108vh, 0) rotate(240deg);
+  }
+}
+
+.animate-seasonal-fall {
+  will-change: transform, opacity;
+  -webkit-animation: seasonal-fall var(--fall-duration, 14s) linear infinite;
+  animation: seasonal-fall var(--fall-duration, 14s) linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-logo-bounce,
   .animate-marquee-rtl,
-  .animate-typewriter-caret {
+  .animate-typewriter-caret,
+  .animate-seasonal-fall {
     -webkit-animation: none;
     animation: none;
     -webkit-transform: none;

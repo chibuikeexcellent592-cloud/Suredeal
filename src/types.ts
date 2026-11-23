@@ -27,6 +27,7 @@ export type AdminFeatureTab =
   | 'live'
   | 'users'
   | 'orders'
+  | 'sms_numbers'
   | 'accounting'
   | 'catalog'
   | 'cms'
@@ -54,6 +55,23 @@ export interface PlatformSettings {
   siteNameColorMode?: 'solid' | 'split' | 'gradient';
   siteNameColor1?: string;
   siteNameColor2?: string;
+  siteNameSplitRule?: 'words' | 'sure_prefix';
+  siteNameThemeTarget?: 'first' | 'second' | 'both' | 'custom';
+  siteNameAutoTheme?: boolean;
+  seasonalTheme?:
+    | 'none'
+    | 'christmas'
+    | 'new_year'
+    | 'valentine'
+    | 'ramadan_eid'
+    | 'black_friday'
+    | 'easter'
+    | 'custom';
+  seasonalBannerEnabled?: boolean;
+  seasonalHeadline?: string;
+  seasonalEffectsEnabled?: boolean;
+  seasonalCustomEmoji?: string;
+  seasonalCustomColor?: string;
   mainAdminEmail?: string;
   currencyCode: string;
   currencySymbol: string;
@@ -76,6 +94,18 @@ export interface PlatformSettings {
   supportGroupUrl?: string;
   supportDeskNote?: string;
   supportAllowTickets?: boolean;
+  supportDeskLayout?: 'grid_3' | 'grid_2' | 'stacked' | 'banner_first';
+  supportCardStyle?: 'tinted' | 'solid_clean' | 'dark_pro' | 'outlined';
+  supportHeroBannerEnabled?: boolean;
+  supportHeroBadge?: string;
+  supportHeroTitle?: string;
+  supportResponseTimeLabel?: string;
+  supportHoursLabel?: string;
+  supportWhatsappLabel?: string;
+  supportWhatsappButtonText?: string;
+  supportTelegramLabel?: string;
+  supportTelegramButtonText?: string;
+  supportGroupButtonText?: string;
   showFloatingWhatsapp?: boolean;
   communityChannelEnabled?: boolean;
   communityChannelPlatform?: 'whatsapp' | 'telegram';
@@ -221,6 +251,23 @@ export interface MaintenanceStatusResponse {
   siteNameColorMode?: 'solid' | 'split' | 'gradient';
   siteNameColor1?: string;
   siteNameColor2?: string;
+  siteNameSplitRule?: 'words' | 'sure_prefix';
+  siteNameThemeTarget?: 'first' | 'second' | 'both' | 'custom';
+  siteNameAutoTheme?: boolean;
+  seasonalTheme?:
+    | 'none'
+    | 'christmas'
+    | 'new_year'
+    | 'valentine'
+    | 'ramadan_eid'
+    | 'black_friday'
+    | 'easter'
+    | 'custom';
+  seasonalBannerEnabled?: boolean;
+  seasonalHeadline?: string;
+  seasonalEffectsEnabled?: boolean;
+  seasonalCustomEmoji?: string;
+  seasonalCustomColor?: string;
   supportWhatsapp: string;
   supportEmail: string;
   creatorName: string;

@@ -37,6 +37,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { BrandLogo } from '../BrandLogo';
 import { BrandNameText } from '../BrandNameText';
+import { SEASONAL_PRESETS, type SeasonalThemeId } from '../SeasonalEffects';
 import {
   apiFetch,
   fileToDataUrl,
@@ -4276,8 +4277,17 @@ export function AdminCommsAndSettingsPanel({
     dashboardFundButtonLabel: s.dashboardFundButtonLabel ?? 'Add Funds',
     dashboardHistoryButtonLabel: s.dashboardHistoryButtonLabel ?? 'History',
     siteNameColorMode: s.siteNameColorMode ?? 'split',
-    siteNameColor1: s.siteNameColor1 ?? '#2563EB',
-    siteNameColor2: s.siteNameColor2 ?? '#0F172A',
+    siteNameColor1: s.siteNameColor1 ?? '#0F172A',
+    siteNameColor2: s.siteNameColor2 ?? '#2563EB',
+    siteNameSplitRule: s.siteNameSplitRule ?? 'words',
+    siteNameThemeTarget: s.siteNameThemeTarget ?? 'first',
+    siteNameAutoTheme: s.siteNameAutoTheme ?? true,
+    seasonalTheme: s.seasonalTheme ?? 'none',
+    seasonalBannerEnabled: s.seasonalBannerEnabled ?? true,
+    seasonalHeadline: s.seasonalHeadline ?? '',
+    seasonalEffectsEnabled: s.seasonalEffectsEnabled ?? true,
+    seasonalCustomEmoji: s.seasonalCustomEmoji ?? '🎉',
+    seasonalCustomColor: s.seasonalCustomColor ?? '#2563EB',
     supportPrimaryChannel: s.supportPrimaryChannel ?? 'whatsapp',
     supportTelegram: s.supportTelegram ?? '',
     supportGroupPlatform: s.supportGroupPlatform ?? 'whatsapp',
@@ -4285,6 +4295,18 @@ export function AdminCommsAndSettingsPanel({
     supportGroupUrl: s.supportGroupUrl ?? '',
     supportDeskNote: s.supportDeskNote ?? '',
     supportAllowTickets: s.supportAllowTickets ?? true,
+    supportDeskLayout: s.supportDeskLayout ?? 'grid_3',
+    supportCardStyle: s.supportCardStyle ?? 'tinted',
+    supportHeroBannerEnabled: s.supportHeroBannerEnabled ?? true,
+    supportHeroBadge: s.supportHeroBadge ?? '24/7 Priority Desk',
+    supportHeroTitle: s.supportHeroTitle ?? 'How can we help your account today?',
+    supportResponseTimeLabel: s.supportResponseTimeLabel ?? 'Under 5 mins',
+    supportHoursLabel: s.supportHoursLabel ?? 'Mon - Sun · 8AM - 10PM WAT',
+    supportWhatsappLabel: s.supportWhatsappLabel ?? 'WhatsApp Support',
+    supportWhatsappButtonText: s.supportWhatsappButtonText ?? 'Chat on WhatsApp',
+    supportTelegramLabel: s.supportTelegramLabel ?? 'Telegram Support',
+    supportTelegramButtonText: s.supportTelegramButtonText ?? 'Open Telegram',
+    supportGroupButtonText: s.supportGroupButtonText ?? 'Join Official Group',
     requireEmailVerification: s.requireEmailVerification ?? true,
     googleAuthEnabled: s.googleAuthEnabled ?? false,
     googleClientId: s.googleClientId ?? '',
@@ -4367,6 +4389,18 @@ export function AdminCommsAndSettingsPanel({
     'dashboardBalanceLabel',
     'dashboardFundButtonLabel',
     'dashboardHistoryButtonLabel',
+    'seasonalTheme',
+    'seasonalBannerEnabled',
+    'seasonalHeadline',
+    'seasonalEffectsEnabled',
+    'seasonalCustomEmoji',
+    'seasonalCustomColor',
+    'siteNameColorMode',
+    'siteNameColor1',
+    'siteNameColor2',
+    'siteNameSplitRule',
+    'siteNameThemeTarget',
+    'siteNameAutoTheme',
   ]);
 
   const saveGlobalSettings = async (e: React.FormEvent) => {
@@ -6682,31 +6716,48 @@ export function AdminCommsAndSettingsPanel({
         </div>
       </div>
 
-      {/* Site Name ("SureDeal") Colour Mixer */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-600" />
+      {/* Site Name ("SureDeal Store") Adaptive Light/Dark Colour Mixer */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 text-blue-600 mt-1 shrink-0" />
             <div>
               <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                Site Name (&ldquo;{formSettings.siteName || 'SureDeal Store'}&rdquo;) Colour Mixer
+                Site Name (&ldquo;{formSettings.siteName || 'SureDeal Store'}&rdquo;) Light/Dark Colour Mixer
               </h3>
-              <p className="text-[11px] text-slate-500">
-                Mix two colours or use a gradient for the website name across Landing, Login, Sidebar &amp; Overwatch headers.
+              <p className="text-[11px] text-slate-500 max-w-2xl mt-0.5">
+                Automatically renders <strong>Black &amp; Blue</strong> in Light Mode and <strong>White &amp; Blue</strong> in Dark Mode — choose which word flips Black/White vs stays Blue across the entire website.
               </p>
             </div>
           </div>
-          <div className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-            <BrandNameText
-              settings={formSettings}
-              className="font-display text-lg sm:text-xl font-extrabold"
-            />
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-center">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                Light Mode
+              </span>
+              <BrandNameText
+                settings={formSettings}
+                forceTheme="light"
+                className="font-display text-base sm:text-lg font-extrabold"
+              />
+            </div>
+            <div className="px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-center">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                Dark Mode
+              </span>
+              <BrandNameText
+                settings={formSettings}
+                forceTheme="dark"
+                className="font-display text-base sm:text-lg font-extrabold"
+              />
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
-            <label className="block text-xs font-semibold mb-1">Colour Mix Mode</label>
+            <label className="block text-xs font-semibold mb-1">Colour Style Mode</label>
             <select
               value={formSettings.siteNameColorMode || 'split'}
               onChange={(e) =>
@@ -6717,64 +6768,266 @@ export function AdminCommsAndSettingsPanel({
               }
               className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             >
-              <option value="split">Two-Tone Split (Sure + Deal Store)</option>
+              <option value="split">Two-Tone Split (Black/White + Blue)</option>
               <option value="gradient">Smooth Gradient Blend</option>
-              <option value="solid">Single Solid Colour</option>
+              <option value="solid">Single Adaptive Solid</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold mb-1">Primary Text Colour (#1)</label>
+            <label className="block text-xs font-semibold mb-1">Which Part Changes Black/White?</label>
+            <select
+              value={formSettings.siteNameThemeTarget || 'first'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  siteNameThemeTarget: e.target.value as 'first' | 'second' | 'both' | 'custom',
+                })
+              }
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="first">Part 1 Black/White · Part 2 Blue</option>
+              <option value="second">Part 1 Blue · Part 2 Black/White</option>
+              <option value="both">Both Parts Black/White</option>
+              <option value="custom">Fixed Custom Colours Only</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Word Split Boundary</label>
+            <select
+              value={formSettings.siteNameSplitRule || 'words'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  siteNameSplitRule: e.target.value as 'words' | 'sure_prefix',
+                })
+              }
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="words">SureDeal | Store (By Word)</option>
+              <option value="sure_prefix">Sure | Deal Store (Prefix)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Brand Blue / Accent Hex</label>
             <div className="flex items-center gap-2">
               <input
                 type="color"
-                value={formSettings.siteNameColor1 || '#2563EB'}
+                value={formSettings.siteNameColor2 || '#2563EB'}
                 onChange={(e) =>
                   setFormSettings({
                     ...formSettings,
-                    siteNameColor1: e.target.value.toUpperCase(),
+                    siteNameColor2: e.target.value.toUpperCase(),
                   })
                 }
                 className="w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer bg-transparent"
               />
               <input
                 type="text"
-                value={formSettings.siteNameColor1 || '#2563EB'}
+                value={formSettings.siteNameColor2 || '#2563EB'}
                 onChange={(e) =>
                   setFormSettings({
                     ...formSettings,
-                    siteNameColor1: e.target.value.toUpperCase(),
+                    siteNameColor2: e.target.value.toUpperCase(),
                   })
                 }
                 className="flex-1 min-w-0 px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
             </div>
           </div>
+        </div>
 
-          <div>
-            <label className="block text-xs font-semibold mb-1">Secondary Text Colour (#2)</label>
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800">
+          <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formSettings.siteNameAutoTheme !== false}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, siteNameAutoTheme: e.target.checked })
+              }
+            />
+            Auto-switch Black (Light Mode) ↔ White (Dark Mode) dynamically
+          </label>
+          {formSettings.siteNameThemeTarget === 'custom' && (
             <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500">Part 1 Hex:</span>
               <input
                 type="color"
-                value={formSettings.siteNameColor2 || '#0F172A'}
+                value={formSettings.siteNameColor1 || '#0F172A'}
                 onChange={(e) =>
                   setFormSettings({
                     ...formSettings,
-                    siteNameColor2: e.target.value.toUpperCase(),
+                    siteNameColor1: e.target.value.toUpperCase(),
                   })
                 }
-                className="w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer bg-transparent"
+                className="w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer"
               />
               <input
                 type="text"
-                value={formSettings.siteNameColor2 || '#0F172A'}
+                value={formSettings.siteNameColor1 || '#0F172A'}
                 onChange={(e) =>
                   setFormSettings({
                     ...formSettings,
-                    siteNameColor2: e.target.value.toUpperCase(),
+                    siteNameColor1: e.target.value.toUpperCase(),
                   })
                 }
-                className="flex-1 min-w-0 px-2.5 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                className="w-24 px-2 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Seasonal Mode & Celebration Studio */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 text-amber-500 mt-1 shrink-0" />
+            <div>
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                Seasonal Mode &amp; Holiday Atmosphere Studio
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Put the entire website into Christmas, New Year, Valentine, Ramadan/Eid, Black Friday, Easter, or a custom celebration cleanly.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await apiFetch('/api/admin/settings', {
+                  method: 'PATCH',
+                  body: JSON.stringify({
+                    seasonalTheme: formSettings.seasonalTheme || 'none',
+                    seasonalBannerEnabled: formSettings.seasonalBannerEnabled !== false,
+                    seasonalHeadline: formSettings.seasonalHeadline || '',
+                    seasonalEffectsEnabled: formSettings.seasonalEffectsEnabled !== false,
+                    seasonalCustomEmoji: formSettings.seasonalCustomEmoji || '🎉',
+                    seasonalCustomColor: formSettings.seasonalCustomColor || '#2563EB',
+                  }),
+                });
+                notify('Seasonal mode applied live across the website!', 'success');
+                await onRefresh();
+                await refreshCatalog();
+              } catch (err) {
+                notify(err instanceof Error ? err.message : 'Failed to apply season', 'error');
+              }
+            }}
+            className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+          >
+            Apply Season Live Now
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {(Object.keys(SEASONAL_PRESETS) as SeasonalThemeId[]).map((sid) => {
+            const preset = SEASONAL_PRESETS[sid];
+            const active = (formSettings.seasonalTheme || 'none') === sid;
+            return (
+              <button
+                key={sid}
+                type="button"
+                onClick={() =>
+                  setFormSettings({
+                    ...formSettings,
+                    seasonalTheme: sid,
+                    seasonalHeadline:
+                      sid === 'none'
+                        ? ''
+                        : formSettings.seasonalHeadline?.trim() &&
+                            formSettings.seasonalTheme === sid
+                          ? formSettings.seasonalHeadline
+                          : preset.defaultHeadline,
+                  })
+                }
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  active
+                    ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/50 ring-2 ring-blue-500/20'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-lg" aria-hidden="true">
+                    {preset.emoji}
+                  </span>
+                  {active && (
+                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                      ACTIVE
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs font-bold text-slate-900 dark:text-white mt-1.5 truncate">
+                  {preset.label}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+          <div className="lg:col-span-6">
+            <label className="block text-xs font-semibold mb-1">Seasonal Announcement Headline</label>
+            <input
+              type="text"
+              value={formSettings.seasonalHeadline || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, seasonalHeadline: e.target.value })
+              }
+              placeholder="Leave blank for the preset default celebration message..."
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div className="lg:col-span-3 flex flex-col gap-2">
+            <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formSettings.seasonalBannerEnabled !== false}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, seasonalBannerEnabled: e.target.checked })
+                }
+              />
+              Show Top Seasonal Ribbon
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formSettings.seasonalEffectsEnabled !== false}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, seasonalEffectsEnabled: e.target.checked })
+                }
+              />
+              Ambient Floating Particles
+            </label>
+          </div>
+          <div className="lg:col-span-3 flex items-center gap-2">
+            <div className="w-20">
+              <label className="block text-[11px] font-semibold mb-1">Custom Emoji</label>
+              <input
+                type="text"
+                maxLength={8}
+                value={formSettings.seasonalCustomEmoji || '🎉'}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, seasonalCustomEmoji: e.target.value })
+                }
+                className="w-full px-2.5 py-2 text-xs text-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <label className="block text-[11px] font-semibold mb-1">Ribbon Hex</label>
+              <input
+                type="color"
+                value={formSettings.seasonalCustomColor || '#2563EB'}
+                onChange={(e) =>
+                  setFormSettings({
+                    ...formSettings,
+                    seasonalCustomColor: e.target.value.toUpperCase(),
+                  })
+                }
+                className="w-full h-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer bg-transparent"
               />
             </div>
           </div>
@@ -7147,30 +7400,136 @@ export function AdminCommsAndSettingsPanel({
         </div>
       </div>
 
-      {/* Customer Support Desk, WhatsApp/Telegram Channels & Official Copyable Group */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+      {/* Customer Support Desk Layout, Appearance Designer & Official Group */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <MessageCircle className="w-4 h-4 text-emerald-600" />
             <div>
               <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                Customer Support Desk &amp; Official Group Settings
+                Customer Support Desk Layout &amp; Appearance Designer
               </h3>
               <p className="text-[11px] text-slate-500">
-                Choose WhatsApp, Telegram, or Both for the Support Desk and configure the Official Group link that users can copy in 1 tap.
+                Design exactly how the Support Desk looks — layout grid, card surface theme, hero SLA banner, WhatsApp/Telegram channels &amp; copyable group link.
               </p>
             </div>
           </div>
-          <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formSettings.supportAllowTickets ?? true}
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formSettings.supportHeroBannerEnabled !== false}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, supportHeroBannerEnabled: e.target.checked })
+                }
+              />
+              Hero SLA Banner
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formSettings.supportAllowTickets ?? true}
+                onChange={(e) =>
+                  setFormSettings({ ...formSettings, supportAllowTickets: e.target.checked })
+                }
+              />
+              {formSettings.supportAllowTickets ?? true ? 'Support Tickets ON' : 'Tickets Hidden'}
+            </label>
+          </div>
+        </div>
+
+        {/* Layout & Card Style Pickers */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Support Desk Layout</label>
+            <select
+              value={formSettings.supportDeskLayout || 'grid_3'}
               onChange={(e) =>
-                setFormSettings({ ...formSettings, supportAllowTickets: e.target.checked })
+                setFormSettings({
+                  ...formSettings,
+                  supportDeskLayout: e.target.value as 'grid_3' | 'grid_2' | 'stacked' | 'banner_first',
+                })
               }
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="grid_3">3-Column Channel Cards Grid</option>
+              <option value="grid_2">2-Column Wide Cards Grid</option>
+              <option value="stacked">Full-Width Stacked Bars</option>
+              <option value="banner_first">Hero Banner First + Cards</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Card Surface Style</label>
+            <select
+              value={formSettings.supportCardStyle || 'tinted'}
+              onChange={(e) =>
+                setFormSettings({
+                  ...formSettings,
+                  supportCardStyle: e.target.value as 'tinted' | 'solid_clean' | 'dark_pro' | 'outlined',
+                })
+              }
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            >
+              <option value="tinted">Soft Tinted Brand Cards</option>
+              <option value="solid_clean">Crisp Clean White / Slate</option>
+              <option value="dark_pro">Executive Dark Pro Cards</option>
+              <option value="outlined">Minimal Outlined Borders</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Hero Banner Kicker Badge</label>
+            <input
+              type="text"
+              value={formSettings.supportHeroBadge || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportHeroBadge: e.target.value })
+              }
+              placeholder="24/7 Priority Desk"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             />
-            {formSettings.supportAllowTickets ?? true ? 'Support Tickets ON' : 'Tickets Hidden'}
-          </label>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold mb-1">Average Response SLA</label>
+            <input
+              type="text"
+              value={formSettings.supportResponseTimeLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportResponseTimeLabel: e.target.value })
+              }
+              placeholder="Under 5 mins"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Hero Banner Headline</label>
+            <input
+              type="text"
+              value={formSettings.supportHeroTitle || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportHeroTitle: e.target.value })
+              }
+              placeholder="How can we help your account today?"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1">Operating Hours Label</label>
+            <input
+              type="text"
+              value={formSettings.supportHoursLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportHoursLabel: e.target.value })
+              }
+              placeholder="Mon - Sun · 8AM - 10PM WAT"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -7213,6 +7572,64 @@ export function AdminCommsAndSettingsPanel({
               }
               placeholder="@suredealsupport or https://t.me/..."
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold mb-1">WhatsApp Card Title</label>
+            <input
+              type="text"
+              value={formSettings.supportWhatsappLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportWhatsappLabel: e.target.value })
+              }
+              className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold mb-1">WhatsApp CTA Text</label>
+            <input
+              type="text"
+              value={formSettings.supportWhatsappButtonText || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportWhatsappButtonText: e.target.value })
+              }
+              className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold mb-1">Telegram Card Title</label>
+            <input
+              type="text"
+              value={formSettings.supportTelegramLabel || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportTelegramLabel: e.target.value })
+              }
+              className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold mb-1">Telegram CTA Text</label>
+            <input
+              type="text"
+              value={formSettings.supportTelegramButtonText || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportTelegramButtonText: e.target.value })
+              }
+              className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold mb-1">Group Join Button</label>
+            <input
+              type="text"
+              value={formSettings.supportGroupButtonText || ''}
+              onChange={(e) =>
+                setFormSettings({ ...formSettings, supportGroupButtonText: e.target.value })
+              }
+              className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             />
           </div>
         </div>
@@ -7261,14 +7678,14 @@ export function AdminCommsAndSettingsPanel({
         </div>
 
         <div>
-          <label className="block text-xs font-semibold mb-1">Support Desk Notice / Hours (Optional)</label>
+          <label className="block text-xs font-semibold mb-1">Support Desk Notice (Optional)</label>
           <input
             type="text"
             value={formSettings.supportDeskNote || ''}
             onChange={(e) =>
               setFormSettings({ ...formSettings, supportDeskNote: e.target.value })
             }
-            placeholder="e.g. Live support replies daily from 8:00 AM - 10:00 PM WAT."
+            placeholder="e.g. Live support replies daily for deposits, OTPs & account support."
             className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
           />
         </div>

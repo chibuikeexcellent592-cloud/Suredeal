@@ -23,6 +23,7 @@ import { formatNaira, resolveApiUrl } from '../lib/api';
 import { BrandLogo } from './BrandLogo';
 import { BrandNameText } from './BrandNameText';
 import { SafeImage } from './SafeImage';
+import { SeasonalRibbon } from './SeasonalEffects';
 
 interface LandingPageProps {
   onNavigateAuth: (mode: 'login' | 'signup') => void;
@@ -268,6 +269,7 @@ export function LandingPage({
 
   return (
     <div className="min-h-screen bg-[var(--site-bg)] text-slate-900 dark:text-slate-100">
+      <SeasonalRibbon />
       {settings?.maintenanceMode && user?.role === 'admin' && (
         <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex flex-wrap items-center justify-center gap-3">
           <span>

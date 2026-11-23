@@ -81,6 +81,7 @@ const DELEGATABLE_ADMIN_TABS: AdminFeatureTab[] = [
   'live',
   'users',
   'orders',
+  'sms_numbers',
   'accounting',
   'catalog',
   'cms',
@@ -917,6 +918,15 @@ export class SureDealStoreDO {
           siteNameColorMode: s.siteNameColorMode || 'split',
           siteNameColor1: s.siteNameColor1 || '#0F172A',
           siteNameColor2: s.siteNameColor2 || '#2563EB',
+          siteNameSplitRule: s.siteNameSplitRule || 'words',
+          siteNameThemeTarget: s.siteNameThemeTarget || 'first',
+          siteNameAutoTheme: s.siteNameAutoTheme !== false,
+          seasonalTheme: s.seasonalTheme || 'none',
+          seasonalBannerEnabled: s.seasonalBannerEnabled !== false,
+          seasonalHeadline: s.seasonalHeadline || '',
+          seasonalEffectsEnabled: s.seasonalEffectsEnabled !== false,
+          seasonalCustomEmoji: s.seasonalCustomEmoji || '✨',
+          seasonalCustomColor: s.seasonalCustomColor || '#2563EB',
           supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
           supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
           creatorName: s.creatorName || 'Excellent',
@@ -2458,8 +2468,10 @@ export class SureDealStoreDO {
             transactions: allow(['overview', 'revenue', 'live', 'users', 'orders', 'accounting'])
               ? visibleTransactions
               : [],
-            smsOrders: allow(['overview', 'revenue', 'live', 'users', 'orders']) ? visibleSmsOrders : [],
-            smsPool: allow(['overview', 'orders', 'catalog']) ? db.smsPool : [],
+            smsOrders: allow(['overview', 'revenue', 'live', 'users', 'orders', 'sms_numbers'])
+              ? visibleSmsOrders
+              : [],
+            smsPool: allow(['overview', 'orders', 'catalog', 'sms_numbers']) ? db.smsPool : [],
             smsServices: db.smsServices,
             smsCountries: db.smsCountries,
             boostingOrders: allow(['overview', 'revenue', 'live', 'users', 'orders'])
@@ -2754,7 +2766,7 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/tools/sweep-expired-sms') {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'overview', 'orders', 'live');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'overview', 'orders', 'live', 'sms_numbers');
           if (scopeErr) return scopeErr;
           const refundedCount = this.expireTimedOutSmsOrders();
           if (refundedCount > 0) {
@@ -3622,7 +3634,7 @@ export class SureDealStoreDO {
         // --- SMS ADMIN ---
         const smsAssignMatch = pathname.match(/^\/api\/admin\/sms-orders\/([^/]+)\/assign-number$/);
         if (method === 'POST' && smsAssignMatch) {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live', 'overview', 'sms_numbers');
           if (scopeErr) return scopeErr;
           this.expireTimedOutSmsOrders();
           const orderId = decodeURIComponent(smsAssignMatch[1]);
@@ -3660,7 +3672,7 @@ export class SureDealStoreDO {
 
         const smsDeliverMatch = pathname.match(/^\/api\/admin\/sms-orders\/([^/]+)\/deliver$/);
         if (method === 'POST' && smsDeliverMatch) {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live', 'overview', 'sms_numbers');
           if (scopeErr) return scopeErr;
           this.expireTimedOutSmsOrders();
           const orderId = decodeURIComponent(smsDeliverMatch[1]);
@@ -3701,7 +3713,7 @@ export class SureDealStoreDO {
 
         const smsDeleteMatch = pathname.match(/^\/api\/admin\/sms-orders\/([^/]+)$/);
         if (method === 'DELETE' && smsDeleteMatch) {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'orders');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'sms_numbers');
           if (scopeErr) return scopeErr;
           const orderId = decodeURIComponent(smsDeleteMatch[1]);
           const target = db.smsOrders.find((o) => o.id === orderId && !o.adminCleared);
@@ -3718,7 +3730,7 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/sms-pool') {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders', 'sms_numbers');
           if (scopeErr) return scopeErr;
           const body = await readJsonBody(request);
           const phoneNumber = String(body.phoneNumber || '').trim();
@@ -3740,9 +3752,85 @@ export class SureDealStoreDO {
           return okJson({ item }, 201);
         }
 
+        if (method === 'POST' && pathname === '/api/admin/sms-pool/bulk') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders', 'sms_numbers');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const linesRaw = String(body.lines || '').trim();
+          const entries = Array.isArray(body.entries) ? body.entries : [];
+          const countryId = String(body.countryId || 'cnt_us');
+          const serviceId = String(body.serviceId || '');
+          const parsedItems: { phoneNumber: string; presetOtp: string }[] = [];
+          if (linesRaw) {
+            for (const rawLine of linesRaw.split(/\r?\n/)) {
+              const line = rawLine.trim();
+              if (!line) continue;
+              const parts = line.split(/[|,;\t]/).map((p) => p.trim());
+              const phoneNumber = parts[0] || '';
+              const presetOtp = parts[1] || '';
+              if (phoneNumber) parsedItems.push({ phoneNumber, presetOtp });
+            }
+          } else if (entries.length > 0) {
+            for (const entry of entries.slice(0, 200)) {
+              const obj = (entry || {}) as { phoneNumber?: unknown; presetOtp?: unknown };
+              const phoneNumber = String(obj.phoneNumber || '').trim();
+              const presetOtp = String(obj.presetOtp || '').trim();
+              if (phoneNumber) parsedItems.push({ phoneNumber, presetOtp });
+            }
+          }
+          if (parsedItems.length === 0) {
+            return errJson('Provide at least one phone number to import', 400);
+          }
+          const created = parsedItems.slice(0, 200).map((entry) => {
+            const item = {
+              id: makeId('pool'),
+              phoneNumber: entry.phoneNumber,
+              countryId,
+              serviceId,
+              presetOtp: entry.presetOtp,
+              used: false,
+              createdAt: new Date().toISOString(),
+            };
+            db.smsPool.unshift(item);
+            return item;
+          });
+          this.logAudit(
+            currentUser.email,
+            'BULK_ADD_SMS_POOL',
+            countryId,
+            `Imported ${created.length} numbers into SMS pool`,
+          );
+          this.persistKeys('smsPool', 'auditLogs');
+          return okJson({ addedCount: created.length, items: created }, 201);
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/sms-pool/clear-ready') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders', 'sms_numbers');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const scope = String(body.scope || 'ready');
+          const before = db.smsPool.length;
+          if (scope === 'used') {
+            db.smsPool = db.smsPool.filter((p) => !p.used);
+          } else if (scope === 'all') {
+            db.smsPool = [];
+          } else {
+            db.smsPool = db.smsPool.filter((p) => p.used);
+          }
+          const removedCount = before - db.smsPool.length;
+          this.logAudit(
+            currentUser.email,
+            'CLEAR_SMS_POOL',
+            scope,
+            `Cleared ${removedCount} SMS pool numbers (${scope})`,
+          );
+          this.persistKeys('smsPool', 'auditLogs');
+          return okJson({ ok: true, removedCount });
+        }
+
         const smsPoolDelMatch = pathname.match(/^\/api\/admin\/sms-pool\/([^/]+)$/);
         if (method === 'DELETE' && smsPoolDelMatch) {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'catalog', 'orders', 'sms_numbers');
           if (scopeErr) return scopeErr;
           const id = decodeURIComponent(smsPoolDelMatch[1]);
           db.smsPool = db.smsPool.filter((p) => p.id !== id);
@@ -4909,10 +4997,52 @@ export class SureDealStoreDO {
                 'defaultBuyWarningLevel',
               ]),
               copy: new Set(copyAllowedKeys),
+              sms_numbers: new Set([
+                'smsPrimeLabel',
+                'smsAlternateLabel',
+                'smsAlternateMode',
+                'smsAlternateDiscountPct',
+              ]),
+              support: new Set([
+                'supportEmail',
+                'supportWhatsapp',
+                'supportTelegram',
+                'supportPrimaryChannel',
+                'supportGroupPlatform',
+                'supportGroupName',
+                'supportGroupUrl',
+                'supportDeskNote',
+                'supportAllowTickets',
+                'supportDeskLayout',
+                'supportCardStyle',
+                'supportHeroBannerEnabled',
+                'supportHeroBadge',
+                'supportHeroTitle',
+                'supportResponseTimeLabel',
+                'supportHoursLabel',
+                'supportWhatsappLabel',
+                'supportWhatsappButtonText',
+                'supportTelegramLabel',
+                'supportTelegramButtonText',
+                'supportGroupButtonText',
+                'showFloatingWhatsapp',
+              ]),
               cms: new Set([
                 ...copyAllowedKeys,
                 'siteLogoUrl',
                 'clearSiteLogo',
+                'siteNameColorMode',
+                'siteNameColor1',
+                'siteNameColor2',
+                'siteNameSplitRule',
+                'siteNameThemeTarget',
+                'siteNameAutoTheme',
+                'seasonalTheme',
+                'seasonalBannerEnabled',
+                'seasonalHeadline',
+                'seasonalEffectsEnabled',
+                'seasonalCustomEmoji',
+                'seasonalCustomColor',
                 'landingVideoUrl',
                 'heroKicker',
                 'heroHeadline',
@@ -4974,6 +5104,44 @@ export class SureDealStoreDO {
           if (body.siteNameColorMode === 'solid' || body.siteNameColorMode === 'split' || body.siteNameColorMode === 'gradient') {
             s.siteNameColorMode = body.siteNameColorMode;
           }
+          if (body.siteNameSplitRule === 'words' || body.siteNameSplitRule === 'sure_prefix') {
+            s.siteNameSplitRule = body.siteNameSplitRule;
+          }
+          if (
+            body.siteNameThemeTarget === 'first' ||
+            body.siteNameThemeTarget === 'second' ||
+            body.siteNameThemeTarget === 'both' ||
+            body.siteNameThemeTarget === 'custom'
+          ) {
+            s.siteNameThemeTarget = body.siteNameThemeTarget;
+          }
+          if (typeof body.siteNameAutoTheme === 'boolean') {
+            s.siteNameAutoTheme = body.siteNameAutoTheme;
+          }
+          if (
+            body.seasonalTheme === 'none' ||
+            body.seasonalTheme === 'christmas' ||
+            body.seasonalTheme === 'new_year' ||
+            body.seasonalTheme === 'valentine' ||
+            body.seasonalTheme === 'ramadan_eid' ||
+            body.seasonalTheme === 'black_friday' ||
+            body.seasonalTheme === 'easter' ||
+            body.seasonalTheme === 'custom'
+          ) {
+            s.seasonalTheme = body.seasonalTheme;
+          }
+          if (typeof body.seasonalBannerEnabled === 'boolean') {
+            s.seasonalBannerEnabled = body.seasonalBannerEnabled;
+          }
+          if (typeof body.seasonalHeadline === 'string') {
+            s.seasonalHeadline = body.seasonalHeadline.trim().slice(0, 180);
+          }
+          if (typeof body.seasonalEffectsEnabled === 'boolean') {
+            s.seasonalEffectsEnabled = body.seasonalEffectsEnabled;
+          }
+          if (typeof body.seasonalCustomEmoji === 'string') {
+            s.seasonalCustomEmoji = body.seasonalCustomEmoji.trim().slice(0, 12);
+          }
           if (body.clearSiteLogo === true) {
             s.siteLogoUrl = '';
           } else if (typeof body.siteLogoUrl === 'string' && body.siteLogoUrl.trim()) {
@@ -5010,6 +5178,7 @@ export class SureDealStoreDO {
           if (isHex(body.siteNameColor2)) s.siteNameColor2 = body.siteNameColor2.trim().toUpperCase();
           if (isHex(body.surfaceBgLight)) s.surfaceBgLight = body.surfaceBgLight.trim().toUpperCase();
           if (isHex(body.surfaceBgDark)) s.surfaceBgDark = body.surfaceBgDark.trim().toUpperCase();
+          if (isHex(body.seasonalCustomColor)) s.seasonalCustomColor = body.seasonalCustomColor.trim().toUpperCase();
           if (typeof body.colorPreset === 'string' && body.colorPreset.trim()) {
             s.colorPreset = body.colorPreset.trim();
           }
@@ -5027,6 +5196,46 @@ export class SureDealStoreDO {
           if (typeof body.supportGroupUrl === 'string') s.supportGroupUrl = body.supportGroupUrl.trim();
           if (typeof body.supportDeskNote === 'string') s.supportDeskNote = body.supportDeskNote.trim();
           if (typeof body.supportAllowTickets === 'boolean') s.supportAllowTickets = body.supportAllowTickets;
+          if (
+            body.supportDeskLayout === 'grid_3' ||
+            body.supportDeskLayout === 'grid_2' ||
+            body.supportDeskLayout === 'stacked' ||
+            body.supportDeskLayout === 'banner_first'
+          ) {
+            s.supportDeskLayout = body.supportDeskLayout;
+          }
+          if (
+            body.supportCardStyle === 'tinted' ||
+            body.supportCardStyle === 'solid_clean' ||
+            body.supportCardStyle === 'dark_pro' ||
+            body.supportCardStyle === 'outlined'
+          ) {
+            s.supportCardStyle = body.supportCardStyle;
+          }
+          if (typeof body.supportHeroBannerEnabled === 'boolean') {
+            s.supportHeroBannerEnabled = body.supportHeroBannerEnabled;
+          }
+          if (typeof body.supportHeroBadge === 'string') s.supportHeroBadge = body.supportHeroBadge.trim();
+          if (typeof body.supportHeroTitle === 'string') s.supportHeroTitle = body.supportHeroTitle.trim();
+          if (typeof body.supportResponseTimeLabel === 'string') {
+            s.supportResponseTimeLabel = body.supportResponseTimeLabel.trim();
+          }
+          if (typeof body.supportHoursLabel === 'string') s.supportHoursLabel = body.supportHoursLabel.trim();
+          if (typeof body.supportWhatsappLabel === 'string') {
+            s.supportWhatsappLabel = body.supportWhatsappLabel.trim();
+          }
+          if (typeof body.supportWhatsappButtonText === 'string') {
+            s.supportWhatsappButtonText = body.supportWhatsappButtonText.trim();
+          }
+          if (typeof body.supportTelegramLabel === 'string') {
+            s.supportTelegramLabel = body.supportTelegramLabel.trim();
+          }
+          if (typeof body.supportTelegramButtonText === 'string') {
+            s.supportTelegramButtonText = body.supportTelegramButtonText.trim();
+          }
+          if (typeof body.supportGroupButtonText === 'string') {
+            s.supportGroupButtonText = body.supportGroupButtonText.trim();
+          }
           if (typeof body.showFloatingWhatsapp === 'boolean') {
             s.showFloatingWhatsapp = body.showFloatingWhatsapp;
           }

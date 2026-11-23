@@ -256,9 +256,92 @@ export function SupportPanel() {
   const deskNote = settings?.supportDeskNote?.trim();
   const allowTickets = settings?.supportAllowTickets !== false;
 
+  const deskLayout = settings?.supportDeskLayout || 'grid_3';
+  const cardStyle = settings?.supportCardStyle || 'tinted';
+  const heroEnabled = settings?.supportHeroBannerEnabled !== false;
+  const heroBadge = settings?.supportHeroBadge?.trim() || '24/7 Priority Desk';
+  const heroTitle =
+    settings?.supportHeroTitle?.trim() || 'How can we help your account today?';
+  const responseTimeLabel = settings?.supportResponseTimeLabel?.trim() || 'Under 5 mins';
+  const hoursLabel = settings?.supportHoursLabel?.trim() || 'Mon - Sun · 8AM - 10PM WAT';
+  const whatsappLabel = settings?.supportWhatsappLabel?.trim() || 'WhatsApp Support';
+  const whatsappBtnText = settings?.supportWhatsappButtonText?.trim() || 'Chat on WhatsApp';
+  const telegramLabel = settings?.supportTelegramLabel?.trim() || 'Telegram Support';
+  const telegramBtnText = settings?.supportTelegramButtonText?.trim() || 'Open Telegram';
+  const groupBtnText = settings?.supportGroupButtonText?.trim() || 'Join Official Group';
+
   const showWhatsapp = primaryChannel === 'whatsapp' || primaryChannel === 'both';
   const showTelegram =
     (primaryChannel === 'telegram' || primaryChannel === 'both') && Boolean(telegramUrl);
+
+  const cardsGridClass =
+    deskLayout === 'stacked'
+      ? 'grid grid-cols-1 gap-4'
+      : deskLayout === 'grid_2'
+        ? 'grid grid-cols-1 md:grid-cols-2 gap-4'
+        : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4';
+
+  const getCardSurface = (tone: 'emerald' | 'sky' | 'indigo') => {
+    if (cardStyle === 'dark_pro') {
+      return 'bg-slate-900 text-white border-slate-800 shadow-sm';
+    }
+    if (cardStyle === 'solid_clean') {
+      return 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xs';
+    }
+    if (cardStyle === 'outlined') {
+      return 'bg-transparent border-slate-300 dark:border-slate-700';
+    }
+    if (tone === 'emerald') {
+      return 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30';
+    }
+    if (tone === 'sky') {
+      return 'border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/30';
+    }
+    return 'border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/30';
+  };
+
+  const isDarkCard = cardStyle === 'dark_pro';
+
+  const heroBannerBlock = heroEnabled ? (
+    <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white border border-slate-800 p-5 sm:p-6 flex flex-wrap items-center justify-between gap-4 shadow-md">
+      <div className="space-y-1.5 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-blue-200">
+          <span className="font-bold text-sky-300">{heroBadge}</span>
+          <span aria-hidden="true">·</span>
+          <span>Avg reply: {responseTimeLabel}</span>
+          <span aria-hidden="true">·</span>
+          <span>{hoursLabel}</span>
+        </div>
+        <h2 className="font-display text-lg sm:text-xl font-extrabold tracking-tight">
+          {heroTitle}
+        </h2>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
+        {showWhatsapp && (
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold whitespace-nowrap"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            {whatsappBtnText}
+          </a>
+        )}
+        {showTelegram && (
+          <a
+            href={telegramUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold whitespace-nowrap"
+          >
+            <Send className="w-3.5 h-3.5" />
+            {telegramBtnText}
+          </a>
+        )}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -271,24 +354,42 @@ export function SupportPanel() {
         </p>
       </div>
 
+      {deskLayout === 'banner_first' && heroBannerBlock}
+
       {/* Admin-Configured Direct Channels: WhatsApp / Telegram Support + Copyable Official Group */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className={cardsGridClass}>
         {showWhatsapp && (
-          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 p-5 flex flex-col justify-between gap-4">
+          <div
+            className={`rounded-2xl border p-5 flex flex-col justify-between gap-4 ${getCardSurface(
+              'emerald',
+            )}`}
+          >
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span
+                  className={`inline-flex items-center gap-1.5 font-bold uppercase tracking-wider ${
+                    isDarkCard ? 'text-emerald-400' : 'text-emerald-700 dark:text-emerald-300'
+                  }`}
+                >
                   <MessageCircle className="w-4 h-4" />
-                  WhatsApp Support
+                  {whatsappLabel}
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
-                  Direct Help
+                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  Direct Help · {responseTimeLabel}
                 </span>
               </div>
-              <p className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+              <p
+                className={`font-mono text-sm font-bold ${
+                  isDarkCard ? 'text-white' : 'text-slate-900 dark:text-white'
+                }`}
+              >
                 {whatsappRaw}
               </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
+              <p
+                className={`text-xs ${
+                  isDarkCard ? 'text-slate-300' : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
                 Chat directly with our live support desk on WhatsApp for order or wallet assistance.
               </p>
             </div>
@@ -297,10 +398,10 @@ export function SupportPanel() {
                 href={whatsappUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors whitespace-nowrap"
               >
                 <MessageCircle className="w-3.5 h-3.5" />
-                <span>Chat on WhatsApp</span>
+                <span>{whatsappBtnText}</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
               <button
@@ -319,21 +420,37 @@ export function SupportPanel() {
         )}
 
         {showTelegram && (
-          <div className="rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/30 p-5 flex flex-col justify-between gap-4">
+          <div
+            className={`rounded-2xl border p-5 flex flex-col justify-between gap-4 ${getCardSurface(
+              'sky',
+            )}`}
+          >
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span
+                  className={`inline-flex items-center gap-1.5 font-bold uppercase tracking-wider ${
+                    isDarkCard ? 'text-sky-400' : 'text-sky-700 dark:text-sky-300'
+                  }`}
+                >
                   <Send className="w-4 h-4" />
-                  Telegram Support
+                  {telegramLabel}
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-sky-600 text-white text-[10px] font-bold">
-                  Fast Desk
+                <span className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+                  Fast Desk · {responseTimeLabel}
                 </span>
               </div>
-              <p className="font-mono text-sm font-bold text-slate-900 dark:text-white truncate">
+              <p
+                className={`font-mono text-sm font-bold truncate ${
+                  isDarkCard ? 'text-white' : 'text-slate-900 dark:text-white'
+                }`}
+              >
                 {telegramRaw}
               </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
+              <p
+                className={`text-xs ${
+                  isDarkCard ? 'text-slate-300' : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
                 Message our verified Telegram support agent directly for instant help.
               </p>
             </div>
@@ -342,10 +459,10 @@ export function SupportPanel() {
                 href={telegramUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-colors"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-colors whitespace-nowrap"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Open Telegram</span>
+                <span>{telegramBtnText}</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
               <button
@@ -364,21 +481,33 @@ export function SupportPanel() {
         )}
 
         {/* Official Group Card with Copyable Group Invite Link */}
-        <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/30 p-5 flex flex-col justify-between gap-4">
+        <div
+          className={`rounded-2xl border p-5 flex flex-col justify-between gap-4 ${getCardSurface(
+            'indigo',
+          )}`}
+        >
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span
+                className={`inline-flex items-center gap-1.5 font-bold uppercase tracking-wider ${
+                  isDarkCard ? 'text-indigo-300' : 'text-indigo-700 dark:text-indigo-300'
+                }`}
+              >
                 <Users className="w-4 h-4" />
                 {groupPlatform === 'telegram' ? 'Telegram Group' : 'WhatsApp Group'}
               </span>
-              <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
-                Official Group
+              <span className="text-[11px] font-semibold text-indigo-500 dark:text-indigo-300">
+                Official Community
               </span>
             </div>
-            <p className="font-display text-sm font-extrabold text-slate-900 dark:text-white truncate">
+            <p
+              className={`font-display text-sm font-extrabold truncate ${
+                isDarkCard ? 'text-white' : 'text-slate-900 dark:text-white'
+              }`}
+            >
               {groupName}
             </p>
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200/80 dark:border-indigo-900/70">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-950 border border-indigo-200/80 dark:border-indigo-900/70">
               <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate flex-1">
                 {safeGroupUrl}
               </span>
@@ -401,9 +530,9 @@ export function SupportPanel() {
               href={safeGroupUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors whitespace-nowrap"
             >
-              <span>Join Official Group</span>
+              <span>{groupBtnText}</span>
               <ExternalLink className="w-3 h-3" />
             </a>
             <a
@@ -417,9 +546,12 @@ export function SupportPanel() {
         </div>
       </div>
 
+      {deskLayout !== 'banner_first' && heroBannerBlock}
+
       {deskNote && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-          {deskNote}
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-xs text-slate-600 dark:text-slate-300 leading-relaxed flex flex-wrap items-center justify-between gap-2">
+          <span>{deskNote}</span>
+          <span className="text-[11px] text-slate-500">{hoursLabel}</span>
         </div>
       )}
 

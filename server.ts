@@ -187,6 +187,7 @@ const DELEGATABLE_ADMIN_TABS: AdminFeatureTab[] = [
   'live',
   'users',
   'orders',
+  'sms_numbers',
   'accounting',
   'catalog',
   'cms',
@@ -422,6 +423,15 @@ async function startServer() {
       siteNameColorMode: s.siteNameColorMode || 'split',
       siteNameColor1: s.siteNameColor1 || '#0F172A',
       siteNameColor2: s.siteNameColor2 || '#2563EB',
+      siteNameSplitRule: s.siteNameSplitRule || 'words',
+      siteNameThemeTarget: s.siteNameThemeTarget || 'first',
+      siteNameAutoTheme: s.siteNameAutoTheme !== false,
+      seasonalTheme: s.seasonalTheme || 'none',
+      seasonalBannerEnabled: s.seasonalBannerEnabled !== false,
+      seasonalHeadline: s.seasonalHeadline || '',
+      seasonalEffectsEnabled: s.seasonalEffectsEnabled !== false,
+      seasonalCustomEmoji: s.seasonalCustomEmoji || '✨',
+      seasonalCustomColor: s.seasonalCustomColor || '#2563EB',
       supportWhatsapp: s.supportWhatsapp || s.adminNotifyPhone || '+2347031537390',
       supportEmail: s.supportEmail || 'chibuikeexcellent592@gmail.com',
       creatorName: s.creatorName || 'Excellent',
@@ -2075,8 +2085,10 @@ async function startServer() {
       transactions: allow(['overview', 'revenue', 'live', 'users', 'orders', 'accounting'])
         ? visibleTransactions
         : [],
-      smsOrders: allow(['overview', 'revenue', 'live', 'users', 'orders']) ? visibleSmsOrders : [],
-      smsPool: allow(['overview', 'orders', 'catalog']) ? db.smsPool : [],
+      smsOrders: allow(['overview', 'revenue', 'live', 'users', 'orders', 'sms_numbers'])
+        ? visibleSmsOrders
+        : [],
+      smsPool: allow(['overview', 'orders', 'catalog', 'sms_numbers']) ? db.smsPool : [],
       smsServices: db.smsServices,
       smsCountries: db.smsCountries,
       boostingOrders: allow(['overview', 'revenue', 'live', 'users', 'orders'])
@@ -2354,7 +2366,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/admin/tools/sweep-expired-sms', requireAuth, requireAdminScope('overview', 'orders', 'live'), (req: AuthedRequest, res) => {
+  app.post('/api/admin/tools/sweep-expired-sms', requireAuth, requireAdminScope('overview', 'orders', 'live', 'sms_numbers'), (req: AuthedRequest, res) => {
     const refundedCount = expireTimedOutSmsOrders();
     if (refundedCount > 0) {
       store.logAudit(
@@ -3036,7 +3048,7 @@ async function startServer() {
     res.json({ order });
   });
 
-  app.post('/api/admin/sms-orders/:id/assign-number', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
+  app.post('/api/admin/sms-orders/:id/assign-number', requireAuth, requireAdminScope('orders', 'live', 'overview', 'sms_numbers'), (req: AuthedRequest, res) => {
     expireTimedOutSmsOrders();
     const order = store.db.smsOrders.find((o) => o.id === req.params.id);
     if (!order) {
@@ -3075,7 +3087,7 @@ async function startServer() {
     res.json({ order });
   });
 
-  app.post('/api/admin/sms-orders/:id/deliver', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
+  app.post('/api/admin/sms-orders/:id/deliver', requireAuth, requireAdminScope('orders', 'live', 'overview', 'sms_numbers'), (req: AuthedRequest, res) => {
     expireTimedOutSmsOrders();
     const order = store.db.smsOrders.find((o) => o.id === req.params.id);
     if (!order) {
@@ -3120,7 +3132,7 @@ async function startServer() {
     res.json({ order });
   });
 
-  app.post('/api/admin/sms-pool', requireAuth, requireAdminScope('orders', 'catalog'), (req, res) => {
+  app.post('/api/admin/sms-pool', requireAuth, requireAdminScope('orders', 'catalog', 'sms_numbers'), (req, res) => {
     const phoneNumber = String(req.body?.phoneNumber || '').trim();
     const countryId = String(req.body?.countryId || 'cnt_us');
     const serviceId = String(req.body?.serviceId || '');
@@ -3143,7 +3155,77 @@ async function startServer() {
     res.status(201).json({ item });
   });
 
-  app.delete('/api/admin/sms-pool/:id', requireAuth, requireAdminScope('orders', 'catalog'), (req, res) => {
+  app.post('/api/admin/sms-pool/bulk', requireAuth, requireAdminScope('orders', 'catalog', 'sms_numbers'), (req: AuthedRequest, res) => {
+    const linesRaw = String(req.body?.lines || '').trim();
+    const entries = Array.isArray(req.body?.entries) ? req.body.entries : [];
+    const countryId = String(req.body?.countryId || 'cnt_us');
+    const serviceId = String(req.body?.serviceId || '');
+    const parsedItems: { phoneNumber: string; presetOtp: string }[] = [];
+    if (linesRaw) {
+      for (const rawLine of linesRaw.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const parts = line.split(/[|,;\t]/).map((p) => p.trim());
+        const phoneNumber = parts[0] || '';
+        const presetOtp = parts[1] || '';
+        if (phoneNumber) parsedItems.push({ phoneNumber, presetOtp });
+      }
+    } else if (entries.length > 0) {
+      for (const entry of entries.slice(0, 200)) {
+        const phoneNumber = String(entry?.phoneNumber || '').trim();
+        const presetOtp = String(entry?.presetOtp || '').trim();
+        if (phoneNumber) parsedItems.push({ phoneNumber, presetOtp });
+      }
+    }
+    if (parsedItems.length === 0) {
+      res.status(400).json({ error: 'Provide at least one phone number to import' });
+      return;
+    }
+    const created = parsedItems.slice(0, 200).map((entry) => {
+      const item = {
+        id: makeId('pool'),
+        phoneNumber: entry.phoneNumber,
+        countryId,
+        serviceId,
+        presetOtp: entry.presetOtp,
+        used: false,
+        createdAt: new Date().toISOString(),
+      };
+      store.db.smsPool.unshift(item);
+      return item;
+    });
+    store.logAudit(
+      req.currentUser!.email,
+      'BULK_ADD_SMS_POOL',
+      countryId,
+      `Imported ${created.length} numbers into SMS pool`,
+    );
+    store.save();
+    res.status(201).json({ addedCount: created.length, items: created });
+  });
+
+  app.post('/api/admin/sms-pool/clear-ready', requireAuth, requireAdminScope('orders', 'catalog', 'sms_numbers'), (req: AuthedRequest, res) => {
+    const scope = String(req.body?.scope || 'ready');
+    const before = store.db.smsPool.length;
+    if (scope === 'used') {
+      store.db.smsPool = store.db.smsPool.filter((p) => !p.used);
+    } else if (scope === 'all') {
+      store.db.smsPool = [];
+    } else {
+      store.db.smsPool = store.db.smsPool.filter((p) => p.used);
+    }
+    const removedCount = before - store.db.smsPool.length;
+    store.logAudit(
+      req.currentUser!.email,
+      'CLEAR_SMS_POOL',
+      scope,
+      `Cleared ${removedCount} SMS pool numbers (${scope})`,
+    );
+    store.save();
+    res.json({ ok: true, removedCount });
+  });
+
+  app.delete('/api/admin/sms-pool/:id', requireAuth, requireAdminScope('orders', 'catalog', 'sms_numbers'), (req, res) => {
     store.db.smsPool = store.db.smsPool.filter((p) => p.id !== req.params.id);
     store.save();
     res.json({ ok: true });
@@ -3181,7 +3263,7 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  app.delete('/api/admin/sms-orders/:id', requireAuth, requireAdminScope('orders'), (req: AuthedRequest, res) => {
+  app.delete('/api/admin/sms-orders/:id', requireAuth, requireAdminScope('orders', 'sms_numbers'), (req: AuthedRequest, res) => {
     const target = store.db.smsOrders.find((o) => o.id === req.params.id && !o.adminCleared);
     if (!target) {
       res.status(404).json({ error: 'SMS order not found' });
@@ -4329,10 +4411,52 @@ async function startServer() {
           'defaultBuyWarningLevel',
         ]),
         copy: new Set(copyAllowedKeys),
+        sms_numbers: new Set([
+          'smsPrimeLabel',
+          'smsAlternateLabel',
+          'smsAlternateMode',
+          'smsAlternateDiscountPct',
+        ]),
+        support: new Set([
+          'supportEmail',
+          'supportWhatsapp',
+          'supportTelegram',
+          'supportPrimaryChannel',
+          'supportGroupPlatform',
+          'supportGroupName',
+          'supportGroupUrl',
+          'supportDeskNote',
+          'supportAllowTickets',
+          'supportDeskLayout',
+          'supportCardStyle',
+          'supportHeroBannerEnabled',
+          'supportHeroBadge',
+          'supportHeroTitle',
+          'supportResponseTimeLabel',
+          'supportHoursLabel',
+          'supportWhatsappLabel',
+          'supportWhatsappButtonText',
+          'supportTelegramLabel',
+          'supportTelegramButtonText',
+          'supportGroupButtonText',
+          'showFloatingWhatsapp',
+        ]),
         cms: new Set([
           ...copyAllowedKeys,
           'siteLogoUrl',
           'clearSiteLogo',
+          'siteNameColorMode',
+          'siteNameColor1',
+          'siteNameColor2',
+          'siteNameSplitRule',
+          'siteNameThemeTarget',
+          'siteNameAutoTheme',
+          'seasonalTheme',
+          'seasonalBannerEnabled',
+          'seasonalHeadline',
+          'seasonalEffectsEnabled',
+          'seasonalCustomEmoji',
+          'seasonalCustomColor',
           'landingVideoUrl',
           'heroKicker',
           'heroHeadline',
@@ -4393,6 +4517,44 @@ async function startServer() {
     if (body.siteNameColorMode === 'solid' || body.siteNameColorMode === 'split' || body.siteNameColorMode === 'gradient') {
       s.siteNameColorMode = body.siteNameColorMode;
     }
+    if (body.siteNameSplitRule === 'words' || body.siteNameSplitRule === 'sure_prefix') {
+      s.siteNameSplitRule = body.siteNameSplitRule;
+    }
+    if (
+      body.siteNameThemeTarget === 'first' ||
+      body.siteNameThemeTarget === 'second' ||
+      body.siteNameThemeTarget === 'both' ||
+      body.siteNameThemeTarget === 'custom'
+    ) {
+      s.siteNameThemeTarget = body.siteNameThemeTarget;
+    }
+    if (typeof body.siteNameAutoTheme === 'boolean') {
+      s.siteNameAutoTheme = body.siteNameAutoTheme;
+    }
+    if (
+      body.seasonalTheme === 'none' ||
+      body.seasonalTheme === 'christmas' ||
+      body.seasonalTheme === 'new_year' ||
+      body.seasonalTheme === 'valentine' ||
+      body.seasonalTheme === 'ramadan_eid' ||
+      body.seasonalTheme === 'black_friday' ||
+      body.seasonalTheme === 'easter' ||
+      body.seasonalTheme === 'custom'
+    ) {
+      s.seasonalTheme = body.seasonalTheme;
+    }
+    if (typeof body.seasonalBannerEnabled === 'boolean') {
+      s.seasonalBannerEnabled = body.seasonalBannerEnabled;
+    }
+    if (typeof body.seasonalHeadline === 'string') {
+      s.seasonalHeadline = body.seasonalHeadline.trim().slice(0, 180);
+    }
+    if (typeof body.seasonalEffectsEnabled === 'boolean') {
+      s.seasonalEffectsEnabled = body.seasonalEffectsEnabled;
+    }
+    if (typeof body.seasonalCustomEmoji === 'string') {
+      s.seasonalCustomEmoji = body.seasonalCustomEmoji.trim().slice(0, 12);
+    }
     if (body.clearSiteLogo === true) {
       s.siteLogoUrl = '';
     } else if (typeof body.siteLogoUrl === 'string' && body.siteLogoUrl.trim()) {
@@ -4429,6 +4591,7 @@ async function startServer() {
     if (isHex(body.siteNameColor2)) s.siteNameColor2 = body.siteNameColor2.trim().toUpperCase();
     if (isHex(body.surfaceBgLight)) s.surfaceBgLight = body.surfaceBgLight.trim().toUpperCase();
     if (isHex(body.surfaceBgDark)) s.surfaceBgDark = body.surfaceBgDark.trim().toUpperCase();
+    if (isHex(body.seasonalCustomColor)) s.seasonalCustomColor = body.seasonalCustomColor.trim().toUpperCase();
     if (typeof body.colorPreset === 'string' && body.colorPreset.trim()) {
       s.colorPreset = body.colorPreset.trim();
     }
@@ -4446,6 +4609,46 @@ async function startServer() {
     if (typeof body.supportGroupUrl === 'string') s.supportGroupUrl = body.supportGroupUrl.trim();
     if (typeof body.supportDeskNote === 'string') s.supportDeskNote = body.supportDeskNote.trim();
     if (typeof body.supportAllowTickets === 'boolean') s.supportAllowTickets = body.supportAllowTickets;
+    if (
+      body.supportDeskLayout === 'grid_3' ||
+      body.supportDeskLayout === 'grid_2' ||
+      body.supportDeskLayout === 'stacked' ||
+      body.supportDeskLayout === 'banner_first'
+    ) {
+      s.supportDeskLayout = body.supportDeskLayout;
+    }
+    if (
+      body.supportCardStyle === 'tinted' ||
+      body.supportCardStyle === 'solid_clean' ||
+      body.supportCardStyle === 'dark_pro' ||
+      body.supportCardStyle === 'outlined'
+    ) {
+      s.supportCardStyle = body.supportCardStyle;
+    }
+    if (typeof body.supportHeroBannerEnabled === 'boolean') {
+      s.supportHeroBannerEnabled = body.supportHeroBannerEnabled;
+    }
+    if (typeof body.supportHeroBadge === 'string') s.supportHeroBadge = body.supportHeroBadge.trim();
+    if (typeof body.supportHeroTitle === 'string') s.supportHeroTitle = body.supportHeroTitle.trim();
+    if (typeof body.supportResponseTimeLabel === 'string') {
+      s.supportResponseTimeLabel = body.supportResponseTimeLabel.trim();
+    }
+    if (typeof body.supportHoursLabel === 'string') s.supportHoursLabel = body.supportHoursLabel.trim();
+    if (typeof body.supportWhatsappLabel === 'string') {
+      s.supportWhatsappLabel = body.supportWhatsappLabel.trim();
+    }
+    if (typeof body.supportWhatsappButtonText === 'string') {
+      s.supportWhatsappButtonText = body.supportWhatsappButtonText.trim();
+    }
+    if (typeof body.supportTelegramLabel === 'string') {
+      s.supportTelegramLabel = body.supportTelegramLabel.trim();
+    }
+    if (typeof body.supportTelegramButtonText === 'string') {
+      s.supportTelegramButtonText = body.supportTelegramButtonText.trim();
+    }
+    if (typeof body.supportGroupButtonText === 'string') {
+      s.supportGroupButtonText = body.supportGroupButtonText.trim();
+    }
     if (typeof body.showFloatingWhatsapp === 'boolean') {
       s.showFloatingWhatsapp = body.showFloatingWhatsapp;
     }

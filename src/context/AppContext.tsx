@@ -180,6 +180,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         siteNameColorMode?: 'solid' | 'split' | 'gradient';
         siteNameColor1?: string;
         siteNameColor2?: string;
+        siteNameSplitRule?: 'words' | 'sure_prefix';
+        siteNameThemeTarget?: 'first' | 'second' | 'both' | 'custom';
+        siteNameAutoTheme?: boolean;
+        seasonalTheme?:
+          | 'none'
+          | 'christmas'
+          | 'new_year'
+          | 'valentine'
+          | 'ramadan_eid'
+          | 'black_friday'
+          | 'easter'
+          | 'custom';
+        seasonalBannerEnabled?: boolean;
+        seasonalHeadline?: string;
+        seasonalEffectsEnabled?: boolean;
+        seasonalCustomEmoji?: string;
+        seasonalCustomColor?: string;
         supportEmail?: string;
         supportWhatsapp?: string;
       }>('/api/public/maintenance-status');
@@ -202,6 +219,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 siteNameColorMode: status.siteNameColorMode ?? prev.settings.siteNameColorMode,
                 siteNameColor1: status.siteNameColor1 ?? prev.settings.siteNameColor1,
                 siteNameColor2: status.siteNameColor2 ?? prev.settings.siteNameColor2,
+                siteNameSplitRule: status.siteNameSplitRule ?? prev.settings.siteNameSplitRule,
+                siteNameThemeTarget:
+                  status.siteNameThemeTarget ?? prev.settings.siteNameThemeTarget,
+                siteNameAutoTheme: status.siteNameAutoTheme ?? prev.settings.siteNameAutoTheme,
+                seasonalTheme: status.seasonalTheme ?? prev.settings.seasonalTheme,
+                seasonalBannerEnabled:
+                  status.seasonalBannerEnabled ?? prev.settings.seasonalBannerEnabled,
+                seasonalHeadline: status.seasonalHeadline ?? prev.settings.seasonalHeadline,
+                seasonalEffectsEnabled:
+                  status.seasonalEffectsEnabled ?? prev.settings.seasonalEffectsEnabled,
+                seasonalCustomEmoji:
+                  status.seasonalCustomEmoji ?? prev.settings.seasonalCustomEmoji,
+                seasonalCustomColor:
+                  status.seasonalCustomColor ?? prev.settings.seasonalCustomColor,
                 maintenanceMode: Boolean(status.maintenanceMode),
                 maintenanceHeadline:
                   status.maintenanceHeadline ?? prev.settings.maintenanceHeadline,

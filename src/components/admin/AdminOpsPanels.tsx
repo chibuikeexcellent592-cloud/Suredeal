@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  Check,
   CheckCircle2,
   Clock,
   Crown,
@@ -13,16 +14,22 @@ import {
   Lock,
   Mail,
   MessageSquare,
+  Monitor,
   Pause,
   Play,
   RefreshCw,
+  Search,
   ShieldAlert,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   TrendingUp,
   UserCheck,
   UserPlus,
   Users,
+  Volume2,
+  VolumeX,
+  XCircle,
 } from 'lucide-react';
 import { apiFetch, formatNaira } from '../../lib/api';
 import { useApp } from '../../context/AppContext';
@@ -62,6 +69,10 @@ const FEATURE_META: Record<
   orders: {
     label: 'Orders & Receipts',
     description: 'Verify receipts, OTP numbers & boosting orders',
+  },
+  sms_numbers: {
+    label: 'SMS Numbers & Pool',
+    description: 'Manage virtual SMS number pool, bulk uploads & OTP delivery',
   },
   accounting: {
     label: 'Accounting Archive',
@@ -961,76 +972,315 @@ interface LiveMonitorProps {
   onNavigateTab?: (tab: AdminFeatureTab) => void;
 }
 
+type LiveStreamFilter = 'all' | 'visitors' | 'deposits' | 'sms' | 'boosting' | 'tickets' | 'users';
+
+function playLiveChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(740, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(988, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.26);
+  } catch {
+    // ignore audio restrictions
+  }
+}
+
 export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProps) {
+  const { notify } = useApp();
   const [live, setLive] = useState<LiveFeedPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [autoPoll, setAutoPoll] = useState(true);
+  const [cadenceSec, setCadenceSec] = useState<0 | 5 | 10>(5);
+  const [streamFilter, setStreamFilter] = useState<LiveStreamFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [soundAlert, setSoundAlert] = useState(false);
+  const [actingTxId, setActingTxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const prevCountsRef = useRef<{ deposits: number; sms: number; tickets: number } | null>(null);
 
   const fetchLive = useCallback(async () => {
     try {
       const res = await apiFetch<LiveFeedPayload>('/api/admin/live');
       setLive(res);
       setError(null);
+
+      const nextCounts = {
+        deposits: res.pendingDeposits.length,
+        sms: res.waitingSms.length,
+        tickets: res.openTickets.length,
+      };
+      if (
+        soundAlert &&
+        prevCountsRef.current &&
+        (nextCounts.deposits > prevCountsRef.current.deposits ||
+          nextCounts.sms > prevCountsRef.current.sms ||
+          nextCounts.tickets > prevCountsRef.current.tickets)
+      ) {
+        playLiveChime();
+      }
+      prevCountsRef.current = nextCounts;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to fetch live feed');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [soundAlert]);
 
   useEffect(() => {
     void fetchLive();
   }, [fetchLive]);
 
   useEffect(() => {
-    if (!autoPoll) return;
+    if (!cadenceSec) return;
     const timer = window.setInterval(() => {
       void fetchLive();
-    }, 5000);
+    }, cadenceSec * 1000);
     return () => window.clearInterval(timer);
-  }, [autoPoll, fetchLive]);
+  }, [cadenceSec, fetchLive]);
+
+  const handleInlineDepositDecision = async (txId: string, decision: 'approve' | 'reject') => {
+    setActingTxId(txId);
+    try {
+      await apiFetch(`/api/admin/transactions/${txId}/decision`, {
+        method: 'POST',
+        body: JSON.stringify({ decision }),
+      });
+      notify(
+        decision === 'approve' ? 'Deposit approved & wallet credited!' : 'Deposit rejected.',
+        decision === 'approve' ? 'success' : 'info',
+      );
+      await fetchLive();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Action failed', 'error');
+    } finally {
+      setActingTxId(null);
+    }
+  };
+
+  const visitorAnalytics = useMemo(() => {
+    const sessions = live?.recentSessions || [];
+    let mobileCount = 0;
+    let desktopCount = 0;
+    const pathCounts = new Map<string, number>();
+
+    for (const s of sessions) {
+      const dev = (s.device || '').toLowerCase();
+      if (dev.includes('mobile') || dev.includes('phone') || dev.includes('android') || dev.includes('ios')) {
+        mobileCount += 1;
+      } else {
+        desktopCount += 1;
+      }
+      const p = s.path || '/';
+      pathCounts.set(p, (pathCounts.get(p) || 0) + 1);
+    }
+
+    const total = Math.max(1, mobileCount + desktopCount);
+    const mobilePct = Math.round((mobileCount / total) * 100);
+    const topPaths = Array.from(pathCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+
+    return { mobileCount, desktopCount, mobilePct, topPaths };
+  }, [live?.recentSessions]);
+
+  const unifiedFirehose = useMemo(() => {
+    if (!live) return [];
+    const items: Array<{
+      id: string;
+      kind: Exclude<LiveStreamFilter, 'all'>;
+      title: string;
+      subtitle: string;
+      amount?: number;
+      time: string;
+      badge: string;
+      badgeClass: string;
+      txId?: string;
+      targetTab?: AdminFeatureTab;
+    }> = [];
+
+    for (const d of live.pendingDeposits) {
+      items.push({
+        id: `dep-${d.id}`,
+        kind: 'deposits',
+        title: `Pending Deposit · ${d.userName}`,
+        subtitle: `${d.userEmail}${d.aiAudit?.extractedReference ? ` · Ref: ${d.aiAudit.extractedReference}` : ''}`,
+        amount: d.amount,
+        time: d.createdAt,
+        badge: 'DEPOSIT',
+        badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300',
+        txId: d.id,
+        targetTab: 'orders',
+      });
+    }
+
+    for (const s of live.waitingSms) {
+      items.push({
+        id: `sms-${s.id}`,
+        kind: 'sms',
+        title: `SMS Waiting · ${s.serviceName} (${s.countryName})`,
+        subtitle: `${s.phoneNumber} · ${s.userEmail}`,
+        amount: s.price,
+        time: s.createdAt,
+        badge: 'SMS OTP',
+        badgeClass: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300',
+        targetTab: 'sms_numbers',
+      });
+    }
+
+    for (const b of live.activeBoosting) {
+      items.push({
+        id: `boost-${b.id}`,
+        kind: 'boosting',
+        title: `Boosting (${b.status}) · ${b.serviceName}`,
+        subtitle: `${b.quantity.toLocaleString()} qty · ${b.userEmail}`,
+        amount: b.amount,
+        time: b.createdAt,
+        badge: 'BOOST',
+        badgeClass: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300',
+        targetTab: 'orders',
+      });
+    }
+
+    for (const tk of live.openTickets) {
+      items.push({
+        id: `tkt-${tk.id}`,
+        kind: 'tickets',
+        title: `Support Ticket (${tk.priority}) · ${tk.subject}`,
+        subtitle: `${tk.userName} (${tk.userEmail})`,
+        time: tk.updatedAt || tk.createdAt,
+        badge: 'TICKET',
+        badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300',
+        targetTab: 'support',
+      });
+    }
+
+    for (const u of live.recentUsers) {
+      items.push({
+        id: `usr-${u.id}`,
+        kind: 'users',
+        title: `Active Member · ${u.name}`,
+        subtitle: `${u.email} · Last seen`,
+        amount: u.balance,
+        time: u.lastLoginAt || u.createdAt,
+        badge: 'ACCOUNT',
+        badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300',
+        targetTab: 'users',
+      });
+    }
+
+    for (let idx = 0; idx < live.recentSessions.length; idx++) {
+      const v = live.recentSessions[idx];
+      items.push({
+        id: `vis-${v.visitorId}-${idx}`,
+        kind: 'visitors',
+        title: `Visitor on ${v.path || '/'}`,
+        subtitle: `${v.device || 'Browser'} · ${v.visitorId}`,
+        time: v.visitedAt,
+        badge: 'VISIT',
+        badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300',
+      });
+    }
+
+    const q = searchQuery.trim().toLowerCase();
+    return items
+      .filter((item) => (streamFilter === 'all' ? true : item.kind === streamFilter))
+      .filter((item) =>
+        !q
+          ? true
+          : item.title.toLowerCase().includes(q) ||
+            item.subtitle.toLowerCase().includes(q) ||
+            item.badge.toLowerCase().includes(q),
+      )
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  }, [live, streamFilter, searchQuery]);
+
+  const filterTabs: { id: LiveStreamFilter; label: string; count: number }[] = [
+    { id: 'all', label: 'All Events', count: unifiedFirehose.length },
+    { id: 'deposits', label: 'Deposits', count: live?.pendingDeposits.length ?? 0 },
+    { id: 'sms', label: 'SMS Queue', count: live?.waitingSms.length ?? 0 },
+    { id: 'boosting', label: 'Boosting', count: live?.activeBoosting.length ?? 0 },
+    { id: 'tickets', label: 'Tickets', count: live?.openTickets.length ?? 0 },
+    { id: 'visitors', label: 'Visitors', count: live?.recentSessions.length ?? 0 },
+    { id: 'users', label: 'Accounts', count: live?.recentUsers.length ?? 0 },
+  ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-5">
+      {/* Pro Header & Telemetry Controls */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
             <Activity className="w-5 h-5 text-blue-600" />
-            Live Website Monitor
-            {autoPoll && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+            Live Website Monitor Pro
+            {cadenceSec > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                LIVE 5s
+                STREAM {cadenceSec}s
               </span>
             )}
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real-time storefront visitors, waiting SMS OTP numbers, active boosts, pending receipts &amp; logins.
-            {live?.serverTime ? ` Last update: ${new Date(live.serverTime).toLocaleTimeString()}` : ''}
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Real-time chronological activity firehose, inline receipt approval, SMS queue watch &amp; visitor device analytics.
+            {live?.serverTime ? ` · Updated ${new Date(live.serverTime).toLocaleTimeString()}` : ''}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 gap-1">
+            {([5, 10, 0] as const).map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                onClick={() => setCadenceSec(sec)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                  cadenceSec === sec
+                    ? sec === 0
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-slate-900 dark:bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-800'
+                }`}
+              >
+                {sec === 0 ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                {sec === 0 ? 'Paused' : `${sec}s`}
+              </button>
+            ))}
+          </div>
+
           <button
             type="button"
-            onClick={() => setAutoPoll((v) => !v)}
+            onClick={() => {
+              const next = !soundAlert;
+              setSoundAlert(next);
+              if (next) playLiveChime();
+            }}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border cursor-pointer ${
-              autoPoll
-                ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+              soundAlert
+                ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
                 : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
             }`}
+            title="Play a soft chime when new deposits, SMS orders, or tickets arrive"
           >
-            {autoPoll ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            {autoPoll ? 'Pause Auto-Refresh' : 'Resume Auto-Refresh'}
+            {soundAlert ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            Chime {soundAlert ? 'ON' : 'OFF'}
           </button>
+
           <button
             type="button"
             onClick={() => void fetchLive()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh Now
+            Sync Now
           </button>
         </div>
       </div>
@@ -1082,35 +1332,148 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
         </div>
       </div>
 
-      {/* Live Streams Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Live Visitor Sessions */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
-          <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Eye className="w-4 h-4 text-emerald-600" />
-            Live Visitor Activity ({live?.recentSessions.length ?? 0})
-          </h3>
-          {!live || live.recentSessions.length === 0 ? (
-            <p className="text-xs text-slate-500 py-6 text-center">No visitor sessions logged yet.</p>
+      {/* Visitor Device Split & Top Routes Strip */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+        <div className="lg:col-span-5 space-y-2">
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
+              <Smartphone className="w-3.5 h-3.5 text-blue-600" />
+              Mobile {visitorAnalytics.mobilePct}% ({visitorAnalytics.mobileCount})
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
+              Desktop {100 - visitorAnalytics.mobilePct}% ({visitorAnalytics.desktopCount})
+              <Monitor className="w-3.5 h-3.5 text-indigo-500" />
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-indigo-100 dark:bg-indigo-950/60 overflow-hidden flex">
+            <div
+              className="h-full bg-blue-600 transition-all"
+              style={{ width: `${visitorAnalytics.mobilePct}%` }}
+            />
+          </div>
+        </div>
+        <div className="lg:col-span-7 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">
+            Top Routes:
+          </span>
+          {visitorAnalytics.topPaths.length === 0 ? (
+            <span className="text-slate-500">Waiting for traffic...</span>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto">
-              {live.recentSessions.map((v, idx) => (
-                <div key={`${v.visitorId}-${idx}`} className="py-2.5 flex items-center justify-between gap-2 text-xs">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-slate-900 dark:text-white truncate">
-                      {v.path || '/'} · <span className="font-mono text-[11px] text-slate-500">{v.device}</span>
-                    </p>
-                    <p className="text-[11px] text-slate-400 font-mono truncate">{v.visitorId}</p>
-                  </div>
-                  <span className="text-[11px] font-mono text-slate-500 shrink-0">
-                    {new Date(v.visitedAt).toLocaleTimeString()}
-                  </span>
-                </div>
-              ))}
-            </div>
+            visitorAnalytics.topPaths.map(([p, count]) => (
+              <span
+                key={p}
+                className="px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-300 tabular-nums"
+              >
+                {p} · {count}
+              </span>
+            ))
           )}
         </div>
+      </div>
 
+      {/* Unified Chronological Live Activity Firehose */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+            {filterTabs.map((ft) => (
+              <button
+                key={ft.id}
+                type="button"
+                onClick={() => setStreamFilter(ft.id)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer transition-colors ${
+                  streamFilter === ft.id
+                    ? 'bg-slate-900 dark:bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-800'
+                }`}
+              >
+                {ft.label} <span className="opacity-75 font-mono">({ft.count})</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="relative w-full sm:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search live events, email, phone..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+
+        {unifiedFirehose.length === 0 ? (
+          <p className="py-10 text-center text-xs text-slate-500">
+            No live events match the current filter.
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[380px] overflow-y-auto">
+            {unifiedFirehose.slice(0, 45).map((ev) => (
+              <div
+                key={ev.id}
+                className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${ev.badgeClass}`}>
+                      {ev.badge}
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-white truncate">
+                      {ev.title}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                    {ev.subtitle} · {new Date(ev.time).toLocaleTimeString()}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {typeof ev.amount === 'number' && (
+                    <span className="font-mono font-bold text-slate-900 dark:text-white tabular-nums mr-1">
+                      {formatNaira(ev.amount, symbol)}
+                    </span>
+                  )}
+                  {ev.txId && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={actingTxId === ev.txId}
+                        onClick={() => void handleInlineDepositDecision(ev.txId!, 'approve')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer disabled:opacity-60"
+                      >
+                        <Check className="w-3 h-3" />
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actingTxId === ev.txId}
+                        onClick={() => void handleInlineDepositDecision(ev.txId!, 'reject')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-[11px] font-bold cursor-pointer disabled:opacity-60"
+                      >
+                        <XCircle className="w-3 h-3" />
+                        Reject
+                      </button>
+                    </>
+                  )}
+                  {ev.targetTab && onNavigateTab && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab(ev.targetTab!)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/50 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                    >
+                      Open →
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Specialized Split Queues */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Waiting SMS & Active Boosts */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -1119,13 +1482,22 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
               Active SMS &amp; Boosting Queues
             </h3>
             {onNavigateTab && (
-              <button
-                type="button"
-                onClick={() => onNavigateTab('orders')}
-                className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
-              >
-                Open Orders →
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('sms_numbers')}
+                  className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                >
+                  SMS Numbers →
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('orders')}
+                  className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                >
+                  Orders →
+                </button>
+              </div>
             )}
           </div>
           {!live || (live.waitingSms.length === 0 && live.activeBoosting.length === 0) ? (
@@ -1133,7 +1505,7 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
               All SMS &amp; boosting queues are currently clear.
             </p>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto text-xs">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto text-xs">
               {live.waitingSms.map((s) => (
                 <div key={s.id} className="py-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -1177,35 +1549,33 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
           <div className="flex items-center justify-between">
             <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Landmark className="w-4 h-4 text-amber-500" />
-              Pending Receipts &amp; Open Tickets
+              Urgent Receipts &amp; Open Tickets
             </h3>
-            <div className="flex items-center gap-2">
-              {onNavigateTab && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => onNavigateTab('orders')}
-                    className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
-                  >
-                    Receipts
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onNavigateTab('support')}
-                    className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
-                  >
-                    Tickets
-                  </button>
-                </>
-              )}
-            </div>
+            {onNavigateTab && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('orders')}
+                  className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                >
+                  Receipts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('support')}
+                  className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                >
+                  Tickets
+                </button>
+              </div>
+            )}
           </div>
           {!live || (live.pendingDeposits.length === 0 && live.openTickets.length === 0) ? (
             <p className="text-xs text-slate-500 py-6 text-center">
               No pending receipts or open support tickets.
             </p>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto text-xs">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto text-xs">
               {live.pendingDeposits.map((tx) => (
                 <div key={tx.id} className="py-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -1215,9 +1585,19 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
                     <span className="font-bold text-slate-900 dark:text-white">{tx.userName}</span>
                     <p className="text-[11px] text-slate-500 truncate">{tx.userEmail}</p>
                   </div>
-                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0 tabular-nums">
-                    {formatNaira(tx.amount, symbol)}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="font-mono font-bold text-amber-600 dark:text-amber-400 tabular-nums mr-1">
+                      {formatNaira(tx.amount, symbol)}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={actingTxId === tx.id}
+                      onClick={() => void handleInlineDepositDecision(tx.id, 'approve')}
+                      className="px-2 py-1 rounded-md bg-emerald-600 text-white text-[10px] font-bold cursor-pointer"
+                    >
+                      Approve
+                    </button>
+                  </div>
                 </div>
               ))}
               {live.openTickets.map((tk) => (
@@ -1230,39 +1610,8 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
                     <span className="font-bold text-slate-900 dark:text-white">{tk.subject}</span>
                     <p className="text-[11px] text-slate-500 truncate">{tk.userEmail}</p>
                   </div>
-                  <span className="text-[11px] text-slate-400 shrink-0">
+                  <span className="text-[11px] text-slate-400 shrink-0 tabular-nums">
                     {new Date(tk.updatedAt).toLocaleTimeString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Recent Logins / Signups & Live System Alerts */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
-          <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Users className="w-4 h-4 text-indigo-600" />
-            Recent Active Users &amp; Live Events
-          </h3>
-          {!live || live.recentUsers.length === 0 ? (
-            <p className="text-xs text-slate-500 py-6 text-center">No recent account activity yet.</p>
-          ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto text-xs">
-              {live.recentUsers.map((u) => (
-                <div key={u.id} className="py-2.5 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-900 dark:text-white truncate">
-                      {u.name}{' '}
-                      <span className="text-[10px] font-normal text-slate-500">({u.email})</span>
-                    </p>
-                    <p className="text-[11px] text-slate-400 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      Last seen {new Date(u.lastLoginAt || u.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400 shrink-0 tabular-nums">
-                    {formatNaira(u.balance, symbol)}
                   </span>
                 </div>
               ))}
