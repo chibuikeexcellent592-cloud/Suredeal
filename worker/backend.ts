@@ -77,6 +77,7 @@ export interface WorkerEnv {
 
 const DELEGATABLE_ADMIN_TABS: AdminFeatureTab[] = [
   'overview',
+  'power_suite',
   'revenue',
   'live',
   'users',
@@ -1057,6 +1058,13 @@ export class SureDealStoreDO {
         if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           return errJson('Please provide a valid email address', 400);
         }
+        const emailDomain = email.split('@')[1] || '';
+        const blockedDomains = (db.settings.blockedEmailDomains || []).map((d) =>
+          String(d || '').trim().toLowerCase(),
+        );
+        if (emailDomain && blockedDomains.includes(emailDomain)) {
+          return errJson('Registrations from this email domain are currently blocked.', 403);
+        }
         if (password.length < 6) {
           return errJson('Password must be at least 6 characters', 400);
         }
@@ -1440,6 +1448,7 @@ export class SureDealStoreDO {
             ? db.settings.smsAlternateLabel || 'Alternate'
             : db.settings.smsPrimeLabel || 'Prime';
 
+        const smsExpiryMins = Math.max(5, Math.min(120, Number(db.settings.smsOrderExpiryMinutes ?? 15)));
         const order: DatabaseState['smsOrders'][number] = {
           id: orderId,
           userId: currentUser.id,
@@ -1452,7 +1461,7 @@ export class SureDealStoreDO {
           price,
           status: 'waiting',
           createdAt: new Date(now).toISOString(),
-          expiresAt: new Date(now + 15 * 60 * 1000).toISOString(),
+          expiresAt: new Date(now + smsExpiryMins * 60 * 1000).toISOString(),
         };
 
         if (poolMatch) {
@@ -2080,6 +2089,13 @@ export class SureDealStoreDO {
         if (!Number.isFinite(amount) || amount < db.settings.minimumDeposit) {
           return errJson(
             `Minimum deposit is ${db.settings.currencySymbol}${db.settings.minimumDeposit.toLocaleString()}`,
+            400,
+          );
+        }
+        const maxDep = Number(db.settings.maxDepositAmount ?? 0);
+        if (maxDep > 0 && amount > maxDep) {
+          return errJson(
+            `Maximum deposit per transfer is ${db.settings.currencySymbol}${maxDep.toLocaleString()}`,
             400,
           );
         }
@@ -2766,7 +2782,7 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/tools/sweep-expired-sms') {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'overview', 'orders', 'live', 'sms_numbers');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'overview', 'power_suite', 'orders', 'live', 'sms_numbers');
           if (scopeErr) return scopeErr;
           const refundedCount = this.expireTimedOutSmsOrders();
           if (refundedCount > 0) {
@@ -2779,6 +2795,139 @@ export class SureDealStoreDO {
             this.persistKeys('auditLogs');
           }
           return okJson({ ok: true, refundedCount });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/bulk-price-adjust') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'catalog', 'overview');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const target = String(body.target || 'marketplace');
+          const percent = Number(body.percent || 0);
+          if (!['marketplace', 'sms', 'boosting'].includes(target)) {
+            return errJson('Invalid catalog target', 400);
+          }
+          if (!Number.isFinite(percent) || percent < -50 || percent > 200 || percent === 0) {
+            return errJson('Percentage must be between -50 and +200 (non-zero)', 400);
+          }
+          const factor = 1 + percent / 100;
+          let updatedCount = 0;
+          if (target === 'marketplace') {
+            db.marketplaceListings.forEach((item) => {
+              item.price = Math.max(50, Math.round(item.price * factor));
+              updatedCount += 1;
+            });
+            this.persistKeys('marketplaceListings');
+          } else if (target === 'sms') {
+            db.smsServices.forEach((svc) => {
+              svc.basePrice = Math.max(50, Math.round(svc.basePrice * factor));
+              updatedCount += 1;
+            });
+            this.persistKeys('smsServices');
+          } else {
+            db.boostingServices.forEach((svc) => {
+              svc.ratePer1k = Math.max(50, Math.round(svc.ratePer1k * factor));
+              updatedCount += 1;
+            });
+            this.persistKeys('boostingServices');
+          }
+          this.logAudit(
+            currentUser.email,
+            'BULK_PRICE_ADJUST',
+            target,
+            `Adjusted ${updatedCount} ${target} prices by ${percent > 0 ? `+${percent}` : percent}%`,
+          );
+          this.persistKeys('auditLogs');
+          return okJson({ ok: true, target, percent, updatedCount });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/bulk-restock') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'catalog', 'sms_numbers', 'overview');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const target = String(body.target || 'marketplace');
+          const mode = body.mode === 'floor' ? 'floor' : 'add';
+          const amount = Math.round(Number(body.amount || 0));
+          if (!['marketplace', 'sms'].includes(target)) {
+            return errJson('Invalid restock target', 400);
+          }
+          if (!Number.isFinite(amount) || amount < 1 || amount > 100_000) {
+            return errJson('Restock quantity must be between 1 and 100,000', 400);
+          }
+          let updatedCount = 0;
+          if (target === 'marketplace') {
+            db.marketplaceListings.forEach((item) => {
+              item.stock = mode === 'floor' ? Math.max(item.stock, amount) : item.stock + amount;
+              updatedCount += 1;
+            });
+            this.persistKeys('marketplaceListings');
+          } else {
+            db.smsServices.forEach((svc) => {
+              svc.stock = mode === 'floor' ? Math.max(svc.stock, amount) : svc.stock + amount;
+              updatedCount += 1;
+            });
+            this.persistKeys('smsServices');
+          }
+          this.logAudit(
+            currentUser.email,
+            'BULK_RESTOCK',
+            target,
+            `${mode === 'floor' ? 'Minimum stock floor' : 'Added'} ${amount} across ${updatedCount} items`,
+          );
+          this.persistKeys('auditLogs');
+          return okJson({ ok: true, target, mode, amount, updatedCount });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/toggle-popular') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'catalog', 'overview');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const popular =
+            typeof body.mode === 'string'
+              ? body.mode === 'apply'
+              : Boolean(body.popular);
+          const category = String(body.category || '').trim();
+          const customPopularTag = String(body.popularTag || '').trim().slice(0, 48);
+          let updatedCount = 0;
+          db.marketplaceListings.forEach((item) => {
+            if (!category || category === 'All' || item.category === category) {
+              if (popular) {
+                item.popularTag = customPopularTag || item.popularTag?.trim() || item.category || 'Popular';
+              } else {
+                item.popularTag = '';
+              }
+              updatedCount += 1;
+            }
+          });
+          this.logAudit(
+            currentUser.email,
+            'TOGGLE_POPULAR_TAGS',
+            category || 'All Categories',
+            `${popular ? `Enabled "${customPopularTag || 'Popular'}"` : 'Cleared'} Popular tag on ${updatedCount} products`,
+          );
+          this.persistKeys('marketplaceListings', 'auditLogs');
+          return okJson({ ok: true, popular, popularTag: customPopularTag, updatedCount });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/verify-pending-users') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'users', 'overview');
+          if (scopeErr) return scopeErr;
+          let verifiedUsers = 0;
+          db.users.forEach((u) => {
+            if (u.emailVerified === false) {
+              u.emailVerified = true;
+              verifiedUsers += 1;
+            }
+          });
+          const clearedPending = (db.pendingSignups || []).length;
+          db.pendingSignups = [];
+          this.logAudit(
+            currentUser.email,
+            'VERIFY_ALL_USERS',
+            `${verifiedUsers} users`,
+            `Verified ${verifiedUsers} accounts and cleared ${clearedPending} stale signup OTPs`,
+          );
+          this.persistKeys('users', 'pendingSignups', 'auditLogs');
+          return okJson({ ok: true, verifiedUsers, verifiedCount: verifiedUsers, clearedPending });
         }
 
         if (method === 'POST' && pathname === '/api/admin/alerts/read-all') {
@@ -3357,6 +3506,38 @@ export class SureDealStoreDO {
           if (decision === 'approve') {
             if (tx.status !== 'verified' && user) {
               user.balance += tx.amount;
+              const bonusPct = Math.max(0, Math.min(100, Number(db.settings.depositBonusPercent ?? 0)));
+              if (bonusPct > 0) {
+                const bonusAmt = Math.round((tx.amount * bonusPct) / 100);
+                if (bonusAmt > 0) {
+                  user.balance += bonusAmt;
+                  const bTxId = makeId('tx');
+                  db.transactions.unshift({
+                    id: bTxId,
+                    userId: user.id,
+                    userName: user.name,
+                    userEmail: user.email,
+                    type: 'admin_credit',
+                    amount: bonusAmt,
+                    status: 'completed',
+                    description: `${bonusPct}% Deposit Promo Bonus`,
+                    createdAt: now,
+                  });
+                  this.recordAccountingEntry({
+                    kind: 'transaction',
+                    sourceId: bTxId,
+                    category: 'admin_credit',
+                    userId: user.id,
+                    userName: user.name,
+                    userEmail: user.email,
+                    title: 'DEPOSIT PROMO BONUS',
+                    detail: `${bonusPct}% bonus on verified deposit`,
+                    amount: bonusAmt,
+                    status: 'completed',
+                    createdAt: now,
+                  });
+                }
+              }
               this.creditReferrerOnFirstVerifiedDeposit(user, now);
             }
             tx.status = 'verified';
@@ -3411,7 +3592,7 @@ export class SureDealStoreDO {
         }
 
         if (method === 'POST' && pathname === '/api/admin/transactions/bulk-approve-matched') {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'orders', 'live', 'overview', 'power_suite');
           if (scopeErr) return scopeErr;
           const matched = db.transactions.filter(
             (t) =>
@@ -3423,10 +3604,17 @@ export class SureDealStoreDO {
           );
           let totalCredited = 0;
           const now = new Date().toISOString();
+          const bonusPct = Math.max(0, Math.min(100, Number(db.settings.depositBonusPercent ?? 0)));
           for (const tx of matched) {
             const targetUser = db.users.find((u) => u.id === tx.userId);
             if (targetUser) {
               targetUser.balance += tx.amount;
+              if (bonusPct > 0) {
+                const bonusAmt = Math.round((tx.amount * bonusPct) / 100);
+                if (bonusAmt > 0) {
+                  targetUser.balance += bonusAmt;
+                }
+              }
               this.creditReferrerOnFirstVerifiedDeposit(targetUser, now);
               db.notifications.unshift({
                 id: makeId('ntf'),
@@ -4924,7 +5112,7 @@ export class SureDealStoreDO {
 
         // --- SETTINGS ---
         if (method === 'PATCH' && pathname === '/api/admin/settings') {
-          const scopeErr = this.requireAdminScope(currentUser, request, 'settings', 'cms', 'copy', 'revenue', 'catalog');
+          const scopeErr = this.requireAdminScope(currentUser, request, 'settings', 'cms', 'copy', 'revenue', 'catalog', 'sms_numbers', 'support', 'power_suite');
           if (scopeErr) return scopeErr;
           const s: PlatformSettings = db.settings;
           const body = await readJsonBody(request);
@@ -5083,6 +5271,30 @@ export class SureDealStoreDO {
                 'communityChannelSubtitle',
                 'communityChannelUrl',
                 'communityChannelCta',
+              ]),
+              power_suite: new Set([
+                'minimumDeposit',
+                'maxDepositAmount',
+                'depositBonusPercent',
+                'smsOrderExpiryMinutes',
+                'referralBonusAmount',
+                'welcomePromoAmount',
+                'blockedEmailDomains',
+                'supportCannedReplies',
+                'showPopularBadges',
+                'leaderboardVisible',
+                'maintenanceMode',
+                'pauseMarketplace',
+                'pauseSmsRentals',
+                'pauseBoosting',
+                'autoVerifySignup',
+                'allowRegistrations',
+                'requireLoginForCatalog',
+                'showSocialProofToast',
+                'showPromoPopups',
+                'requireApprovalForLargeDeposits',
+                'largeDepositThreshold',
+                'enforceUniqueEmail',
               ]),
             };
             const allowedKeys = tabWhitelists[currentUser.allowedAdminTab];
@@ -5297,6 +5509,33 @@ export class SureDealStoreDO {
           }
           if (typeof body.minimumDeposit === 'number' && Number.isFinite(body.minimumDeposit)) {
             s.minimumDeposit = Math.max(0, body.minimumDeposit);
+          }
+          if (typeof body.maxDepositAmount === 'number' && Number.isFinite(body.maxDepositAmount)) {
+            s.maxDepositAmount = Math.max(0, Math.round(body.maxDepositAmount));
+          }
+          if (typeof body.depositBonusPercent === 'number' && Number.isFinite(body.depositBonusPercent)) {
+            s.depositBonusPercent = Math.max(0, Math.min(100, Math.round(body.depositBonusPercent)));
+          }
+          if (typeof body.smsOrderExpiryMinutes === 'number' && Number.isFinite(body.smsOrderExpiryMinutes)) {
+            s.smsOrderExpiryMinutes = Math.max(5, Math.min(120, Math.round(body.smsOrderExpiryMinutes)));
+          }
+          if (typeof body.showPopularBadges === 'boolean') {
+            s.showPopularBadges = body.showPopularBadges;
+          }
+          if (typeof body.leaderboardVisible === 'boolean') {
+            s.leaderboardVisible = body.leaderboardVisible;
+          }
+          if (Array.isArray(body.supportCannedReplies)) {
+            s.supportCannedReplies = body.supportCannedReplies
+              .slice(0, 15)
+              .map((r: unknown) => String(r || '').trim())
+              .filter(Boolean);
+          }
+          if (Array.isArray(body.blockedEmailDomains)) {
+            s.blockedEmailDomains = body.blockedEmailDomains
+              .slice(0, 100)
+              .map((d: unknown) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
+              .filter(Boolean);
           }
           if (
             typeof body.referralBonusAmount === 'number' &&

@@ -123,8 +123,33 @@ export function ReferralPanel() {
           <button
             type="button"
             onClick={async () => {
+              const site = catalog?.settings?.siteName || 'SureDeal Store';
+              const inviteText = `Join ${site} for instant virtual SMS numbers, social growth boosting & verified digital accounts: ${shareUrl}`;
+              if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+                try {
+                  await navigator.share({
+                    title: site,
+                    text: `Join ${site} — Virtual SMS Numbers, Social Boosting & Digital Vault`,
+                    url: shareUrl,
+                  });
+                  return;
+                } catch (err) {
+                  if (err instanceof Error && err.name === 'AbortError') return;
+                }
+              }
+              await copyText(inviteText);
+              notify(`${site} invite link & message copied!`, 'success');
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl shadow-xs cursor-pointer"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Share Link
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
               await copyText(shareUrl);
-              notify('Referral link copied!', 'success');
+              notify(`${catalog?.settings?.siteName || 'SureDeal Store'} link copied!`, 'success');
             }}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold bg-white text-blue-700 hover:bg-blue-50 rounded-xl shadow-xs cursor-pointer"
           >

@@ -480,12 +480,12 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
         {/* Main Content Viewport */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Header matching attached brand/profile screenshot */}
-          <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3.5 sm:px-6 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
+          <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setMobileOpen(true)}
-                className="lg:hidden w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-900/70 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 cursor-pointer"
+                className="lg:hidden w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-900/70 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 cursor-pointer"
                 aria-label="Open menu"
               >
                 <Menu className="w-5 h-5" />
@@ -494,7 +494,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               <button
                 type="button"
                 onClick={() => selectTab('overview')}
-                className="flex items-center gap-2.5 min-w-0 text-left cursor-pointer"
+                className="flex items-center gap-2 sm:gap-2.5 min-w-0 text-left cursor-pointer"
               >
                 <BrandLogo
                   logoUrl={settings?.siteLogoUrl}
@@ -504,22 +504,22 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                   className="lg:hidden shrink-0"
                 />
                 <div className="min-w-0">
-                  <p className="font-display text-sm sm:text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight truncate">
+                  <p className="font-display text-[15px] sm:text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight truncate">
                     <BrandNameText settings={settings} />
                   </p>
-                  <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+                  <p className="hidden sm:block text-[11px] text-slate-500 dark:text-slate-400 leading-tight truncate">
                     {siteTagline}
                   </p>
                 </div>
               </button>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               {/* Notification Bell with red dot */}
               <button
                 type="button"
                 onClick={() => selectTab('notifications')}
-                className="relative w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
+                className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
                 aria-label="Notifications"
               >
                 <Bell className="w-4 h-4" />
@@ -531,7 +531,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               <button
                 type="button"
                 onClick={toggleTheme}
-                className="w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center justify-center cursor-pointer"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center justify-center cursor-pointer"
                 aria-label="Toggle theme"
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -541,7 +541,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               <button
                 type="button"
                 onClick={() => setProfileDrawerOpen(true)}
-                className="inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                className="inline-flex items-center gap-1 sm:gap-1.5 pl-1 pr-2 sm:pr-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
                 aria-label="Open My Profile drawer"
               >
                 <UserAvatar
@@ -554,7 +554,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
             </div>
           </header>
 
-          <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-5">
+          <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-24 sm:pb-10 max-w-7xl w-full mx-auto space-y-5">
             {activeTab === 'overview' && <PinnedMarquee />}
             {activeTab === 'overview' && <OverviewPanel onNavigate={selectTab} />}
             {activeTab === 'orders' && <OrdersPanel onNavigate={selectTab} />}

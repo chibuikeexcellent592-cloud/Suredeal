@@ -61,7 +61,22 @@ function AppRouter() {
   useEffect(() => {
     const name = catalog?.settings?.siteName || 'SureDeal Store';
     const tag = catalog?.settings?.siteTagline || 'Digital solutions for every market';
-    document.title = `${name} — ${tag}`;
+    const fullTitle = `${name} — ${tag}`;
+    const desc = `${name}: Instant virtual SMS verification numbers, automated social media boosting campaigns, and a verified digital asset marketplace.`;
+    document.title = fullTitle;
+
+    const setMeta = (selector: string, content: string) => {
+      const el = document.querySelector(selector);
+      if (el) el.setAttribute('content', content);
+    };
+    setMeta('meta[name="application-name"]', name);
+    setMeta('meta[name="apple-mobile-web-app-title"]', name);
+    setMeta('meta[property="og:site_name"]', name);
+    setMeta('meta[property="og:title"]', fullTitle);
+    setMeta('meta[property="og:description"]', desc);
+    setMeta('meta[name="twitter:title"]', fullTitle);
+    setMeta('meta[name="twitter:description"]', desc);
+    setMeta('meta[name="description"]', desc);
   }, [catalog?.settings?.siteName, catalog?.settings?.siteTagline]);
 
   useEffect(() => {

@@ -23,6 +23,7 @@ export interface LandingWorkflowStep {
 
 export type AdminFeatureTab =
   | 'overview'
+  | 'power_suite'
   | 'revenue'
   | 'live'
   | 'users'
@@ -129,6 +130,13 @@ export interface PlatformSettings {
   adminWebhookUrl: string;
   autoApproveDeposits: boolean;
   minimumDeposit: number;
+  maxDepositAmount?: number;
+  depositBonusPercent?: number;
+  smsOrderExpiryMinutes?: number;
+  showPopularBadges?: boolean;
+  leaderboardVisible?: boolean;
+  supportCannedReplies?: string[];
+  blockedEmailDomains?: string[];
   referralBonusAmount: number;
   welcomePromoEnabled: boolean;
   welcomePromoAmount: number;

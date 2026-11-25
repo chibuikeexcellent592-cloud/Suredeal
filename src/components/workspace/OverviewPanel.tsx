@@ -291,7 +291,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
                 </div>
                 {banner.title && (
                   <div className="px-4 py-2.5 flex items-center justify-between gap-2 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
-                    <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                    <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white line-clamp-2 sm:line-clamp-1 leading-snug">
                       {banner.title}
                     </p>
                     {safeUrl && (
@@ -322,29 +322,36 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
         </div>
       )}
 
-      {/* 4 Long Panoramic Horizontal KPI Bars */}
+      {/* 4 Long Panoramic Horizontal KPI Bars — organized 2-row stack on mobile, full horizontal bar on sm+ */}
       <div className="grid grid-cols-1 gap-3.5">
         {horizontalKpis.map((item) => {
           const Icon = item.icon;
           return (
             <div
               key={item.label}
-              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-5 sm:px-8 py-5 min-h-[94px] flex items-center justify-between gap-5 sm:gap-8 shadow-2xs hover:border-blue-300 dark:hover:border-blue-800 transition-colors"
+              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 sm:px-8 py-4 sm:py-5 sm:min-h-[94px] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3.5 sm:gap-8 shadow-2xs hover:border-blue-300 dark:hover:border-blue-800 transition-colors"
             >
-              <div className="flex items-center gap-4 min-w-0 flex-1">
-                <span
-                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${item.iconClass}`}
-                >
-                  <Icon className="w-5 h-5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm sm:text-[15px] font-bold text-slate-900 dark:text-white truncate">
-                    {item.label}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                    {item.subtitle}
-                  </p>
+              <div className="flex items-start sm:items-center justify-between gap-3 min-w-0 flex-1">
+                <div className="flex items-start sm:items-center gap-3.5 sm:gap-4 min-w-0 flex-1">
+                  <span
+                    className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center shrink-0 ${item.iconClass}`}
+                  >
+                    <Icon className="w-5 h-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm sm:text-[15px] font-bold text-slate-900 dark:text-white leading-snug">
+                      {item.label}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5 line-clamp-2 sm:line-clamp-1">
+                      {item.subtitle}
+                    </p>
+                  </div>
                 </div>
+
+                {/* Mobile numeric KPI badge on top right */}
+                <p className="sm:hidden font-mono text-base font-extrabold text-slate-900 dark:text-white leading-tight tabular-nums shrink-0 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+                  {item.value}
+                </p>
               </div>
 
               <div className="hidden lg:flex items-center flex-1 max-w-xs px-4">
@@ -353,14 +360,14 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 sm:gap-6 shrink-0">
-                <p className="font-mono text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white leading-tight tabular-nums min-w-[3.5ch] text-right">
+              <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800/80">
+                <p className="hidden sm:block font-mono text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white leading-tight tabular-nums min-w-[3.5ch] text-right">
                   {item.value}
                 </p>
                 <button
                   type="button"
                   onClick={() => onNavigate(item.tab)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-xs font-bold text-blue-700 dark:text-blue-300 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-xs font-bold text-blue-700 dark:text-blue-300 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
                 >
                   <span>{item.cta}</span>
                   <ArrowRight className="w-3.5 h-3.5" />

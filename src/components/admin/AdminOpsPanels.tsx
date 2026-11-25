@@ -29,6 +29,7 @@ import {
   Users,
   Volume2,
   VolumeX,
+  X,
   XCircle,
 } from 'lucide-react';
 import { apiFetch, formatNaira } from '../../lib/api';
@@ -53,6 +54,10 @@ const FEATURE_META: Record<
   overview: {
     label: 'Overview Console',
     description: 'High-level platform snapshot & alerts',
+  },
+  power_suite: {
+    label: 'Power Suite (100+ Tools)',
+    description: 'Searchable control center, bulk price/stock & platform guardrails',
   },
   revenue: {
     label: 'Revenue & Profit',
@@ -1391,15 +1396,25 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
             ))}
           </div>
 
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="w-full sm:w-64 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+            <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search live events, email, phone..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                aria-label="Clear live events search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 

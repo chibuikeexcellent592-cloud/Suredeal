@@ -120,6 +120,17 @@ export function createInitialDatabaseState(
       adminWebhookUrl: '',
       autoApproveDeposits: false,
       minimumDeposit: 500,
+      maxDepositAmount: 5000000,
+      depositBonusPercent: 0,
+      smsOrderExpiryMinutes: 15,
+      showPopularBadges: true,
+      leaderboardVisible: true,
+      supportCannedReplies: [
+        'We have reviewed your request and updated your account. Please refresh and verify.',
+        'Your Moniepoint deposit receipt has been verified and credited to your wallet.',
+        'Please share your Order ID and screenshot so our team can assist right away.',
+      ],
+      blockedEmailDomains: [],
       referralBonusAmount: 500,
       welcomePromoEnabled: false,
       welcomePromoAmount: 500,
@@ -642,7 +653,7 @@ export function mergeParsedDatabaseState(
       }
     }
   }
-  if (!parsed.settings?.brandMigratedV3) {
+  if (!parsed.settings?.brandMigratedV3 || mergedSettings.siteName === 'Ultimate Tech App') {
     if (!mergedSettings.siteName || mergedSettings.siteName === 'Ultimate Tech App') {
       mergedSettings.siteName = 'SureDeal Store';
     }
@@ -659,12 +670,26 @@ export function mergeParsedDatabaseState(
     mergedSettings.brandMigratedV3 = true;
   }
 
+  const scrubBrand = (val: unknown): string =>
+    typeof val === 'string' ? val.replace(/Ultimate Tech App/gi, 'SureDeal Store') : '';
+
   const users = parsed.users ?? defaults.users;
   const userById = new Map(users.map((u) => [u.id, u]));
   const transactions = parsed.transactions ?? defaults.transactions;
   const smsOrders = parsed.smsOrders ?? defaults.smsOrders;
   const boostingOrders = parsed.boostingOrders ?? defaults.boostingOrders;
   const vaultItems = parsed.vaultItems ?? defaults.vaultItems;
+  const migratedNotifications = (parsed.notifications ?? defaults.notifications).map((n) => ({
+    ...n,
+    title: scrubBrand(n.title),
+    message: scrubBrand(n.message),
+  }));
+  const migratedTutorials = (parsed.tutorials ?? defaults.tutorials).map((t) => ({
+    ...t,
+    title: scrubBrand(t.title),
+    summary: scrubBrand(t.summary),
+    content: scrubBrand(t.content),
+  }));
 
   // Backfill immutable accounting archive once if upgrading from a store without accountingRecords
   let accountingRecords = Array.isArray(parsed.accountingRecords) ? parsed.accountingRecords : [];
@@ -748,6 +773,8 @@ export function mergeParsedDatabaseState(
     ...defaults,
     ...parsed,
     settings: mergedSettings,
+    notifications: migratedNotifications,
+    tutorials: migratedTutorials,
     accountingRecords,
     visitorStats: parsed.visitorStats ?? defaults.visitorStats,
     marketplaceListings: (parsed.marketplaceListings ?? defaults.marketplaceListings).map((l) => ({

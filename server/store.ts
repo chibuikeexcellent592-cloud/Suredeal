@@ -14,7 +14,9 @@ import {
 
 export type { DatabaseState, PendingSignupVerification, StoredUser };
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = process.env.SUREDEAL_DATA_DIR
+  ? path.resolve(process.env.SUREDEAL_DATA_DIR)
+  : path.resolve(process.cwd(), 'data');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_PATH = path.join(DATA_DIR, 'suredeal-store.json');
 const BACKUP_DB_PATH = path.join(DATA_DIR, 'suredeal-store.backup.json');

@@ -38,10 +38,12 @@ interface MarketplacePanelProps {
 function ProductCoverBanner({
   title,
   imageUrl,
+  popularTag,
   variant = 'card',
 }: {
   title: string;
   imageUrl?: string;
+  popularTag?: string;
   variant?: 'card' | 'modal';
 }) {
   return (
@@ -57,6 +59,11 @@ function ProductCoverBanner({
         className="w-full h-full object-cover object-center block"
       />
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/15 via-transparent to-transparent pointer-events-none" />
+      {popularTag && (
+        <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-extrabold uppercase tracking-wide shadow-sm">
+          {popularTag}
+        </span>
+      )}
     </div>
   );
 }
@@ -391,15 +398,25 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
                 <LayoutGrid className="w-4 h-4" />
               </button>
 
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              <div className="flex-1 min-w-0 flex items-center gap-2.5 px-3.5 py-2.5 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-950 text-slate-900 dark:text-white focus-within:ring-2 focus-within:ring-blue-600 focus-within:border-blue-500">
+                <Search className="w-4 h-4 text-slate-400 shrink-0" />
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search for products or categories..."
-                  className="w-full pl-11 pr-4 py-2.5 text-sm rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  className="flex-1 min-w-0 bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                 />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="p-0.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                    aria-label="Clear product search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
               <button
@@ -534,6 +551,11 @@ export function MarketplacePanel({ onOpenOrders }: MarketplacePanelProps) {
                         <ProductCoverBanner
                           title={item.title}
                           imageUrl={item.imageUrl}
+                          popularTag={
+                            catalog?.settings?.showPopularBadges !== false
+                              ? item.popularTag
+                              : undefined
+                          }
                         />
 
                         <div className="p-3.5 sm:p-4 flex-1 flex flex-col justify-between gap-3">

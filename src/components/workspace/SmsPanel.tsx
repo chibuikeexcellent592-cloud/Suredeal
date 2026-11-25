@@ -11,6 +11,7 @@ import {
   Smartphone,
   Tag,
   Wallet,
+  X,
   XCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -362,15 +363,25 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 Service
               </label>
               {services.length > 6 && (
-                <div className="relative w-40">
-                  <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <div className="w-44 flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus-within:ring-2 focus-within:ring-violet-500">
+                  <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <input
                     type="text"
                     value={serviceSearch}
                     onChange={(e) => setServiceSearch(e.target.value)}
                     placeholder="Filter app..."
-                    className="w-full pl-7 pr-2 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none"
+                    className="flex-1 min-w-0 bg-transparent text-[11px] text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                   />
+                  {serviceSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setServiceSearch('')}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                      aria-label="Clear service filter"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -6,6 +6,15 @@
     "siteNameColorMode": "split",
     "siteNameColor1": "#0F172A",
     "siteNameColor2": "#2563EB",
+    "siteNameSplitRule": "words",
+    "siteNameThemeTarget": "first",
+    "siteNameAutoTheme": true,
+    "seasonalTheme": "none",
+    "seasonalBannerEnabled": true,
+    "seasonalHeadline": "",
+    "seasonalEffectsEnabled": true,
+    "seasonalCustomEmoji": "✨",
+    "seasonalCustomColor": "#2563EB",
     "mainAdminEmail": "chibuikeexcellent592@gmail.com",
     "currencyCode": "NGN",
     "currencySymbol": "₦",
@@ -28,6 +37,18 @@
     "supportGroupUrl": "https://wa.me/2347031537390",
     "supportDeskNote": "Reach our support team anytime on WhatsApp, Telegram, or join our official group below.",
     "supportAllowTickets": true,
+    "supportDeskLayout": "grid_3",
+    "supportCardStyle": "tinted",
+    "supportHeroBannerEnabled": true,
+    "supportHeroBadge": "24/7 Priority Helpdesk",
+    "supportHeroTitle": "Direct Support & Official Community",
+    "supportResponseTimeLabel": "Typical reply: Under 5 mins",
+    "supportHoursLabel": "Mon – Sun · 24/7 Live Desk",
+    "supportWhatsappLabel": "WhatsApp Support",
+    "supportWhatsappButtonText": "Chat on WhatsApp",
+    "supportTelegramLabel": "Telegram Support",
+    "supportTelegramButtonText": "Open Telegram",
+    "supportGroupButtonText": "Join Official Group",
     "showFloatingWhatsapp": true,
     "communityChannelEnabled": true,
     "communityChannelPlatform": "whatsapp",
@@ -51,6 +72,7 @@
     "dashboardBanners": [],
     "smsPrimeLabel": "Prime",
     "smsAlternateLabel": "Alternate",
+    "smsAlternateMode": "discount",
     "smsAlternateDiscountPct": 15,
     "profitCostPercentMarketplace": 45,
     "profitCostPercentSms": 55,
@@ -69,6 +91,19 @@
     "adminWebhookUrl": "",
     "autoApproveDeposits": false,
     "minimumDeposit": 500,
+    "maxDepositAmount": 2500000,
+    "depositBonusPercent": 5,
+    "smsOrderExpiryMinutes": 15,
+    "showPopularBadges": true,
+    "leaderboardVisible": true,
+    "supportCannedReplies": [
+      "We have reviewed your request and updated your account. Please refresh and verify.",
+      "Your Moniepoint deposit receipt has been verified and credited to your wallet.",
+      "Please share your Order ID and screenshot so our team can assist right away."
+    ],
+    "blockedEmailDomains": [
+      "spamblock.test"
+    ],
     "referralBonusAmount": 500,
     "welcomePromoEnabled": false,
     "welcomePromoAmount": 500,
@@ -183,7 +218,8 @@
       "referralCode": "SUREADMIN",
       "createdAt": "2026-11-21T08:46:22.536Z",
       "isMainAdmin": true,
-      "emailVerified": true
+      "emailVerified": true,
+      "lastLoginAt": "2026-11-24T23:40:48.044Z"
     }
   ],
   "pendingSignups": [],
@@ -455,7 +491,7 @@
       "id": "mkt_cliproxy_30",
       "title": "30IPS CLIPROXY",
       "category": "Proxies",
-      "popularTag": "Proxy",
+      "popularTag": "HotDeal",
       "shortSpec": "30 Clean Residential IPs · High Speed SOCKS5/HTTP",
       "description": "30 dedicated clean residential proxy IPs from CLiproxy with full country targeting and instant vault key delivery.",
       "buyWarning": "Important: Redeem your CLiproxy key on dashboard.cliproxy.io immediately. Keys are single-use and non-refundable once revealed in your Vault.",
@@ -465,8 +501,8 @@
         "Instant API & Vault activation key",
         "99.9% route uptime"
       ],
-      "price": 14500,
-      "stock": 35,
+      "price": 18464,
+      "stock": 46,
       "deliveryType": "Automated Key",
       "imageUrl": "/src/assets/images/marketplace_proxies_security_1794869407993.jpg",
       "logoUrl": "",
@@ -480,7 +516,7 @@
       "id": "mkt_9proxy_5",
       "title": "5IPS 9PROXY",
       "category": "Proxies",
-      "popularTag": "Proxy",
+      "popularTag": "HotDeal",
       "shortSpec": "5 Clean Residential IPs · Lifetime Non-Expiring Credits",
       "description": "5 residential proxy IPs via 9Proxy desktop & mobile client. Ideal for social account management and ad verification.",
       "buyWarning": "Warning: Do not share your 9Proxy redeem code. Once opened in your Orders/Vault, replacement is only covered for invalid codes.",
@@ -490,8 +526,8 @@
         "Windows, macOS & Linux app compatible",
         "Instant Vault key"
       ],
-      "price": 2800,
-      "stock": 60,
+      "price": 3566,
+      "stock": 71,
       "deliveryType": "Automated Key",
       "imageUrl": "/src/assets/images/marketplace_proxies_security_1794869407993.jpg",
       "logoUrl": "",
@@ -505,7 +541,7 @@
       "id": "mkt_9proxy_10",
       "title": "10IPS 9PROXY",
       "category": "Proxies",
-      "popularTag": "Proxy",
+      "popularTag": "HotDeal",
       "shortSpec": "10 Clean Residential IPs · Multi-Region Targeting",
       "description": "10 clean residential IPs on 9Proxy network with city and ISP level selection.",
       "buyWarning": "Notice: Redeem directly inside the official 9Proxy desktop/mobile client. Verify proxy compatibility before checkout.",
@@ -515,8 +551,8 @@
         "Zero expiry until used",
         "Instant Vault delivery"
       ],
-      "price": 5400,
-      "stock": 44,
+      "price": 6876,
+      "stock": 55,
       "deliveryType": "Automated Key",
       "imageUrl": "/src/assets/images/marketplace_proxies_security_1794869407993.jpg",
       "logoUrl": "",
@@ -530,7 +566,7 @@
       "id": "mkt_9proxy_25",
       "title": "25IPS 9PROXY",
       "category": "Proxies",
-      "popularTag": "Proxy",
+      "popularTag": "HotDeal",
       "shortSpec": "25 Clean Residential IPs · Agency Bundle",
       "description": "25 high-trust residential proxy IPs engineered for agencies running multiple social accounts safely.",
       "buyWarning": "Agency Notice: Keep your 25IP key confidential. All sales are final upon instant credential generation.",
@@ -540,8 +576,8 @@
         "Instant Vault activation code",
         "Priority replacement warranty"
       ],
-      "price": 12200,
-      "stock": 28,
+      "price": 15536,
+      "stock": 39,
       "deliveryType": "Automated Key",
       "imageUrl": "/src/assets/images/marketplace_proxies_security_1794869407993.jpg",
       "logoUrl": "",
@@ -555,7 +591,7 @@
       "id": "mkt_piavpn_pro",
       "title": "PIAVPN Dedicated 1-Year License",
       "category": "VPNs",
-      "popularTag": "VPN",
+      "popularTag": "HotDeal",
       "shortSpec": "Unlimited Bandwidth · 84 Countries · 10 Devices",
       "description": "Private Internet Access (PIAVPN) verified annual credentials with WireGuard encryption and strict no-logs policy.",
       "buyWarning": "Important: Do not change the master billing email on shared VPN licenses. Log in on up to 2 personal devices.",
@@ -565,8 +601,8 @@
         "Dedicated kill switch & MACE ad-blocker",
         "Instant Vault credential delivery"
       ],
-      "price": 3500,
-      "stock": 40,
+      "price": 4457,
+      "stock": 51,
       "deliveryType": "Automated Key",
       "imageUrl": "/src/assets/images/marketplace_digital_vault_1794869408342.jpg",
       "logoUrl": "",
@@ -580,7 +616,7 @@
       "id": "mkt_creator_aged",
       "title": "Verified Aged Creator Social Bundle",
       "category": "Creator Accounts",
-      "popularTag": "Facebook",
+      "popularTag": "HotDeal",
       "shortSpec": "2021 Aged Profile · 2FA Backup Codes · Email Access Included",
       "description": "Clean aged creator social profile paired with original recovery email credentials and 2FA backup keys.",
       "buyWarning": "Security Warning: Always log in using a clean residential proxy matching the account region and update the recovery password within 30 minutes.",
@@ -590,8 +626,8 @@
         "2FA recovery secret included",
         "Instant Vault delivery"
       ],
-      "price": 16000,
-      "stock": 15,
+      "price": 20374,
+      "stock": 26,
       "deliveryType": "Vault Credentials",
       "imageUrl": "/src/assets/images/card_social_growth_studio_1794880847533.jpg",
       "logoUrl": "",
@@ -607,13 +643,27 @@
   "transactions": [],
   "accountingRecords": [],
   "visitorStats": {
-    "totalVisits": 0,
-    "recentSessions": []
+    "totalVisits": 2,
+    "recentSessions": [
+      {
+        "visitorId": "vis_1795562456152_2w17ir",
+        "path": "/",
+        "device": "Mobile Browser",
+        "visitedAt": "2026-11-24T23:34:14.046Z"
+      },
+      {
+        "visitorId": "vis_1795562456152_2w17ir",
+        "path": "/",
+        "device": "Mobile Browser",
+        "visitedAt": "2026-11-24T23:29:12.673Z"
+      }
+    ],
+    "lastVisitAt": "2026-11-24T23:34:14.046Z"
   },
   "notifications": [
     {
       "id": "ntf_welcome",
-      "title": "Welcome to Ultimate Tech App",
+      "title": "Welcome to SureDeal Store",
       "message": "Fund your wallet via Moniepoint (7031537390 · UCHECHI BLESSING OJI) and upload your receipt for rapid verification.",
       "type": "info",
       "targetUserId": "all",
@@ -629,7 +679,7 @@
       "category": "Wallet & Funding",
       "duration": "2 min read",
       "summary": "Step-by-step guide to transferring Naira (₦) to Moniepoint 7031537390 and uploading your receipt for automated AI inspection.",
-      "content": "1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in Ultimate Tech App and click Submit Deposit.",
+      "content": "1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in SureDeal Store and click Submit Deposit.",
       "videoUrl": "",
       "createdAt": "2026-11-21T08:46:22.536Z"
     },
@@ -645,7 +695,24 @@
     }
   ],
   "tickets": [],
-  "adminAlerts": [],
+  "adminAlerts": [
+    {
+      "id": "alrt_9e2dfed38dd2",
+      "title": "Website Visitor",
+      "detail": "Visitor viewed / · Mobile Browser",
+      "category": "visitor",
+      "read": false,
+      "createdAt": "2026-11-24T23:34:14.046Z"
+    },
+    {
+      "id": "alrt_405d9ffecfe2",
+      "title": "Website Visitor",
+      "detail": "Visitor viewed / · Mobile Browser",
+      "category": "visitor",
+      "read": false,
+      "createdAt": "2026-11-24T23:29:12.673Z"
+    }
+  ],
   "adminPhoneAlerts": [],
   "promoCodes": [
     {
@@ -659,5 +726,150 @@
       "createdAt": "2026-11-21T08:46:22.536Z"
     }
   ],
-  "auditLogs": []
+  "auditLogs": [
+    {
+      "id": "aud_90406dc43503",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-24T23:40:48.373Z"
+    },
+    {
+      "id": "aud_7ca252cc580e",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "VERIFY_ALL_USERS",
+      "target": "0 users",
+      "detail": "Verified 0 accounts and cleared 0 stale signup OTPs",
+      "createdAt": "2026-11-24T23:40:48.337Z"
+    },
+    {
+      "id": "aud_31c451d8f60e",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "TOGGLE_POPULAR_TAGS",
+      "target": "All Categories",
+      "detail": "Enabled \"HotDeal\" Popular tag on 6 products",
+      "createdAt": "2026-11-24T23:40:48.170Z"
+    },
+    {
+      "id": "aud_bf2c16f96563",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_RESTOCK",
+      "target": "marketplace",
+      "detail": "Added 2 across 6 items",
+      "createdAt": "2026-11-24T23:40:48.148Z"
+    },
+    {
+      "id": "aud_6543e54dae94",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_PRICE_ADJUST",
+      "target": "marketplace",
+      "detail": "Adjusted 6 marketplace prices by +5%",
+      "createdAt": "2026-11-24T23:40:48.124Z"
+    },
+    {
+      "id": "aud_64f079b76e43",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-24T23:40:35.538Z"
+    },
+    {
+      "id": "aud_835a9fc0db96",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "VERIFY_ALL_USERS",
+      "target": "0 users",
+      "detail": "Verified 0 accounts and cleared 0 stale signup OTPs",
+      "createdAt": "2026-11-24T23:40:35.471Z"
+    },
+    {
+      "id": "aud_c4f9a817a1aa",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "TOGGLE_POPULAR_TAGS",
+      "target": "All Categories",
+      "detail": "Enabled \"HotDeal\" Popular tag on 6 products",
+      "createdAt": "2026-11-24T23:40:35.351Z"
+    },
+    {
+      "id": "aud_923f7beff8f2",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_RESTOCK",
+      "target": "marketplace",
+      "detail": "Added 2 across 6 items",
+      "createdAt": "2026-11-24T23:40:35.327Z"
+    },
+    {
+      "id": "aud_d1d446becfcd",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_PRICE_ADJUST",
+      "target": "marketplace",
+      "detail": "Adjusted 6 marketplace prices by +5%",
+      "createdAt": "2026-11-24T23:40:35.299Z"
+    },
+    {
+      "id": "aud_16ec0f6dc3b3",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "TOGGLE_POPULAR_TAGS",
+      "target": "All Categories",
+      "detail": "Enabled \"HotDeal\" Popular tag on 6 products",
+      "createdAt": "2026-11-24T23:39:03.496Z"
+    },
+    {
+      "id": "aud_2320e59dd177",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_RESTOCK",
+      "target": "marketplace",
+      "detail": "Added 2 across 6 items",
+      "createdAt": "2026-11-24T23:39:03.476Z"
+    },
+    {
+      "id": "aud_a384892cf483",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_PRICE_ADJUST",
+      "target": "marketplace",
+      "detail": "Adjusted 6 marketplace prices by +5%",
+      "createdAt": "2026-11-24T23:39:03.453Z"
+    },
+    {
+      "id": "aud_ce3e90409acd",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "UPDATE_SETTINGS",
+      "target": "Overwatch Settings",
+      "detail": "Saved global configuration",
+      "createdAt": "2026-11-24T23:36:13.389Z"
+    },
+    {
+      "id": "aud_5d1adfeef516",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "VERIFY_ALL_USERS",
+      "target": "0 users",
+      "detail": "Verified 0 accounts and cleared 0 stale signup OTPs",
+      "createdAt": "2026-11-24T23:36:13.363Z"
+    },
+    {
+      "id": "aud_c2f9c55e47c1",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "TOGGLE_POPULAR_TAGS",
+      "target": "All Categories",
+      "detail": "Cleared Popular tag on 6 products",
+      "createdAt": "2026-11-24T23:36:13.346Z"
+    },
+    {
+      "id": "aud_e33c00c335bf",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_RESTOCK",
+      "target": "marketplace",
+      "detail": "Added 5 across 6 items",
+      "createdAt": "2026-11-24T23:36:13.329Z"
+    },
+    {
+      "id": "aud_36632a434585",
+      "actorEmail": "chibuikeexcellent592@gmail.com",
+      "action": "BULK_PRICE_ADJUST",
+      "target": "marketplace",
+      "detail": "Adjusted 6 marketplace prices by +10%",
+      "createdAt": "2026-11-24T23:36:13.306Z"
+    }
+  ]
 }

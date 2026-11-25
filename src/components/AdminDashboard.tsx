@@ -86,6 +86,10 @@ import {
   AdminRevenueProfitPanel,
   AdminSubAdminsPanel,
 } from './admin/AdminOpsPanels';
+import {
+  AdminPowerSuitePanel,
+  type PowerQuickToggleKey,
+} from './admin/AdminPowerSuitePanel';
 import { AdminSectionCopyPanel } from './admin/AdminSectionCopyPanel';
 import { SEASONAL_PRESETS, type SeasonalThemeId } from './SeasonalEffects';
 
@@ -736,22 +740,7 @@ export function AdminDashboard({
   ];
 
   const handleToggleQuickSetting = async (
-    key:
-      | 'maintenanceMode'
-      | 'autoApproveDeposits'
-      | 'welcomePromoEnabled'
-      | 'pinnedTickerEnabled'
-      | 'allowNewSignups'
-      | 'requireEmailVerification'
-      | 'googleAuthEnabled'
-      | 'enableSmsService'
-      | 'enableBoostingService'
-      | 'enableMarketplace'
-      | 'allowPromoCodes'
-      | 'supportAllowTickets'
-      | 'showFloatingWhatsapp'
-      | 'showLandingShowcase'
-      | 'showLandingRates',
+    key: PowerQuickToggleKey,
     val: boolean,
   ) => {
     try {
@@ -957,6 +946,7 @@ export function AdminDashboard({
     badge?: number;
   }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart3, badge: data.metrics.unreadAlerts },
+    { id: 'power_suite', label: 'Power Suite (100+)', icon: Zap },
     { id: 'revenue', label: 'Revenue & Profit', icon: TrendingUp },
     { id: 'live', label: 'Live Monitor', icon: Activity },
     {
@@ -1452,6 +1442,14 @@ export function AdminDashboard({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      onClick={() => selectTab('power_suite')}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-xs font-extrabold text-slate-950 shadow-sm cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      Power Suite (100+ Tools)
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => selectTab('live')}
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white cursor-pointer"
                     >
@@ -1714,6 +1712,7 @@ export function AdminDashboard({
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-2.5">
                   {[
+                    { label: 'Power Suite (100+)', sub: 'Bulk tools & switches', tab: 'power_suite' as AdminTab, icon: Zap, tint: 'bg-amber-400/20 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800' },
                     { label: 'Revenue & Profit', sub: `${accountingRecordsList.length} ledger`, tab: 'revenue' as AdminTab, icon: TrendingUp, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
                     { label: 'Live Monitor', sub: `${visitorStats.totalVisits} visits`, tab: 'live' as AdminTab, icon: Activity, tint: 'bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900/60' },
                     { label: 'SMS Numbers', sub: `${readyPoolCount} pool · ${waitingSmsCount} wait`, tab: 'sms_numbers' as AdminTab, icon: Smartphone, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
@@ -2435,15 +2434,25 @@ export function AdminDashboard({
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="relative w-56 sm:w-64">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <div className="w-56 sm:w-64 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <input
                         type="text"
                         value={userSearch}
                         onChange={(e) => setUserSearch(e.target.value)}
                         placeholder="Search by name or email..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                       />
+                      {userSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setUserSearch('')}
+                          className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                          aria-label="Clear user search"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -3362,15 +3371,25 @@ export function AdminDashboard({
                       </button>
                     ))}
                   </div>
-                  <div className="relative w-full sm:w-64">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <div className="w-full sm:w-64 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                    <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <input
                       type="text"
                       value={boostSearch}
                       onChange={(e) => setBoostSearch(e.target.value)}
                       placeholder="Search email, link, order #..."
-                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                      className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                     />
+                    {boostSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setBoostSearch('')}
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                        aria-label="Clear boosting order search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -3563,15 +3582,25 @@ export function AdminDashboard({
                     ))}
                   </div>
 
-                  <div className="relative w-full sm:w-64">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <div className="w-full sm:w-64 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                    <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <input
                       type="text"
                       value={txSearch}
                       onChange={(e) => setTxSearch(e.target.value)}
                       placeholder="Filter by email, ID, description..."
-                      className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                      className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                     />
+                    {txSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setTxSearch('')}
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                        aria-label="Clear transaction search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -3686,15 +3715,25 @@ export function AdminDashboard({
                         </button>
                       )
                     )}
-                    <div className="relative w-full sm:w-64">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <div className="w-full sm:w-64 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <input
                         type="text"
                         value={vaultSearch}
                         onChange={(e) => setVaultSearch(e.target.value)}
                         placeholder="Search buyer, product, key..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                       />
+                      {vaultSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setVaultSearch('')}
+                          className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                          aria-label="Clear vault delivery search"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3874,15 +3913,25 @@ export function AdminDashboard({
                         Active SMS Orders ({filteredSmsOrders.length} / {data.smsOrders.length})
                       </h3>
                       <div className="flex items-center gap-2">
-                        <div className="relative w-44 sm:w-56">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <div className="w-44 sm:w-56 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                          <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <input
                             type="text"
                             value={smsSearch}
                             onChange={(e) => setSmsSearch(e.target.value)}
                             placeholder="Search email, country, #..."
-                            className="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                            className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                           />
+                          {smsSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setSmsSearch('')}
+                              className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                              aria-label="Clear SMS search"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
                         {data.smsOrders.length > 0 && (
                           <button
@@ -4495,15 +4544,25 @@ export function AdminDashboard({
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <div className="flex-1 min-w-[200px] flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                      <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <input
                         type="text"
                         value={accSearch}
                         onChange={(e) => setAccSearch(e.target.value)}
                         placeholder="Search by ID, order/tx ref, customer name, email, or item..."
-                        className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
                       />
+                      {accSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setAccSearch('')}
+                          className="text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                          aria-label="Clear accounting search"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                     <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
                       {(['all', 'order', 'transaction'] as const).map((k) => (
@@ -4766,6 +4825,24 @@ export function AdminDashboard({
                 </div>
               )}
             </div>
+          )}
+
+          {/* POWER SUITE (100+ TOOLS & AUTOMATION) */}
+          {tab === 'power_suite' && (
+            <AdminPowerSuitePanel
+              data={data}
+              symbol={symbol}
+              selectTab={selectTab}
+              loadAdmin={loadAdmin}
+              handleToggleQuickSetting={handleToggleQuickSetting}
+              handleSweepExpiredSms={handleSweepExpiredSms}
+              handleExportUsersCsv={handleExportUsersCsv}
+              handleExportAccountingCsv={handleExportAccountingCsv}
+              handleExportJsonBackup={handleExportJsonBackup}
+              handleQuickSeasonApply={handleQuickSeasonApply}
+              sweepingSms={sweepingSms}
+              matchedPendingDepositsCount={matchedPendingDepositsCount}
+            />
           )}
 
           {/* REVENUE & PROFIT */}
@@ -5590,6 +5667,11 @@ export function AdminDashboard({
                           id: 'act_refresh_ops',
                           label: 'Refresh Website Queues (Safe Preserve)',
                           run: () => void handleRefreshOpsSafe(),
+                        },
+                        {
+                          id: 'act_power_suite',
+                          label: 'Open Power Suite (100+ Controls & Bulk Tools)',
+                          run: () => selectTab('power_suite'),
                         },
                         {
                           id: 'act_sms_desk',

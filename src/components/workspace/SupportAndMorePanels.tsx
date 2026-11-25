@@ -969,13 +969,39 @@ export function SettingsPanel({
               type="text"
               readOnly
               value={shareUrl}
+              aria-label="Referral share link"
               className="flex-1 min-w-[220px] px-3.5 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300"
             />
             <button
               type="button"
               onClick={async () => {
+                const site = catalog?.settings?.siteName || 'SureDeal Store';
+                const inviteText = `Join ${site} for instant virtual SMS numbers, social growth boosting & verified digital accounts: ${shareUrl}`;
+                if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+                  try {
+                    await navigator.share({
+                      title: site,
+                      text: `Join ${site} — Virtual SMS Numbers, Social Boosting & Digital Vault`,
+                      url: shareUrl,
+                    });
+                    return;
+                  } catch (err) {
+                    if (err instanceof Error && err.name === 'AbortError') return;
+                  }
+                }
+                await copyText(inviteText);
+                notify(`${site} invite link & message copied!`, 'success');
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-lg cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              Share Link
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
                 await copyText(shareUrl);
-                notify('Referral link copied!', 'success');
+                notify(`${catalog?.settings?.siteName || 'SureDeal Store'} link copied!`, 'success');
               }}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
             >

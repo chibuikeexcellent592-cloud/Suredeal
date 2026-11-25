@@ -183,6 +183,7 @@ function reorderByIds<T extends { id: string }>(items: T[], orderedIds: string[]
 
 const DELEGATABLE_ADMIN_TABS: AdminFeatureTab[] = [
   'overview',
+  'power_suite',
   'revenue',
   'live',
   'users',
@@ -567,6 +568,14 @@ async function startServer() {
     }
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       res.status(400).json({ error: 'Please provide a valid email address' });
+      return;
+    }
+    const emailDomain = email.split('@')[1] || '';
+    const blockedDomains = (store.db.settings.blockedEmailDomains || []).map((d) =>
+      String(d || '').trim().toLowerCase(),
+    );
+    if (emailDomain && blockedDomains.includes(emailDomain)) {
+      res.status(403).json({ error: 'Registrations from this email domain are currently blocked.' });
       return;
     }
     if (password.length < 6) {
@@ -1032,6 +1041,7 @@ async function startServer() {
         ? store.db.settings.smsAlternateLabel || 'Alternate'
         : store.db.settings.smsPrimeLabel || 'Prime';
 
+    const smsExpiryMins = Math.max(5, Math.min(120, Number(store.db.settings.smsOrderExpiryMinutes ?? 15)));
     const order: (typeof store.db.smsOrders)[number] = {
       id: orderId,
       userId: user.id,
@@ -1044,7 +1054,7 @@ async function startServer() {
       price,
       status: 'waiting',
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + 15 * 60 * 1000).toISOString(),
+      expiresAt: new Date(now + smsExpiryMins * 60 * 1000).toISOString(),
     };
 
     if (poolMatch) {
@@ -1694,6 +1704,13 @@ async function startServer() {
     if (!Number.isFinite(amount) || amount < db.settings.minimumDeposit) {
       res.status(400).json({
         error: `Minimum deposit is ${db.settings.currencySymbol}${db.settings.minimumDeposit.toLocaleString()}`,
+      });
+      return;
+    }
+    const maxDep = Number(db.settings.maxDepositAmount ?? 0);
+    if (maxDep > 0 && amount > maxDep) {
+      res.status(400).json({
+        error: `Maximum deposit per transfer is ${db.settings.currencySymbol}${maxDep.toLocaleString()}`,
       });
       return;
     }
@@ -2366,7 +2383,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/admin/tools/sweep-expired-sms', requireAuth, requireAdminScope('overview', 'orders', 'live', 'sms_numbers'), (req: AuthedRequest, res) => {
+  app.post('/api/admin/tools/sweep-expired-sms', requireAuth, requireAdminScope('overview', 'power_suite', 'orders', 'live', 'sms_numbers'), (req: AuthedRequest, res) => {
     const refundedCount = expireTimedOutSmsOrders();
     if (refundedCount > 0) {
       store.logAudit(
@@ -2378,6 +2395,127 @@ async function startServer() {
       store.save();
     }
     res.json({ ok: true, refundedCount });
+  });
+
+  app.post('/api/admin/tools/bulk-price-adjust', requireAuth, requireAdminScope('power_suite', 'catalog', 'overview'), (req: AuthedRequest, res) => {
+    const target = String(req.body?.target || 'marketplace');
+    const percent = Number(req.body?.percent || 0);
+    if (!['marketplace', 'sms', 'boosting'].includes(target)) {
+      res.status(400).json({ error: 'Invalid catalog target' });
+      return;
+    }
+    if (!Number.isFinite(percent) || percent < -50 || percent > 200 || percent === 0) {
+      res.status(400).json({ error: 'Percentage must be between -50 and +200 (non-zero)' });
+      return;
+    }
+    const factor = 1 + percent / 100;
+    let updatedCount = 0;
+    if (target === 'marketplace') {
+      store.db.marketplaceListings.forEach((item) => {
+        item.price = Math.max(50, Math.round(item.price * factor));
+        updatedCount += 1;
+      });
+    } else if (target === 'sms') {
+      store.db.smsServices.forEach((svc) => {
+        svc.basePrice = Math.max(50, Math.round(svc.basePrice * factor));
+        updatedCount += 1;
+      });
+    } else if (target === 'boosting') {
+      store.db.boostingServices.forEach((svc) => {
+        svc.ratePer1k = Math.max(50, Math.round(svc.ratePer1k * factor));
+        updatedCount += 1;
+      });
+    }
+    store.logAudit(
+      req.currentUser!.email,
+      'BULK_PRICE_ADJUST',
+      target,
+      `Adjusted ${updatedCount} ${target} prices by ${percent > 0 ? `+${percent}` : percent}%`,
+    );
+    store.save();
+    res.json({ ok: true, target, percent, updatedCount });
+  });
+
+  app.post('/api/admin/tools/bulk-restock', requireAuth, requireAdminScope('power_suite', 'catalog', 'sms_numbers', 'overview'), (req: AuthedRequest, res) => {
+    const target = String(req.body?.target || 'marketplace');
+    const mode = req.body?.mode === 'floor' ? 'floor' : 'add';
+    const amount = Math.round(Number(req.body?.amount || 0));
+    if (!['marketplace', 'sms'].includes(target)) {
+      res.status(400).json({ error: 'Invalid restock target' });
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 1 || amount > 100_000) {
+      res.status(400).json({ error: 'Restock quantity must be between 1 and 100,000' });
+      return;
+    }
+    let updatedCount = 0;
+    if (target === 'marketplace') {
+      store.db.marketplaceListings.forEach((item) => {
+        item.stock = mode === 'floor' ? Math.max(item.stock, amount) : item.stock + amount;
+        updatedCount += 1;
+      });
+    } else {
+      store.db.smsServices.forEach((svc) => {
+        svc.stock = mode === 'floor' ? Math.max(svc.stock, amount) : svc.stock + amount;
+        updatedCount += 1;
+      });
+    }
+    store.logAudit(
+      req.currentUser!.email,
+      'BULK_RESTOCK',
+      target,
+      `${mode === 'floor' ? 'Minimum stock floor' : 'Added'} ${amount} across ${updatedCount} items`,
+    );
+    store.save();
+    res.json({ ok: true, target, mode, amount, updatedCount });
+  });
+
+  app.post('/api/admin/tools/toggle-popular', requireAuth, requireAdminScope('power_suite', 'catalog', 'overview'), (req: AuthedRequest, res) => {
+    const popular =
+      typeof req.body?.mode === 'string'
+        ? req.body.mode === 'apply'
+        : Boolean(req.body?.popular);
+    const category = String(req.body?.category || '').trim();
+    const customPopularTag = String(req.body?.popularTag || '').trim().slice(0, 48);
+    let updatedCount = 0;
+    store.db.marketplaceListings.forEach((item) => {
+      if (!category || category === 'All' || item.category === category) {
+        if (popular) {
+          item.popularTag = customPopularTag || item.popularTag?.trim() || item.category || 'Popular';
+        } else {
+          item.popularTag = '';
+        }
+        updatedCount += 1;
+      }
+    });
+    store.logAudit(
+      req.currentUser!.email,
+      'TOGGLE_POPULAR_TAGS',
+      category || 'All Categories',
+      `${popular ? `Enabled "${customPopularTag || 'Popular'}"` : 'Cleared'} Popular tag on ${updatedCount} products`,
+    );
+    store.save();
+    res.json({ ok: true, popular, popularTag: customPopularTag, updatedCount });
+  });
+
+  app.post('/api/admin/tools/verify-pending-users', requireAuth, requireAdminScope('power_suite', 'users', 'overview'), (req: AuthedRequest, res) => {
+    let verifiedUsers = 0;
+    store.db.users.forEach((u) => {
+      if (u.emailVerified === false) {
+        u.emailVerified = true;
+        verifiedUsers += 1;
+      }
+    });
+    const clearedPending = (store.db.pendingSignups || []).length;
+    store.db.pendingSignups = [];
+    store.logAudit(
+      req.currentUser!.email,
+      'VERIFY_ALL_USERS',
+      `${verifiedUsers} users`,
+      `Verified ${verifiedUsers} accounts and cleared ${clearedPending} stale signup OTPs`,
+    );
+    store.save();
+    res.json({ ok: true, verifiedUsers, verifiedCount: verifiedUsers, clearedPending });
   });
 
   app.post('/api/admin/alerts/read-all', requireAuth, requireAdmin, (_req, res) => {
@@ -2868,6 +3006,38 @@ async function startServer() {
     if (decision === 'approve') {
       if (tx.status !== 'verified' && user) {
         user.balance += tx.amount;
+        const bonusPct = Math.max(0, Math.min(100, Number(store.db.settings.depositBonusPercent ?? 0)));
+        if (bonusPct > 0) {
+          const bonusAmt = Math.round((tx.amount * bonusPct) / 100);
+          if (bonusAmt > 0) {
+            user.balance += bonusAmt;
+            const bTxId = makeId('tx');
+            store.db.transactions.unshift({
+              id: bTxId,
+              userId: user.id,
+              userName: user.name,
+              userEmail: user.email,
+              type: 'admin_credit',
+              amount: bonusAmt,
+              status: 'completed',
+              description: `${bonusPct}% Deposit Promo Bonus`,
+              createdAt: now,
+            });
+            store.recordAccountingEntry({
+              kind: 'transaction',
+              sourceId: bTxId,
+              category: 'admin_credit',
+              userId: user.id,
+              userName: user.name,
+              userEmail: user.email,
+              title: 'DEPOSIT PROMO BONUS',
+              detail: `${bonusPct}% bonus on verified deposit`,
+              amount: bonusAmt,
+              status: 'completed',
+              createdAt: now,
+            });
+          }
+        }
         creditReferrerOnFirstVerifiedDeposit(user, now);
       }
       tx.status = 'verified';
@@ -2911,7 +3081,7 @@ async function startServer() {
     res.json({ transaction: tx });
   });
 
-  app.post('/api/admin/transactions/bulk-approve-matched', requireAuth, requireAdminScope('orders', 'live', 'overview'), (req: AuthedRequest, res) => {
+  app.post('/api/admin/transactions/bulk-approve-matched', requireAuth, requireAdminScope('orders', 'live', 'overview', 'power_suite'), (req: AuthedRequest, res) => {
     const matched = store.db.transactions.filter(
       (t) =>
         !t.adminCleared &&
@@ -2922,10 +3092,17 @@ async function startServer() {
     );
     let totalCredited = 0;
     const now = new Date().toISOString();
+    const bonusPct = Math.max(0, Math.min(100, Number(store.db.settings.depositBonusPercent ?? 0)));
     for (const tx of matched) {
       const targetUser = store.db.users.find((u) => u.id === tx.userId);
       if (targetUser) {
         targetUser.balance += tx.amount;
+        if (bonusPct > 0) {
+          const bonusAmt = Math.round((tx.amount * bonusPct) / 100);
+          if (bonusAmt > 0) {
+            targetUser.balance += bonusAmt;
+          }
+        }
         creditReferrerOnFirstVerifiedDeposit(targetUser, now);
         store.db.notifications.unshift({
           id: makeId('ntf'),
@@ -4338,7 +4515,7 @@ async function startServer() {
   });
 
   // --- ADMIN PLATFORM SETTINGS (GOD-MODE GLOBAL EDITOR) ---
-  app.patch('/api/admin/settings', requireAuth, requireAdminScope('settings', 'cms', 'copy', 'revenue', 'catalog'), (req: AuthedRequest, res) => {
+  app.patch('/api/admin/settings', requireAuth, requireAdminScope('settings', 'cms', 'copy', 'revenue', 'catalog', 'sms_numbers', 'support', 'power_suite'), (req: AuthedRequest, res) => {
     const s = store.db.settings;
     const body = (req.body || {}) as Record<string, unknown>;
     const caller = req.currentUser!;
@@ -4497,6 +4674,30 @@ async function startServer() {
           'communityChannelSubtitle',
           'communityChannelUrl',
           'communityChannelCta',
+        ]),
+        power_suite: new Set([
+          'minimumDeposit',
+          'maxDepositAmount',
+          'depositBonusPercent',
+          'smsOrderExpiryMinutes',
+          'referralBonusAmount',
+          'welcomePromoAmount',
+          'blockedEmailDomains',
+          'supportCannedReplies',
+          'showPopularBadges',
+          'leaderboardVisible',
+          'maintenanceMode',
+          'pauseMarketplace',
+          'pauseSmsRentals',
+          'pauseBoosting',
+          'autoVerifySignup',
+          'allowRegistrations',
+          'requireLoginForCatalog',
+          'showSocialProofToast',
+          'showPromoPopups',
+          'requireApprovalForLargeDeposits',
+          'largeDepositThreshold',
+          'enforceUniqueEmail',
         ]),
       };
       const allowedKeys = tabWhitelists[caller.allowedAdminTab];
@@ -4706,6 +4907,33 @@ async function startServer() {
     }
     if (typeof body.minimumDeposit === 'number' && Number.isFinite(body.minimumDeposit)) {
       s.minimumDeposit = Math.max(0, body.minimumDeposit);
+    }
+    if (typeof body.maxDepositAmount === 'number' && Number.isFinite(body.maxDepositAmount)) {
+      s.maxDepositAmount = Math.max(0, Math.round(body.maxDepositAmount));
+    }
+    if (typeof body.depositBonusPercent === 'number' && Number.isFinite(body.depositBonusPercent)) {
+      s.depositBonusPercent = Math.max(0, Math.min(100, Math.round(body.depositBonusPercent)));
+    }
+    if (typeof body.smsOrderExpiryMinutes === 'number' && Number.isFinite(body.smsOrderExpiryMinutes)) {
+      s.smsOrderExpiryMinutes = Math.max(5, Math.min(120, Math.round(body.smsOrderExpiryMinutes)));
+    }
+    if (typeof body.showPopularBadges === 'boolean') {
+      s.showPopularBadges = body.showPopularBadges;
+    }
+    if (typeof body.leaderboardVisible === 'boolean') {
+      s.leaderboardVisible = body.leaderboardVisible;
+    }
+    if (Array.isArray(body.supportCannedReplies)) {
+      s.supportCannedReplies = body.supportCannedReplies
+        .slice(0, 15)
+        .map((r: unknown) => String(r || '').trim())
+        .filter(Boolean);
+    }
+    if (Array.isArray(body.blockedEmailDomains)) {
+      s.blockedEmailDomains = body.blockedEmailDomains
+        .slice(0, 100)
+        .map((d: unknown) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
+        .filter(Boolean);
     }
     if (
       typeof body.referralBonusAmount === 'number' &&
