@@ -1605,6 +1605,12 @@ export class SureDealStoreDO {
         if (order.status === 'cancelled' || order.status === 'expired') {
           return errJson('Cannot request another code on a closed or expired number', 400);
         }
+        if (order.status === 'received' || Boolean(order.otpCode)) {
+          return errJson(
+            'Code already received for this number. You cannot request another code.',
+            400,
+          );
+        }
         order.status = 'waiting';
         order.otpCode = undefined;
         order.smsText = 'Waiting for another OTP code from our team.';

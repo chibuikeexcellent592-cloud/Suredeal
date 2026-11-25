@@ -17,6 +17,7 @@ import {
   ShoppingBag,
   TrendingUp,
   Wallet,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, formatNaira } from '../../lib/api';
@@ -54,6 +55,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [hideBalance, setHideBalance] = useState(false);
+  const [selectedNotice, setSelectedNotice] = useState<NotificationItem | null>(null);
   const symbol = catalog?.settings?.currencySymbol || '₦';
   const firstName = (user?.name || 'User').trim().split(/\s+/)[0];
 
@@ -466,15 +468,25 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
             </div>
             <div className="mt-3 space-y-3">
               {(data?.notifications || []).slice(0, 3).map((n) => (
-                <div
+                <button
                   key={n.id}
-                  className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800"
+                  type="button"
+                  onClick={() => {
+                    setSelectedNotice(n);
+                    void apiFetch(`/api/notifications/${n.id}/read`, { method: 'POST' }).catch(
+                      () => {},
+                    );
+                  }}
+                  className="w-full text-left p-3 rounded-lg bg-slate-50 hover:bg-slate-100/80 dark:bg-slate-950 dark:hover:bg-slate-800/60 border border-slate-100 dark:border-slate-800 transition-colors cursor-pointer"
                 >
                   <p className="text-xs font-semibold text-slate-900 dark:text-white">{n.title}</p>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed line-clamp-2">
                     {n.message}
                   </p>
-                </div>
+                  <p className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 mt-1.5">
+                    Tap to read in full →
+                  </p>
+                </button>
               ))}
             </div>
           </div>
@@ -514,6 +526,71 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
           </div>
         </div>
       </div>
+
+      {selectedNotice && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setSelectedNotice(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wider">
+                      {selectedNotice.type || 'notice'}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      {new Date(selectedNotice.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <h2 className="font-display text-base sm:text-lg font-extrabold text-slate-900 dark:text-white mt-1 break-words">
+                    {selectedNotice.title}
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedNotice(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                aria-label="Close notice"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto">
+              <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line break-words">
+                {selectedNotice.message}
+              </p>
+            </div>
+            <div className="px-5 py-3.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-950/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedNotice(null);
+                  onNavigate('notifications');
+                }}
+                className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+              >
+                Open All Notifications
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedNotice(null)}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

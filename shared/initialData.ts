@@ -258,7 +258,7 @@ export function createInitialDatabaseState(
         successRate: 98.4,
         stock: 1840,
         active: true,
-        sampleTemplate: 'Your WhatsApp Business code: {{CODE}}. Never share this code with anyone.',
+        sampleTemplate: 'Your WhatsApp code is: {{CODE}}. Never share this code with anyone.',
       },
       {
         id: 'svc_tg',
@@ -609,7 +609,7 @@ export function createInitialDatabaseState(
         category: 'Wallet & Funding',
         duration: '2 min read',
         summary:
-          'Step-by-step guide to transferring Naira (₦) to Moniepoint 7031537390 and uploading your receipt for automated AI inspection.',
+          'Step-by-step guide to transferring Naira (₦) to Moniepoint 7031537390 and uploading your receipt for Team inspection.',
         content:
           '1. Open Wallet & Fund in your left navigation.\n2. Copy the official Moniepoint account number: 7031537390 (Account Name: UCHECHI BLESSING OJI).\n3. Complete your Naira transfer from any Nigerian bank app.\n4. Take a clear screenshot of the successful receipt showing the amount, date, and beneficiary.\n5. Upload the screenshot in SureDeal Store and click Submit Deposit.',
         videoUrl: '',
@@ -680,10 +680,29 @@ export function mergeParsedDatabaseState(
   const scrubBrand = (val: unknown): string =>
     typeof val === 'string' ? val.replace(/Ultimate Tech App/gi, 'SureDeal Store') : '';
 
+  const scrubWhatsappCodeText = (val: unknown): string =>
+    typeof val === 'string'
+      ? val.replace(/Your WhatsApp Business code(?:\s+is)?:?/gi, 'Your WhatsApp code is:')
+      : '';
+
+  if (typeof mergedSettings.walletPageSubtitle === 'string') {
+    mergedSettings.walletPageSubtitle = mergedSettings.walletPageSubtitle
+      .replace(/instant AI\s*&\s*Team verification/gi, 'instant Team verification')
+      .replace(/instant AI verification/gi, 'instant Team verification')
+      .replace(/\bAI verification\b/gi, 'Team verification');
+  }
+
   const users = parsed.users ?? defaults.users;
   const userById = new Map(users.map((u) => [u.id, u]));
   const transactions = parsed.transactions ?? defaults.transactions;
-  const smsOrders = parsed.smsOrders ?? defaults.smsOrders;
+  const smsServices = (parsed.smsServices ?? defaults.smsServices).map((svc) => ({
+    ...svc,
+    sampleTemplate: scrubWhatsappCodeText(svc.sampleTemplate),
+  }));
+  const smsOrders = (parsed.smsOrders ?? defaults.smsOrders).map((ord) => ({
+    ...ord,
+    smsText: ord.smsText ? scrubWhatsappCodeText(ord.smsText) : ord.smsText,
+  }));
   const boostingOrders = parsed.boostingOrders ?? defaults.boostingOrders;
   const vaultItems = parsed.vaultItems ?? defaults.vaultItems;
   const migratedNotifications = (parsed.notifications ?? defaults.notifications).map((n) => ({
@@ -694,8 +713,8 @@ export function mergeParsedDatabaseState(
   const migratedTutorials = (parsed.tutorials ?? defaults.tutorials).map((t) => ({
     ...t,
     title: scrubBrand(t.title),
-    summary: scrubBrand(t.summary),
-    content: scrubBrand(t.content),
+    summary: scrubBrand(t.summary).replace(/automated AI inspection/gi, 'Team inspection'),
+    content: scrubBrand(t.content).replace(/automated AI inspection/gi, 'Team inspection'),
   }));
 
   // Backfill immutable accounting archive once if upgrading from a store without accountingRecords
@@ -780,6 +799,8 @@ export function mergeParsedDatabaseState(
     ...defaults,
     ...parsed,
     settings: mergedSettings,
+    smsServices,
+    smsOrders,
     notifications: migratedNotifications,
     tutorials: migratedTutorials,
     accountingRecords,

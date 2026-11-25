@@ -6,7 +6,6 @@ import {
   Clock,
   Copy,
   RefreshCw,
-  RotateCcw,
   Search,
   Smartphone,
   Tag,
@@ -230,19 +229,6 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
     }
   };
 
-  const handleRequestAnother = async (orderId: string) => {
-    try {
-      const res = await apiFetch<{ order: SmsOrder }>(
-        `/api/sms/orders/${orderId}/request-another`,
-        { method: 'POST' },
-      );
-      setOrders((prev) => prev.map((o) => (o.id === orderId ? res.order : o)));
-      notify('Request sent! Waiting for the new OTP code.', 'info');
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to request new code', 'error');
-    }
-  };
-
   const handleCancelRefund = async (orderId: string) => {
     try {
       const res = await apiFetch<{ order: SmsOrder; balance: number }>(
@@ -311,19 +297,6 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
               }`}
             >
               <span>{alternateLabel}</span>
-              {alternatePct > 0 && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
-                    tier === 'alternate'
-                      ? 'bg-white/20 text-white'
-                      : alternateMode === 'markup'
-                        ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
-                        : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-                  }`}
-                >
-                  {alternateMode === 'markup' ? `+${alternatePct}%` : `-${alternatePct}%`}
-                </span>
-              )}
             </button>
           </div>
 
@@ -718,14 +691,9 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                               <Copy className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRequestAnother(order.id)}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 cursor-pointer"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            Request Another
-                          </button>
+                          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            One-time code delivered
+                          </span>
                         </div>
                         {order.smsText && (
                           <p className="text-xs text-slate-600 dark:text-slate-400">

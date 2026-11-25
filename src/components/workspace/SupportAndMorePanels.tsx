@@ -3,6 +3,7 @@ import {
   Bell,
   BookOpen,
   Check,
+  ChevronRight,
   Copy,
   ExternalLink,
   Eye,
@@ -16,6 +17,7 @@ import {
   Shield,
   Upload,
   Users,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, fileToDataUrl, formatNaira } from '../../lib/api';
@@ -27,6 +29,7 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
   const { user, catalog, notify } = useApp();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedNotification, setSelectedNotification] = useState<NotificationItem | null>(null);
 
   useEffect(() => {
     apiFetch<{ notifications: NotificationItem[] }>('/api/notifications')
@@ -34,6 +37,15 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
       .catch((err) => notify(err instanceof Error ? err.message : 'Failed to load alerts', 'error'))
       .finally(() => setLoading(false));
   }, [notify]);
+
+  useEffect(() => {
+    if (!selectedNotification) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedNotification(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedNotification]);
 
   const markRead = async (id: string) => {
     try {
@@ -45,9 +57,22 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
             : n,
         ),
       );
+      setSelectedNotification((prev) =>
+        prev && prev.id === id && user && !prev.readBy.includes(user.id)
+          ? { ...prev, readBy: [...prev.readBy, user.id] }
+          : prev,
+      );
       onRead?.();
     } catch {
       // ignore
+    }
+  };
+
+  const openNotification = (n: NotificationItem) => {
+    setSelectedNotification(n);
+    const isRead = user ? n.readBy.includes(user.id) : false;
+    if (!isRead) {
+      void markRead(n.id);
     }
   };
 
@@ -62,7 +87,7 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
         </p>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-slate-500">Loading notifications...</div>
         ) : items.length === 0 ? (
@@ -71,27 +96,55 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
           items.map((n) => {
             const isRead = user ? n.readBy.includes(user.id) : false;
             return (
-              <div key={n.id} className="p-5 flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3">
+              <div
+                key={n.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openNotification(n)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openNotification(n);
+                  }
+                }}
+                className={`p-5 flex items-start justify-between gap-4 transition-colors cursor-pointer ${
+                  isRead
+                    ? 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                    : 'bg-blue-50/35 dark:bg-blue-950/15 hover:bg-blue-50/70 dark:hover:bg-blue-950/30'
+                }`}
+              >
+                <div className="flex items-start gap-3 min-w-0 flex-1">
                   <Bell
                     className={`w-4 h-4 mt-1 shrink-0 ${
                       isRead ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400'
                     }`}
                   />
-                  <div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">{n.title}</p>
-                    <p className="text-sm text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">{n.title}</p>
+                      {!isRead && (
+                        <span className="inline-block w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                      )}
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mt-1 leading-relaxed line-clamp-2">
                       {n.message}
                     </p>
-                    <p className="text-xs text-slate-400 mt-1.5">
-                      {new Date(n.createdAt).toLocaleString()}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-400">
+                      <span>{new Date(n.createdAt).toLocaleString()}</span>
+                      <span className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-400 font-semibold">
+                        Tap to view full notice
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
                   </div>
                 </div>
                 {!isRead && (
                   <button
                     type="button"
-                    onClick={() => markRead(n.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void markRead(n.id);
+                    }}
                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-md shrink-0 cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" />
@@ -103,6 +156,63 @@ export function NotificationsPanel({ onRead }: { onRead?: () => void }) {
           })
         )}
       </div>
+
+      {selectedNotification && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setSelectedNotification(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wider">
+                      {selectedNotification.type || 'notice'}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      {new Date(selectedNotification.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <h2 className="font-display text-base sm:text-lg font-extrabold text-slate-900 dark:text-white mt-1 break-words">
+                    {selectedNotification.title}
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedNotification(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                aria-label="Close notification"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto">
+              <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line break-words">
+                {selectedNotification.message}
+              </p>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/70 dark:bg-slate-950/50">
+              <button
+                type="button"
+                onClick={() => setSelectedNotification(null)}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

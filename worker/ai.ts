@@ -49,7 +49,7 @@ export async function verifyMoniepointReceiptWithAiWeb(params: {
         confidence: 0,
         inspectedAt: new Date().toISOString(),
         summary:
-          'Receipt file format could not be parsed for image inspection; awaiting manual Admin review.',
+          'Receipt file format could not be parsed for image inspection; awaiting manual Team review.',
       },
       allChecksPassed: false,
     };
@@ -96,7 +96,7 @@ export async function verifyMoniepointReceiptWithAiWeb(params: {
         confidence: 0,
         inspectedAt: new Date().toISOString(),
         summary:
-          'Automated AI receipt scanner is offline; routed directly to Admin verification desk.',
+          'Automated verification is temporarily offline; routed directly to our Team verification desk.',
       },
     };
   }
@@ -368,7 +368,7 @@ Respond strictly in JSON.`;
       verdict = 'uncertain';
     }
 
-    const baseSummary = parsed.summary || 'AI forensic receipt inspection completed.';
+    const baseSummary = parsed.summary || 'Team receipt inspection completed.';
     const finalSummary = notes.length > 0 ? `${baseSummary} Checks: ${notes.join(' ')}` : baseSummary;
 
     return {
@@ -403,7 +403,7 @@ Respond strictly in JSON.`;
         verdict: 'unavailable',
         confidence: 0,
         inspectedAt: nowIso,
-        summary: 'AI receipt check temporarily unavailable; queued for manual Admin inspection.',
+        summary: 'Automated receipt check temporarily unavailable; queued for manual Team inspection.',
       },
     };
   }

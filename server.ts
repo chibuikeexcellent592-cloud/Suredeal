@@ -1195,6 +1195,12 @@ async function startServer() {
       res.status(400).json({ error: 'Cannot request another code on a closed or expired number' });
       return;
     }
+    if (order.status === 'received' || Boolean(order.otpCode)) {
+      res.status(400).json({
+        error: 'Code already received for this number. You cannot request another code.',
+      });
+      return;
+    }
     order.status = 'waiting';
     order.otpCode = undefined;
     order.smsText = 'Waiting for another OTP code from our team.';
@@ -1854,7 +1860,7 @@ async function startServer() {
 
     void dispatchAdminPhoneAlert({
       eventType: 'wallet_funding',
-      message: `[${db.settings.siteName}] Wallet Funding (${status.toUpperCase()}): ${user.name} (${user.email}) submitted ${db.settings.currencySymbol}${amount.toLocaleString()} to ${db.settings.bankName} ${db.settings.bankAccountNumber}. AI: ${aiAudit.verdict}`,
+      message: `[${db.settings.siteName}] Wallet Funding (${status.toUpperCase()}): ${user.name} (${user.email}) submitted ${db.settings.currencySymbol}${amount.toLocaleString()} to ${db.settings.bankName} ${db.settings.bankAccountNumber}. Team Review: ${aiAudit.verdict}`,
     });
 
     res.status(201).json({

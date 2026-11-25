@@ -15,7 +15,7 @@ export const SECTION_COPY_DEFAULTS = {
 
   walletPageTitle: 'Wallet & {{BANK}} Funding',
   walletPageSubtitle:
-    'Transfer Naira ({{SYMBOL}}) to our official {{BANK}} account and upload your receipt for instant AI & Team verification.',
+    'Transfer Naira ({{SYMBOL}}) to our official {{BANK}} account and upload your receipt for instant Team verification.',
   walletNoticeText: '',
   walletCardHeader: 'Official Funding Account',
   walletFormTitle: 'Submit Transfer Receipt',

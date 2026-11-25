@@ -114,20 +114,27 @@ export function WalletPanel({ onViewHistory }: WalletPanelProps) {
         : res.autoRejected
           ? 'rejected'
           : 'pending';
+      const rawSummary = res.transaction.aiAudit?.summary || '';
+      const teamSummary = rawSummary
+        ? rawSummary
+            .replace(/Automated AI receipt scanner/gi, 'Our automated Team verification desk')
+            .replace(/AI forensic receipt inspection/gi, 'Team receipt inspection')
+            .replace(/AI receipt check/gi, 'Team receipt check')
+            .replace(/\bAI\b/g, 'Team')
+            .replace(/\bAdmin\b/g, 'Team')
+        : 'Receipt uploaded and queued for our Team review.';
       setLastResult({
         status,
-        summary:
-          res.transaction.aiAudit?.summary ||
-          'Receipt uploaded and queued for our Team review.',
+        summary: teamSummary,
       });
       setReceiptDataUrl('');
       setReceiptName('');
       setSenderNote('');
 
       if (res.autoVerified) {
-        notify('Transfer verified automatically! Wallet credited.', 'success');
+        notify('Transfer verified by our Team! Wallet credited.', 'success');
       } else if (res.autoRejected) {
-        notify('Receipt flagged during verification. Check details or contact support.', 'error');
+        notify('Receipt flagged during Team verification. Check details or contact support.', 'error');
       } else {
         notify('Receipt uploaded! Queued for our Team verification.', 'info');
       }
