@@ -43,7 +43,7 @@ export function UserAvatar({
 
   return (
     <div className={`relative inline-flex shrink-0 ${SIZE_CLASSES[size]} ${className}`}>
-      <div className="w-full h-full rounded-full ring-2 ring-purple-600 dark:ring-purple-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-900 bg-[#DCE4F0] dark:bg-slate-800 overflow-hidden flex items-center justify-center shadow-xs">
+      <div className="w-full h-full rounded-full ring-2 ring-blue-600 dark:ring-blue-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-900 bg-[#DCE4F0] dark:bg-slate-800 overflow-hidden flex items-center justify-center shadow-xs">
         {avatarUrl && !imgFailed ? (
           <img
             src={avatarUrl}

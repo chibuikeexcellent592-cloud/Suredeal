@@ -143,6 +143,7 @@ export async function verifyPasswordWeb(password: string, storedHash: string): P
 export interface TokenPayload {
   userId: string;
   exp: number;
+  epoch?: number;
 }
 
 async function hmacSha256(secret: string, message: string): Promise<Uint8Array> {
@@ -157,10 +158,11 @@ async function hmacSha256(secret: string, message: string): Promise<Uint8Array> 
   return new Uint8Array(sig);
 }
 
-export async function signTokenWeb(userId: string, secret: string): Promise<string> {
+export async function signTokenWeb(userId: string, secret: string, epoch = 1): Promise<string> {
   const payload: TokenPayload = {
     userId,
     exp: Date.now() + 1000 * 60 * 60 * 24 * 14,
+    epoch: Number.isFinite(epoch) && epoch >= 1 ? Math.floor(epoch) : 1,
   };
   const body = bytesToBase64Url(encoder.encode(JSON.stringify(payload)));
   const sigBytes = await hmacSha256(secret, body);

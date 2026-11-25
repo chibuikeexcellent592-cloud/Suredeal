@@ -7,10 +7,12 @@ import {
   BookOpen,
   CheckCircle2,
   Crown,
+  Database,
   Download,
   FileSpreadsheet,
   FileText,
   Filter,
+  Flame,
   Gift,
   Globe,
   KeyRound,
@@ -21,8 +23,11 @@ import {
   Megaphone,
   Package,
   Percent,
+  Power,
   RefreshCw,
+  RotateCcw,
   Search,
+  Send,
   Settings,
   ShieldAlert,
   ShieldCheck,
@@ -31,6 +36,7 @@ import {
   Sparkles,
   Tag,
   TrendingUp,
+  Upload,
   UserCheck,
   Users,
   Wallet,
@@ -175,7 +181,7 @@ export function AdminPowerSuitePanel({
   sweepingSms = false,
   matchedPendingDepositsCount = 0,
 }: AdminPowerSuitePanelProps) {
-  const { notify, refreshCatalog } = useApp();
+  const { user, notify, refreshCatalog } = useApp();
   const s = data.settings;
 
   const [query, setQuery] = useState('');
@@ -200,6 +206,54 @@ export function AdminPowerSuitePanel({
   const [batchApproving, setBatchApproving] = useState(false);
   const [verifyingUsers, setVerifyingUsers] = useState(false);
 
+  // NEW 1: Flash Sale Auto-Discount Engine State
+  const [flashEnabled, setFlashEnabled] = useState<boolean>(Boolean(s.flashSaleEnabled));
+  const [flashLabel, setFlashLabel] = useState<string>(s.flashSaleLabel || 'Flash Deal');
+  const [flashPercent, setFlashPercent] = useState<number>(Number(s.flashSalePercent ?? 15));
+  const [flashTarget, setFlashTarget] = useState<'all' | 'marketplace' | 'sms' | 'boosting'>(
+    s.flashSaleTarget || 'all',
+  );
+  const [flashEndsAt, setFlashEndsAt] = useState<string>(() => {
+    if (!s.flashSaleEndsAt) return '';
+    const d = new Date(s.flashSaleEndsAt);
+    if (Number.isNaN(d.getTime())) return '';
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  });
+  const [savingFlashSale, setSavingFlashSale] = useState(false);
+
+  // NEW 2: Bulk User Wallet Credit / Debit by Segment State
+  const [walletSegment, setWalletSegment] = useState<
+    'all' | 'verified' | 'zero_balance' | 'active_only'
+  >('verified');
+  const [walletMode, setWalletMode] = useState<'credit' | 'debit'>('credit');
+  const [walletAmount, setWalletAmount] = useState<number>(500);
+  const [walletNote, setWalletNote] = useState<string>('Creator Segment Reward');
+  const [walletBulkBusy, setWalletBulkBusy] = useState(false);
+
+  // NEW 3: Bulk Boosting Order Batch Processor State
+  const [boostBatchBusy, setBoostBatchBusy] = useState(false);
+  const [confirmCancelBoostBatch, setConfirmCancelBoostBatch] = useState(false);
+
+  // NEW 4: Targeted Segment Broadcast Campaign State
+  const [broadcastSegment, setBroadcastSegment] = useState<
+    'all' | 'verified' | 'unfunded' | 'spenders'
+  >('all');
+  const [broadcastType, setBroadcastType] = useState<'info' | 'success' | 'warning'>('info');
+  const [broadcastTitle, setBroadcastTitle] = useState<string>('');
+  const [broadcastMessage, setBroadcastMessage] = useState<string>('');
+  const [broadcastEmail, setBroadcastEmail] = useState<boolean>(false);
+  const [broadcastBusy, setBroadcastBusy] = useState(false);
+
+  // NEW 5: Emergency Session Kill Switch State
+  const [confirmKillSwitch, setConfirmKillSwitch] = useState(false);
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false);
+
+  // NEW 6: JSON Store Backup Restore State (Main Admin only)
+  const [backupJsonText, setBackupJsonText] = useState<string>('');
+  const [confirmRestoreBackup, setConfirmRestoreBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
+
   // Financial, SMS & Security Guardrails Form State
   const [minimumDeposit, setMinimumDeposit] = useState<number>(s.minimumDeposit ?? 500);
   const [maxDepositAmount, setMaxDepositAmount] = useState<number>(s.maxDepositAmount ?? 5000000);
@@ -217,6 +271,9 @@ export function AdminPowerSuitePanel({
   );
   const [blockedDomainsText, setBlockedDomainsText] = useState<string>(
     (s.blockedEmailDomains || []).join(', '),
+  );
+  const [blockedNamesText, setBlockedNamesText] = useState<string>(
+    (s.blockedNameKeywords || []).join(', '),
   );
   const [cannedRepliesText, setCannedRepliesText] = useState<string>(
     (s.supportCannedReplies || []).join('\n'),
@@ -370,6 +427,10 @@ export function AdminPowerSuitePanel({
         .split(/[\n,]+/)
         .map((d) => d.trim().toLowerCase().replace(/^@+/, ''))
         .filter(Boolean);
+      const blockedNameKeywords = blockedNamesText
+        .split(/[\n,]+/)
+        .map((k) => k.trim().toLowerCase())
+        .filter(Boolean);
       const supportCannedReplies = cannedRepliesText
         .split(/\n+/)
         .map((r) => r.trim())
@@ -385,6 +446,7 @@ export function AdminPowerSuitePanel({
           referralBonusAmount: Math.max(0, Number(referralBonusAmount) || 0),
           welcomePromoAmount: Math.max(0, Number(welcomePromoAmount) || 0),
           blockedEmailDomains,
+          blockedNameKeywords,
           supportCannedReplies,
         }),
       });
@@ -394,6 +456,195 @@ export function AdminPowerSuitePanel({
       notify(err instanceof Error ? err.message : 'Failed to save guardrails', 'error');
     } finally {
       setSavingGuardrails(false);
+    }
+  };
+
+  const handleSaveFlashSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingFlashSale(true);
+    try {
+      const endsIso = flashEndsAt.trim() ? new Date(flashEndsAt).toISOString() : '';
+      await apiFetch<PlatformSettings>('/api/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          flashSaleEnabled: flashEnabled,
+          flashSaleLabel: flashLabel.trim() || 'Flash Deal',
+          flashSalePercent: Math.max(1, Math.min(90, Number(flashPercent) || 1)),
+          flashSaleTarget: flashTarget,
+          flashSaleEndsAt: endsIso,
+        }),
+      });
+      await Promise.all([loadAdmin(), refreshCatalog()]);
+      notify(
+        flashEnabled
+          ? `Flash Sale "${flashLabel.trim() || 'Flash Deal'}" (-${flashPercent}%) is LIVE on ${flashTarget.toUpperCase()}!`
+          : 'Flash Sale Auto-Discount Engine saved (OFF).',
+        'success',
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to save Flash Sale settings', 'error');
+    } finally {
+      setSavingFlashSale(false);
+    }
+  };
+
+  const handleSegmentWalletBulk = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWalletBulkBusy(true);
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        affectedCount: number;
+        totalAmount: number;
+      }>('/api/admin/tools/bulk-credit-users', {
+        method: 'POST',
+        body: JSON.stringify({
+          segment: walletSegment,
+          mode: walletMode,
+          amount: Math.max(1, Number(walletAmount) || 0),
+          note: walletNote.trim(),
+        }),
+      });
+      notify(
+        `${walletMode === 'credit' ? 'Credited' : 'Debited'} ${res.affectedCount} user(s) · Total ${formatNaira(res.totalAmount, symbol)}`,
+        'success',
+      );
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk wallet operation failed', 'error');
+    } finally {
+      setWalletBulkBusy(false);
+    }
+  };
+
+  const handleBoostBatchAction = async (
+    action: 'complete_boosting' | 'cancel_refund_boosting',
+  ) => {
+    setBoostBatchBusy(true);
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        updatedCount: number;
+        refundedAmount: number;
+      }>('/api/admin/tools/bulk-process-orders', {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
+      setConfirmCancelBoostBatch(false);
+      notify(
+        action === 'complete_boosting'
+          ? `Marked ${res.updatedCount} active boosting order(s) completed!`
+          : `Cancelled ${res.updatedCount} boosting order(s) and refunded ${formatNaira(res.refundedAmount, symbol)}.`,
+        res.updatedCount > 0 ? 'success' : 'info',
+      );
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk boosting batch failed', 'error');
+    } finally {
+      setBoostBatchBusy(false);
+    }
+  };
+
+  const handleTargetedBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBroadcastBusy(true);
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        recipientCount: number;
+        sentEmails: number;
+      }>('/api/admin/tools/targeted-broadcast', {
+        method: 'POST',
+        body: JSON.stringify({
+          segment: broadcastSegment,
+          type: broadcastType,
+          title: broadcastTitle.trim(),
+          message: broadcastMessage.trim(),
+          sendEmail: broadcastEmail,
+        }),
+      });
+      setBroadcastTitle('');
+      setBroadcastMessage('');
+      notify(
+        `Broadcast sent to ${res.recipientCount} ${broadcastSegment} member(s)${
+          res.sentEmails > 0 ? ` (${res.sentEmails} email(s) delivered)` : ''
+        }!`,
+        'success',
+      );
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Targeted broadcast failed', 'error');
+    } finally {
+      setBroadcastBusy(false);
+    }
+  };
+
+  const handleForceLogoutAll = async () => {
+    setKillSwitchBusy(true);
+    try {
+      const res = await apiFetch<{ ok: boolean; authSessionEpoch: number }>(
+        '/api/admin/tools/force-logout-all',
+        { method: 'POST' },
+      );
+      setConfirmKillSwitch(false);
+      notify(
+        `Emergency Kill Switch triggered! Session epoch bumped to v${res.authSessionEpoch}. All non-main-admin sessions logged out.`,
+        'success',
+      );
+      await loadAdmin();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Kill switch request failed', 'error');
+    } finally {
+      setKillSwitchBusy(false);
+    }
+  };
+
+  const handleBackupFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setBackupJsonText(text);
+      notify(`Loaded backup file "${file.name}" (${Math.round(file.size / 1024)} KB)`, 'info');
+    } catch {
+      notify('Could not read selected JSON file', 'error');
+    }
+  };
+
+  const handleImportBackupRestore = async () => {
+    if (!backupJsonText.trim()) {
+      notify('Paste JSON or pick a backup file first', 'error');
+      return;
+    }
+    setRestoringBackup(true);
+    try {
+      const parsed = JSON.parse(backupJsonText) as Record<string, unknown>;
+      const backupPayload =
+        parsed.backup && typeof parsed.backup === 'object'
+          ? parsed.backup
+          : parsed.store && typeof parsed.store === 'object'
+            ? parsed.store
+            : parsed;
+      const res = await apiFetch<{ ok: boolean; restoredParts: string[] }>(
+        '/api/admin/tools/import-backup',
+        {
+          method: 'POST',
+          body: JSON.stringify({ backup: backupPayload }),
+        },
+      );
+      setConfirmRestoreBackup(false);
+      notify(
+        `Backup restored permanently (${res.restoredParts.join(', ')})!`,
+        'success',
+      );
+      await Promise.all([loadAdmin(), refreshCatalog()]);
+    } catch (err) {
+      notify(
+        err instanceof Error ? err.message : 'Invalid JSON or restore failed',
+        'error',
+      );
+    } finally {
+      setRestoringBackup(false);
     }
   };
 
@@ -515,6 +766,14 @@ export function AdminPowerSuitePanel({
       { id: 'sc_clear_audit', title: 'Purge Audit Log History', description: 'Clear older audit trail entries after exporting backup.', domain: 'security', kind: 'jump', targetTab: 'audit' },
       { id: 'sc_session_inspect', title: 'Visitor Device & Path Tracker', description: 'Monitor active visitor browsers, OS versions, and visited sections live.', domain: 'security', kind: 'jump', targetTab: 'live' },
       { id: 'sc_cmd_palette', title: 'Overwatch Quick-Jump Palette (⌘K)', description: 'Press Ctrl+K / ⌘K anywhere in Overwatch to search users, tabs & tools.', domain: 'security', kind: 'jump', targetTab: 'overview' },
+      // --- NEW POWER SUITE ENGINES ---
+      { id: 'pr_flash_sale', title: 'Flash Sale Auto-Discount Engine', description: `Automated sitewide checkout discount (${s.flashSaleEnabled ? `ACTIVE -${s.flashSalePercent ?? 15}%` : 'OFF'}) with optional expiry.`, domain: 'pricing', kind: 'jump', targetTab: 'power_suite', badge: s.flashSaleEnabled ? `-${s.flashSalePercent ?? 15}%` : 'OFF' },
+      { id: 'us_bulk_wallet_seg', title: 'Bulk Segment Wallet Credit / Debit', description: 'Credit or debit verified, zero-balance, active, or all member wallets in 1 batch.', domain: 'users', kind: 'jump', targetTab: 'power_suite' },
+      { id: 'sb_boost_batch', title: 'Bulk Boosting Order Batch Processor', description: 'Complete all active boosting campaigns or cancel & auto-refund queues cleanly.', domain: 'sms_boost', kind: 'jump', targetTab: 'power_suite' },
+      { id: 'su_targeted_camp', title: 'Targeted Segment Broadcast Campaign', description: 'Send workspace + email campaigns to verified, unfunded, spender, or all users.', domain: 'support', kind: 'jump', targetTab: 'power_suite' },
+      { id: 'sc_kill_switch', title: 'Emergency Session Kill Switch', description: `Force-logout all non-main-admin sessions instantly (Session Epoch v${s.authSessionEpoch ?? 1}).`, domain: 'security', kind: 'jump', targetTab: 'power_suite', badge: `v${s.authSessionEpoch ?? 1}` },
+      { id: 'sc_blocked_names', title: 'Blocked Signup Name Keywords Guard', description: `${(s.blockedNameKeywords || []).length} spam/restricted name keyword(s) rejected at signup.`, domain: 'security', kind: 'jump', targetTab: 'power_suite' },
+      { id: 'sc_restore_json', title: 'Full JSON Store Backup Import / Restore', description: 'Main Admin restore of settings, listings, categories, SMS, boosting & sections from JSON.', domain: 'security', kind: 'jump', targetTab: 'power_suite' },
       { id: 'sc_alerts_read', title: 'Unread Admin Alert Counter', description: `${data.metrics.unreadAlerts} unread operational alert(s) tracked in Overwatch.`, domain: 'security', kind: 'jump', targetTab: 'live', badge: `${data.metrics.unreadAlerts}` },
       { id: 'sc_sync_now', title: 'Force Sync Full Backend State', description: 'Pull fresh snapshot from server database and synchronize storefront.', domain: 'security', kind: 'jump', targetTab: 'overview' },
     ],
@@ -611,7 +870,7 @@ export function AdminPowerSuitePanel({
   return (
     <div className="space-y-6">
       {/* Legendary Hero Header */}
-      <div className="rounded-3xl bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white border border-indigo-500/30 p-6 shadow-xl space-y-5">
+      <div className="rounded-3xl bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white border border-blue-500/30 p-6 shadow-xl space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1.5 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[11px] font-extrabold uppercase tracking-wider">
@@ -901,6 +1160,476 @@ export function AdminPowerSuitePanel({
         </div>
       </div>
 
+      {/* NEW ADVANCED ADMIN POWER ENGINES */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* NEW 1: Flash Sale Auto-Discount Engine */}
+        <form
+          onSubmit={handleSaveFlashSale}
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <Flame className="w-4 h-4" />
+              </span>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  Flash Sale Auto-Discount Engine
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Real server-enforced % checkout discount across Storefront, SMS &amp; Boosting
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFlashEnabled((v) => !v)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                flashEnabled
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {flashEnabled ? 'LIVE ON' : 'PAUSED'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="sm:col-span-2">
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Promo Label
+              </label>
+              <input
+                type="text"
+                value={flashLabel}
+                onChange={(e) => setFlashLabel(e.target.value)}
+                placeholder="Flash Deal"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Discount %
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={90}
+                value={flashPercent}
+                onChange={(e) => setFlashPercent(Number(e.target.value))}
+                className="w-full px-3 py-2 font-mono font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Target Scope
+              </label>
+              <select
+                value={flashTarget}
+                onChange={(e) =>
+                  setFlashTarget(
+                    e.target.value as 'all' | 'marketplace' | 'sms' | 'boosting',
+                  )
+                }
+                className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-semibold"
+              >
+                <option value="all">All Storefront</option>
+                <option value="marketplace">Marketplace</option>
+                <option value="sms">SMS Numbers</option>
+                <option value="boosting">Boosting</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Auto-Expiry (Optional Date &amp; Time)
+              </label>
+              <input
+                type="datetime-local"
+                value={flashEndsAt}
+                onChange={(e) => setFlashEndsAt(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={savingFlashSale}
+              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+            >
+              {savingFlashSale ? 'Saving Flash Sale...' : 'Save Flash Sale Rules'}
+            </button>
+          </div>
+        </form>
+
+        {/* NEW 2: Bulk User Wallet Credit / Debit by Segment */}
+        <form
+          onSubmit={handleSegmentWalletBulk}
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3.5"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+              <Wallet className="w-4 h-4" />
+            </span>
+            <div>
+              <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                Bulk Segment Wallet Credit / Debit
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Credit bonuses or adjust balances by member segment with ledger &amp; notifications
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Segment
+              </label>
+              <select
+                value={walletSegment}
+                onChange={(e) =>
+                  setWalletSegment(
+                    e.target.value as 'all' | 'verified' | 'zero_balance' | 'active_only',
+                  )
+                }
+                className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-semibold"
+              >
+                <option value="verified">Email Verified</option>
+                <option value="all">All Non-Admin</option>
+                <option value="zero_balance">Zero Balance (0)</option>
+                <option value="active_only">Active Accounts</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Action</label>
+              <select
+                value={walletMode}
+                onChange={(e) => setWalletMode(e.target.value as 'credit' | 'debit')}
+                className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-semibold"
+              >
+                <option value="credit">+ Credit</option>
+                <option value="debit">- Debit</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Amount ({symbol})
+              </label>
+              <input
+                type="number"
+                min={1}
+                required
+                value={walletAmount}
+                onChange={(e) => setWalletAmount(Number(e.target.value))}
+                className="w-full px-2.5 py-2 font-mono font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Ledger Note / Reason
+              </label>
+              <input
+                type="text"
+                value={walletNote}
+                onChange={(e) => setWalletNote(e.target.value)}
+                placeholder="Loyalty reward"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={walletBulkBusy}
+              className={`w-full py-2.5 rounded-xl text-white text-xs font-bold cursor-pointer disabled:opacity-60 ${
+                walletMode === 'credit'
+                  ? 'bg-emerald-600 hover:bg-emerald-700'
+                  : 'bg-amber-600 hover:bg-amber-700'
+              }`}
+            >
+              {walletBulkBusy
+                ? 'Processing Batch...'
+                : `${walletMode === 'credit' ? '+ Credit' : '- Debit'} ${formatNaira(walletAmount || 0, symbol)} (${walletSegment})`}
+            </button>
+          </div>
+        </form>
+
+        {/* NEW 3: Targeted Segment Broadcast Campaign */}
+        <form
+          onSubmit={handleTargetedBroadcast}
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3.5"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Megaphone className="w-4 h-4" />
+            </span>
+            <div>
+              <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                Targeted Segment Broadcast Campaign
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Notify &amp; optionally email specific customer cohorts without spamming everyone
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Cohort
+              </label>
+              <select
+                value={broadcastSegment}
+                onChange={(e) =>
+                  setBroadcastSegment(
+                    e.target.value as 'all' | 'verified' | 'unfunded' | 'spenders',
+                  )
+                }
+                className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-semibold"
+              >
+                <option value="all">All Active Users</option>
+                <option value="verified">Email Verified</option>
+                <option value="unfunded">Unfunded (₦0 Bal)</option>
+                <option value="spenders">Past Buyers</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Tone</label>
+              <select
+                value={broadcastType}
+                onChange={(e) =>
+                  setBroadcastType(e.target.value as 'info' | 'success' | 'warning')
+                }
+                className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-semibold"
+              >
+                <option value="info">Blue Info</option>
+                <option value="success">Green Promo</option>
+                <option value="warning">Amber Alert</option>
+              </select>
+            </div>
+            <label className="col-span-2 sm:col-span-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={broadcastEmail}
+                onChange={(e) => setBroadcastEmail(e.target.checked)}
+                className="w-4 h-4 rounded text-blue-600"
+              />
+              <span className="font-semibold text-[11px]">Also Email</span>
+            </label>
+          </div>
+
+          <input
+            type="text"
+            required
+            value={broadcastTitle}
+            onChange={(e) => setBroadcastTitle(e.target.value)}
+            placeholder="Campaign headline (e.g. Weekend SMS Restock Live)"
+            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+          />
+          <textarea
+            rows={2}
+            required
+            value={broadcastMessage}
+            onChange={(e) => setBroadcastMessage(e.target.value)}
+            placeholder="Write campaign message..."
+            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+          />
+          <button
+            type="submit"
+            disabled={broadcastBusy}
+            className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+          >
+            <Send className="w-3.5 h-3.5" />
+            {broadcastBusy ? 'Dispatching Campaign...' : `Send Targeted Campaign (${broadcastSegment})`}
+          </button>
+        </form>
+
+        {/* NEW 4 & 5: Bulk Boosting Batch Processor + Emergency Kill Switch */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-4 h-4" />
+              </span>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  Bulk Boosting Order Batch Processor
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  {data.metrics.pendingBoostingCount} pending boosting order(s) in queue
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={boostBatchBusy}
+                onClick={() => void handleBoostBatchAction('complete_boosting')}
+                className="flex-1 min-w-[160px] py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {boostBatchBusy ? 'Working...' : 'Complete All Active Boosts'}
+              </button>
+              {confirmCancelBoostBatch ? (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={boostBatchBusy}
+                    onClick={() => void handleBoostBatchAction('cancel_refund_boosting')}
+                    className="px-3 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                  >
+                    Confirm Refund All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCancelBoostBatch(false)}
+                    className="px-2.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancelBoostBatch(true)}
+                  className="px-3.5 py-2.5 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold cursor-pointer"
+                >
+                  Cancel &amp; Refund All Active
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                  <Power className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="font-display text-xs font-extrabold text-slate-900 dark:text-white">
+                    Emergency Session Kill Switch
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Force-logout all non-main-admin sessions (Epoch v{s.authSessionEpoch ?? 1})
+                  </p>
+                </div>
+              </div>
+              {confirmKillSwitch ? (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    disabled={killSwitchBusy}
+                    onClick={() => void handleForceLogoutAll()}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer disabled:opacity-60"
+                  >
+                    {killSwitchBusy ? 'Revoking...' : 'Confirm Kill'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmKillSwitch(false)}
+                    className="px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-semibold cursor-pointer"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmKillSwitch(true)}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer shrink-0"
+                >
+                  Force Logout All
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* NEW 6: Main Admin Full JSON Store Backup Import / Restore */}
+      {user?.isMainAdmin && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Database className="w-4 h-4" />
+              </span>
+              <div>
+                <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                  Full JSON Store Backup Import / Restore (Main Admin Only)
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Restore settings, marketplace catalog, SMS pricing, boosting services, sections, promos &amp; tutorials while preserving user accounts &amp; balances.
+                </p>
+              </div>
+            </div>
+            <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-blue-600" />
+              Load .json File
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={(e) => void handleBackupFilePick(e)}
+                className="hidden"
+              />
+            </label>
+          </div>
+          <textarea
+            rows={3}
+            value={backupJsonText}
+            onChange={(e) => setBackupJsonText(e.target.value)}
+            placeholder='Paste exported SureDeal backup JSON here ({"settings": {...}, "marketplaceListings": [...]})...'
+            className="w-full px-3 py-2 font-mono text-[11px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {backupJsonText && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBackupJsonText('');
+                  setConfirmRestoreBackup(false);
+                }}
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
+            {confirmRestoreBackup ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={restoringBackup}
+                  onClick={() => void handleImportBackupRestore()}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer disabled:opacity-60"
+                >
+                  {restoringBackup ? 'Restoring...' : 'Confirm Restore Store Catalog'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmRestoreBackup(false)}
+                  className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={!backupJsonText.trim()}
+                onClick={() => setConfirmRestoreBackup(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Restore From Backup JSON
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Financial, SMS Expiry, Security & Canned Replies Guardrails */}
       <form
         onSubmit={handleSaveGuardrails}
@@ -908,22 +1637,22 @@ export function AdminPowerSuitePanel({
       >
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <span className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+            <span className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
               <Wrench className="w-4 h-4" />
             </span>
             <div>
               <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                Financial Rules, SMS Countdown, Domain Blocker &amp; Support Templates
+                Financial Rules, SMS Countdown, Signup Guards &amp; Support Templates
               </h2>
               <p className="text-xs text-slate-500">
-                Real server-enforced deposit caps, cashback %, OTP expiry timer, blocked email domains &amp; ticket canned replies.
+                Real server-enforced deposit caps, cashback %, OTP expiry timer, blocked email domains, blocked name keywords &amp; ticket canned replies.
               </p>
             </div>
           </div>
           <button
             type="submit"
             disabled={savingGuardrails}
-            className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs cursor-pointer disabled:opacity-60"
+            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer disabled:opacity-60"
           >
             {savingGuardrails ? 'Saving Guardrails...' : 'Save All Guardrails'}
           </button>
@@ -1007,7 +1736,7 @@ export function AdminPowerSuitePanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
               Blocked Signup Email Domains (comma or newline separated)
@@ -1017,6 +1746,18 @@ export function AdminPowerSuitePanel({
               value={blockedDomainsText}
               onChange={(e) => setBlockedDomainsText(e.target.value)}
               placeholder="tempmail.com, mailinator.com, 10minutemail.com"
+              className="w-full px-3 py-2 font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+              Blocked Signup Name Keywords (comma or newline separated)
+            </label>
+            <textarea
+              rows={2}
+              value={blockedNamesText}
+              onChange={(e) => setBlockedNamesText(e.target.value)}
+              placeholder="official support, admin team, scammer"
               className="w-full px-3 py-2 font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             />
           </div>

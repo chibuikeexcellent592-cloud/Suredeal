@@ -8,6 +8,7 @@ import {
   Crown,
   Download,
   Eye,
+  EyeOff,
   KeyRound,
   Landmark,
   LifeBuoy,
@@ -1151,7 +1152,7 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
         amount: b.amount,
         time: b.createdAt,
         badge: 'BOOST',
-        badgeClass: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300',
+        badgeClass: 'bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300',
         targetTab: 'orders',
       });
     }
@@ -1178,7 +1179,7 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
         amount: u.balance,
         time: u.lastLoginAt || u.createdAt,
         badge: 'ACCOUNT',
-        badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300',
+        badgeClass: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300',
         targetTab: 'users',
       });
     }
@@ -1319,7 +1320,7 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
           <p className="text-[11px] font-bold uppercase text-slate-400">Active Boosts</p>
-          <p className="font-display text-2xl font-extrabold text-purple-600 dark:text-purple-400 mt-1 tabular-nums">
+          <p className="font-display text-2xl font-extrabold text-sky-600 dark:text-sky-400 mt-1 tabular-nums">
             {live?.activeBoosting.length ?? 0}
           </p>
         </div>
@@ -1347,10 +1348,10 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
             </span>
             <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
               Desktop {100 - visitorAnalytics.mobilePct}% ({visitorAnalytics.desktopCount})
-              <Monitor className="w-3.5 h-3.5 text-indigo-500" />
+              <Monitor className="w-3.5 h-3.5 text-sky-500" />
             </span>
           </div>
-          <div className="h-2 w-full rounded-full bg-indigo-100 dark:bg-indigo-950/60 overflow-hidden flex">
+          <div className="h-2 w-full rounded-full bg-sky-100 dark:bg-sky-950/60 overflow-hidden flex">
             <div
               className="h-full bg-blue-600 transition-all"
               style={{ width: `${visitorAnalytics.mobilePct}%` }}
@@ -1542,7 +1543,7 @@ export function AdminLiveMonitorPanel({ symbol, onNavigateTab }: LiveMonitorProp
               {live.activeBoosting.map((b) => (
                 <div key={b.id} className="py-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="inline-block px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 text-[10px] font-bold mr-1.5 uppercase">
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-[10px] font-bold mr-1.5 uppercase">
                       {b.status}
                     </span>
                     <span className="font-bold text-slate-900 dark:text-white">
@@ -1663,6 +1664,7 @@ export function AdminSubAdminsPanel({
   // Main admin email change form
   const [newMainEmail, setNewMainEmail] = useState(currentUser?.email || mainAdminEmail || '');
   const [currentPassword, setCurrentPassword] = useState('');
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
   const [changingEmail, setChangingEmail] = useState(false);
 
   // Sub-admin delegation form
@@ -1671,6 +1673,7 @@ export function AdminSubAdminsPanel({
   const [subName, setSubName] = useState('');
   const [subEmail, setSubEmail] = useState('');
   const [subPassword, setSubPassword] = useState('');
+  const [showSubPw, setShowSubPw] = useState(false);
   const [selectedFeature, setSelectedFeature] = useState<AdminFeatureTab>('support');
   const [assigning, setAssigning] = useState(false);
 
@@ -1831,15 +1834,15 @@ export function AdminSubAdminsPanel({
             <label className="block text-[11px] font-semibold text-slate-300 mb-1">
               Main Admin Email Address
             </label>
-            <div className="relative">
-              <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 border border-white/20 focus-within:ring-2 focus-within:ring-amber-400">
+              <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <input
                 type="email"
                 required
                 value={newMainEmail}
                 onChange={(e) => setNewMainEmail(e.target.value)}
                 placeholder="new-owner@example.com"
-                className="w-full pl-8 pr-3 py-2 text-xs rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-slate-400"
+                className="flex-1 min-w-0 bg-transparent text-xs text-white placeholder:text-slate-400 focus:outline-none"
               />
             </div>
           </div>
@@ -1847,16 +1850,24 @@ export function AdminSubAdminsPanel({
             <label className="block text-[11px] font-semibold text-slate-300 mb-1">
               Verify Current Password
             </label>
-            <div className="relative">
-              <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 border border-white/20 focus-within:ring-2 focus-within:ring-amber-400">
+              <KeyRound className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <input
-                type="password"
+                type={showCurrentPw ? 'text' : 'password'}
                 required
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder="Enter current password"
-                className="w-full pl-8 pr-3 py-2 text-xs rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-slate-400"
+                className="flex-1 min-w-0 bg-transparent text-xs text-white placeholder:text-slate-400 focus:outline-none"
               />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPw((v) => !v)}
+                className="inline-flex items-center justify-center text-slate-300 hover:text-white cursor-pointer shrink-0"
+                aria-label={showCurrentPw ? 'Hide current password' : 'Show current password'}
+              >
+                {showCurrentPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
             </div>
           </div>
           <div className="flex items-end">
@@ -1955,15 +1966,26 @@ export function AdminSubAdminsPanel({
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Password (6+ chars)</label>
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={subPassword}
-                  onChange={(e) => setSubPassword(e.target.value)}
-                  placeholder="Minimum 6 characters"
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                />
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                  <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <input
+                    type={showSubPw ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={subPassword}
+                    onChange={(e) => setSubPassword(e.target.value)}
+                    placeholder="Minimum 6 characters"
+                    className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSubPw((v) => !v)}
+                    className="inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                    aria-label={showSubPw ? 'Hide sub-admin password' : 'Show sub-admin password'}
+                  >
+                    {showSubPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
           )}

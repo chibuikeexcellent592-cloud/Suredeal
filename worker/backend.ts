@@ -7,6 +7,7 @@ import {
   HEAD_ADMIN_REFERRAL_CODE,
   mergeParsedDatabaseState,
 } from '../shared/initialData.ts';
+import { applyFlashSaleDiscount } from '../shared/pricing.ts';
 import type {
   AccountingRecord,
   AdminAlert,
@@ -99,6 +100,15 @@ function generateSixDigitCodeWeb(): string {
   const num = new Uint32Array(1);
   crypto.getRandomValues(num);
   return String(100000 + (num[0] % 900000));
+}
+
+function escapeHtmlWeb(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 const STATE_KEYS: Array<keyof DatabaseState> = [
@@ -676,6 +686,17 @@ export class SureDealStoreDO {
       };
     }
     const isHead = this.isMainAdminUser(user);
+    const minEpoch = Math.max(1, Math.floor(Number(db.settings.authSessionEpoch ?? 1)));
+    if (!isHead && (payload.epoch ?? 1) < minEpoch) {
+      return {
+        errorResponse: jsonResponse(
+          { error: 'Session reset by administrator. Please sign in again.' },
+          401,
+          request,
+          this.env,
+        ),
+      };
+    }
     if ((user.role === 'admin' || isHead) && user.status !== 'active') {
       user.status = 'active';
       this.persistKeys('users');
@@ -1034,7 +1055,11 @@ export class SureDealStoreDO {
         }
         user.lastLoginAt = new Date().toISOString();
         this.persistKeys('users');
-        const token = await signTokenWeb(user.id, this.sessionSecret!);
+        const token = await signTokenWeb(
+          user.id,
+          this.sessionSecret!,
+          db.settings.authSessionEpoch ?? 1,
+        );
         return okJson({ token, user: toPublicUser(user) });
       }
 
@@ -1064,6 +1089,13 @@ export class SureDealStoreDO {
         );
         if (emailDomain && blockedDomains.includes(emailDomain)) {
           return errJson('Registrations from this email domain are currently blocked.', 403);
+        }
+        const blockedNames = (db.settings.blockedNameKeywords || [])
+          .map((kw) => String(kw || '').trim().toLowerCase())
+          .filter(Boolean);
+        const lowerName = name.toLowerCase();
+        if (blockedNames.some((kw) => lowerName.includes(kw))) {
+          return errJson('That display name contains a restricted keyword.', 403);
         }
         if (password.length < 6) {
           return errJson('Password must be at least 6 characters', 400);
@@ -1120,7 +1152,11 @@ export class SureDealStoreDO {
           referralCodeInput,
           authProvider: 'email',
         });
-        const token = await signTokenWeb(newUser.id, this.sessionSecret!);
+        const token = await signTokenWeb(
+          newUser.id,
+          this.sessionSecret!,
+          db.settings.authSessionEpoch ?? 1,
+        );
         return okJson({ token, user: toPublicUser(newUser) }, 201);
       }
 
@@ -1172,7 +1208,11 @@ export class SureDealStoreDO {
           referralCodeInput: pending.referralCodeInput,
           authProvider: 'email',
         });
-        const token = await signTokenWeb(newUser.id, this.sessionSecret!);
+        const token = await signTokenWeb(
+          newUser.id,
+          this.sessionSecret!,
+          db.settings.authSessionEpoch ?? 1,
+        );
         return okJson({ token, user: toPublicUser(newUser) }, 201);
       }
 
@@ -1271,7 +1311,11 @@ export class SureDealStoreDO {
               existing.avatarUrl = info.picture;
             }
             this.persistKeys('users');
-            const token = await signTokenWeb(existing.id, this.sessionSecret!);
+            const token = await signTokenWeb(
+              existing.id,
+              this.sessionSecret!,
+              db.settings.authSessionEpoch ?? 1,
+            );
             return okJson({ token, user: toPublicUser(existing) });
           }
 
@@ -1290,7 +1334,11 @@ export class SureDealStoreDO {
             authProvider: 'google',
             avatarUrl: info.picture,
           });
-          const token = await signTokenWeb(newUser.id, this.sessionSecret!);
+          const token = await signTokenWeb(
+            newUser.id,
+            this.sessionSecret!,
+            db.settings.authSessionEpoch ?? 1,
+          );
           return okJson({ token, user: toPublicUser(newUser) }, 201);
         } catch (err) {
           console.error('Google tokeninfo verification error:', err);
@@ -1401,8 +1449,10 @@ export class SureDealStoreDO {
               ? Math.max(50, Math.round(basePrice * (1 + altPct / 100)))
               : Math.max(50, Math.round(basePrice * (1 - altPct / 100)))
             : basePrice;
+        const smsFlash = applyFlashSaleDiscount(tierPrice, db.settings, 'sms');
+        const saleTierPrice = smsFlash.active ? Math.max(50, smsFlash.finalAmount) : tierPrice;
 
-        let price = tierPrice;
+        let price = saleTierPrice;
         let appliedPromo: PromoCode | undefined;
         if (promoCodeStr) {
           if (db.settings.allowPromoCodes === false) {
@@ -1415,9 +1465,9 @@ export class SureDealStoreDO {
             return errJson('Coupon code is invalid or expired', 400);
           }
           if (appliedPromo.discountType === 'percent') {
-            price = Math.max(50, Math.round(tierPrice * (1 - appliedPromo.value / 100)));
+            price = Math.max(50, Math.round(saleTierPrice * (1 - appliedPromo.value / 100)));
           } else {
-            price = Math.max(50, tierPrice - appliedPromo.value);
+            price = Math.max(50, saleTierPrice - appliedPromo.value);
           }
         }
 
@@ -1649,7 +1699,9 @@ export class SureDealStoreDO {
           );
         }
 
-        const amount = Math.max(10, Math.round((service.ratePer1k * quantity) / 1000));
+        const rawBoostAmount = Math.max(10, Math.round((service.ratePer1k * quantity) / 1000));
+        const boostFlash = applyFlashSaleDiscount(rawBoostAmount, db.settings, 'boosting');
+        const amount = boostFlash.active ? Math.max(10, boostFlash.finalAmount) : rawBoostAmount;
         if (currentUser.balance < amount) {
           return errJson(
             `Insufficient wallet balance. Campaign costs ${db.settings.currencySymbol}${amount.toLocaleString()}.`,
@@ -1798,7 +1850,9 @@ export class SureDealStoreDO {
           );
         }
 
-        const baseTotal = listing.price * quantity;
+        const rawTotal = listing.price * quantity;
+        const mktFlash = applyFlashSaleDiscount(rawTotal, db.settings, 'marketplace');
+        const baseTotal = mktFlash.active ? mktFlash.finalAmount : rawTotal;
         let finalTotal = baseTotal;
         let appliedPromo: PromoCode | undefined;
         if (promoCodeStr) {
@@ -1969,7 +2023,9 @@ export class SureDealStoreDO {
             400,
           );
         }
-        const totalPrice = product.price * quantity;
+        const rawSectionPrice = product.price * quantity;
+        const secFlash = applyFlashSaleDiscount(rawSectionPrice, db.settings, 'marketplace');
+        const totalPrice = secFlash.active ? secFlash.finalAmount : rawSectionPrice;
         if (currentUser.balance < totalPrice) {
           return errJson(
             `Insufficient wallet balance. Need ${db.settings.currencySymbol}${totalPrice.toLocaleString()}.`,
@@ -1981,8 +2037,11 @@ export class SureDealStoreDO {
         currentUser.balance -= totalPrice;
         product.stock -= quantity;
 
+        const secUnitPaid = quantity === 1 ? totalPrice : Math.round(totalPrice / quantity);
         const createdVaultItems: DatabaseState['vaultItems'][number][] = [];
         for (let i = 0; i < quantity; i++) {
+          const itemPrice =
+            i === quantity - 1 ? Math.max(0, totalPrice - secUnitPaid * (quantity - 1)) : secUnitPaid;
           createdVaultItems.push({
             id: makeId('vlt'),
             userId: currentUser.id,
@@ -1990,7 +2049,7 @@ export class SureDealStoreDO {
             sourceId: product.id,
             title: quantity > 1 ? `${product.title} (${i + 1}/${quantity})` : product.title,
             category: section.name,
-            price: product.price,
+            price: itemPrice,
             deliveredCredential: buildCredentialFromTemplateWeb(product.credentialTemplate),
             deliveryType: 'Vault Delivery',
             buyWarningShown:
@@ -2930,6 +2989,335 @@ export class SureDealStoreDO {
           return okJson({ ok: true, verifiedUsers, verifiedCount: verifiedUsers, clearedPending });
         }
 
+        if (method === 'POST' && pathname === '/api/admin/tools/bulk-credit-users') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'users', 'overview');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const segment = String(body.segment || 'all');
+          const mode = body.mode === 'debit' ? 'debit' : 'credit';
+          const amount = Math.round(Number(body.amount || 0));
+          const note = String(body.note || '').trim().slice(0, 140) || `Bulk ${mode} by Overwatch`;
+          if (!['all', 'verified', 'zero_balance', 'active_only'].includes(segment)) {
+            return errJson('Invalid user segment selected', 400);
+          }
+          if (!Number.isFinite(amount) || amount < 1 || amount > 10_000_000) {
+            return errJson('Amount must be between 1 and 10,000,000', 400);
+          }
+
+          const targets = db.users.filter((u) => {
+            if (u.role === 'admin' || this.isMainAdminUser(u)) return false;
+            if (segment === 'verified') return u.emailVerified !== false;
+            if (segment === 'zero_balance') return u.balance <= 0;
+            if (segment === 'active_only') return u.status === 'active';
+            return true;
+          });
+
+          const now = new Date().toISOString();
+          let affectedCount = 0;
+          let totalAmount = 0;
+          for (const u of targets) {
+            const delta = mode === 'credit' ? amount : Math.min(u.balance, amount);
+            if (mode === 'debit' && delta <= 0) continue;
+            u.balance = mode === 'credit' ? u.balance + delta : Math.max(0, u.balance - delta);
+            affectedCount += 1;
+            totalAmount += delta;
+            const txId = makeId('tx');
+            const txType = mode === 'credit' ? 'admin_credit' : 'admin_debit';
+            db.transactions.unshift({
+              id: txId,
+              userId: u.id,
+              userName: u.name,
+              userEmail: u.email,
+              type: txType,
+              amount: delta,
+              status: 'completed',
+              description: note,
+              adminNote: note,
+              createdAt: now,
+            });
+            this.recordAccountingEntry({
+              kind: 'transaction',
+              sourceId: txId,
+              category: txType,
+              userId: u.id,
+              userName: u.name,
+              userEmail: u.email,
+              title: mode === 'credit' ? 'BULK ADMIN CREDIT' : 'BULK ADMIN DEBIT',
+              detail: `${note} [${segment}]`,
+              amount: delta,
+              status: 'completed',
+              createdAt: now,
+            });
+            db.notifications.unshift({
+              id: makeId('ntf'),
+              title: mode === 'credit' ? 'Wallet Credited' : 'Wallet Adjusted',
+              message: `${mode === 'credit' ? 'Added' : 'Deducted'} ${db.settings.currencySymbol}${delta.toLocaleString()} — ${note}`,
+              type: mode === 'credit' ? 'success' : 'info',
+              targetUserId: u.id,
+              readBy: [],
+              createdAt: now,
+            });
+          }
+
+          this.logAudit(
+            currentUser.email,
+            'BULK_WALLET_ADJUST',
+            `${affectedCount} users (${segment})`,
+            `${mode === 'credit' ? 'Credited' : 'Debited'} ${db.settings.currencySymbol}${amount.toLocaleString()} across ${affectedCount} accounts (Total ${db.settings.currencySymbol}${totalAmount.toLocaleString()})`,
+          );
+          this.persistKeys('users', 'transactions', 'accountingRecords', 'notifications', 'auditLogs');
+          return okJson({ ok: true, segment, mode, amount, affectedCount, totalAmount });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/bulk-process-orders') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'orders', 'overview');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const action = String(body.action || '');
+          if (action !== 'complete_boosting' && action !== 'cancel_refund_boosting') {
+            return errJson('Invalid bulk order action', 400);
+          }
+
+          const now = new Date().toISOString();
+          let updatedCount = 0;
+          let refundedAmount = 0;
+
+          for (const order of db.boostingOrders) {
+            if (order.status !== 'pending' && order.status !== 'processing' && order.status !== 'refilling') {
+              continue;
+            }
+            if (action === 'complete_boosting') {
+              order.status = 'completed';
+              order.remains = 0;
+              order.updatedAt = now;
+              this.syncAccountingStatus(order.id, 'completed');
+              updatedCount += 1;
+            } else {
+              order.status = 'cancelled';
+              order.updatedAt = now;
+              this.syncAccountingStatus(order.id, 'cancelled');
+              const user = db.users.find((u) => u.id === order.userId);
+              if (user && order.amount > 0) {
+                user.balance += order.amount;
+                refundedAmount += order.amount;
+                const refTxId = makeId('tx');
+                db.transactions.unshift({
+                  id: refTxId,
+                  userId: user.id,
+                  userName: user.name,
+                  userEmail: user.email,
+                  type: 'refund',
+                  amount: order.amount,
+                  status: 'completed',
+                  description: `Bulk refund for cancelled boost order ${order.id}`,
+                  createdAt: now,
+                });
+                this.recordAccountingEntry({
+                  kind: 'transaction',
+                  sourceId: refTxId,
+                  category: 'refund',
+                  userId: user.id,
+                  userName: user.name,
+                  userEmail: user.email,
+                  title: 'BULK BOOST REFUND',
+                  detail: `Bulk refund for cancelled boost order ${order.id}`,
+                  amount: order.amount,
+                  status: 'completed',
+                  createdAt: now,
+                });
+              }
+              updatedCount += 1;
+            }
+          }
+
+          this.logAudit(
+            currentUser.email,
+            'BULK_PROCESS_ORDERS',
+            `${updatedCount} boosting orders`,
+            action === 'complete_boosting'
+              ? `Marked ${updatedCount} active boosting orders completed`
+              : `Cancelled & refunded ${updatedCount} boosting orders (${db.settings.currencySymbol}${refundedAmount.toLocaleString()})`,
+          );
+          this.persistKeys('boostingOrders', 'users', 'transactions', 'accountingRecords', 'auditLogs');
+          return okJson({ ok: true, action, updatedCount, refundedAmount });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/force-logout-all') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'users', 'overview', 'settings');
+          if (scopeErr) return scopeErr;
+          const nextEpoch = Math.max(1, Math.floor(Number(db.settings.authSessionEpoch ?? 1))) + 1;
+          db.settings.authSessionEpoch = nextEpoch;
+          this.logAudit(
+            currentUser.email,
+            'FORCE_LOGOUT_ALL',
+            `Epoch v${nextEpoch}`,
+            `Invalidated all non-main-admin active sessions (epoch ${nextEpoch})`,
+          );
+          this.persistKeys('settings', 'auditLogs');
+          return okJson({ ok: true, authSessionEpoch: nextEpoch });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/targeted-broadcast') {
+          const scopeErr = this.requireAdminScope(currentUser, request, 'power_suite', 'notifications', 'overview');
+          if (scopeErr) return scopeErr;
+          const body = await readJsonBody(request);
+          const segment = String(body.segment || 'all');
+          const title = String(body.title || '').trim().slice(0, 120);
+          const message = String(body.message || '').trim().slice(0, 1500);
+          const type = body.type === 'success' || body.type === 'warning' ? body.type : 'info';
+          const sendEmail = Boolean(body.sendEmail);
+
+          if (!['all', 'verified', 'unfunded', 'spenders'].includes(segment)) {
+            return errJson('Invalid broadcast segment', 400);
+          }
+          if (!title || !message) {
+            return errJson('Campaign title and message are required', 400);
+          }
+
+          const spenderIds = new Set(
+            db.transactions.filter((t) => t.type === 'purchase').map((t) => t.userId),
+          );
+          const targets = db.users.filter((u) => {
+            if (u.role === 'admin' || this.isMainAdminUser(u) || u.status !== 'active') return false;
+            if (segment === 'verified') return u.emailVerified !== false;
+            if (segment === 'unfunded') return u.balance <= 0;
+            if (segment === 'spenders') return spenderIds.has(u.id);
+            return true;
+          });
+
+          const now = new Date().toISOString();
+          let sentEmails = 0;
+          const safeTitleHtml = escapeHtmlWeb(title);
+          const safeMessageHtml = escapeHtmlWeb(message);
+
+          for (const u of targets) {
+            db.notifications.unshift({
+              id: makeId('ntf'),
+              title,
+              message,
+              type,
+              targetUserId: u.id,
+              readBy: [],
+              createdAt: now,
+            });
+
+            if (sendEmail && u.email) {
+              db.emailLogs.unshift({
+                id: makeId('eml'),
+                to: u.email,
+                subject: title,
+                body: message,
+                sentBy: currentUser.email,
+                createdAt: now,
+              });
+              const mailRes = await sendTransactionalEmailWeb({
+                to: u.email,
+                subject: title,
+                text: message,
+                html: `<div style="font-family:sans-serif;padding:24px;color:#0F172A;"><h2 style="margin:0 0 12px;">${safeTitleHtml}</h2><p style="white-space:pre-line;line-height:1.6;">${safeMessageHtml}</p></div>`,
+                settings: db.settings,
+                envResendApiKey: this.env.RESEND_API_KEY,
+              });
+              if (mailRes.delivered) sentEmails += 1;
+            }
+          }
+
+          this.logAudit(
+            currentUser.email,
+            'TARGETED_BROADCAST',
+            `${targets.length} users (${segment})`,
+            `Sent "${title}" to ${targets.length} accounts (${sentEmails} emails delivered)`,
+          );
+          this.persistKeys('notifications', 'emailLogs', 'auditLogs');
+          return okJson({ ok: true, segment, recipientCount: targets.length, sentEmails });
+        }
+
+        if (method === 'POST' && pathname === '/api/admin/tools/import-backup') {
+          if (!this.isMainAdminUser(currentUser)) {
+            return errJson('Main Admin privileges required for backup restore', 403);
+          }
+          const body = await readJsonBody(request);
+          const rawBackup = body.backup;
+          if (!rawBackup || typeof rawBackup !== 'object' || Array.isArray(rawBackup)) {
+            return errJson('Invalid backup JSON object', 400);
+          }
+          const backup = rawBackup as Record<string, unknown>;
+          const restoredParts: string[] = [];
+          const keysToPersist: Array<keyof DatabaseState> = ['auditLogs'];
+
+          if (backup.settings && typeof backup.settings === 'object' && !Array.isArray(backup.settings)) {
+            const preservedMainEmail = db.settings.mainAdminEmail;
+            const preservedEpoch = db.settings.authSessionEpoch ?? 1;
+            const incomingSettings = backup.settings as Record<string, unknown>;
+            const merged = { ...db.settings };
+            for (const [k, v] of Object.entries(incomingSettings)) {
+              if (k === 'mainAdminEmail' || k === 'authSessionEpoch') continue;
+              if (v !== undefined) {
+                (merged as Record<string, unknown>)[k] = v;
+              }
+            }
+            merged.mainAdminEmail = preservedMainEmail;
+            merged.authSessionEpoch = preservedEpoch;
+            db.settings = merged;
+            restoredParts.push('settings');
+            keysToPersist.push('settings');
+          }
+
+          if (Array.isArray(backup.marketplaceCategories)) {
+            db.marketplaceCategories = backup.marketplaceCategories as DatabaseState['marketplaceCategories'];
+            restoredParts.push('marketplaceCategories');
+            keysToPersist.push('marketplaceCategories');
+          }
+          if (Array.isArray(backup.marketplaceListings)) {
+            db.marketplaceListings = backup.marketplaceListings as DatabaseState['marketplaceListings'];
+            restoredParts.push('marketplaceListings');
+            keysToPersist.push('marketplaceListings');
+          }
+          if (Array.isArray(backup.smsCountries)) {
+            db.smsCountries = backup.smsCountries as DatabaseState['smsCountries'];
+            restoredParts.push('smsCountries');
+            keysToPersist.push('smsCountries');
+          }
+          if (Array.isArray(backup.smsServices)) {
+            db.smsServices = backup.smsServices as DatabaseState['smsServices'];
+            restoredParts.push('smsServices');
+            keysToPersist.push('smsServices');
+          }
+          if (Array.isArray(backup.boostingServices)) {
+            db.boostingServices = backup.boostingServices as DatabaseState['boostingServices'];
+            restoredParts.push('boostingServices');
+            keysToPersist.push('boostingServices');
+          }
+          if (Array.isArray(backup.customSections)) {
+            db.customSections = backup.customSections as DatabaseState['customSections'];
+            restoredParts.push('customSections');
+            keysToPersist.push('customSections');
+          }
+          if (Array.isArray(backup.promoCodes)) {
+            db.promoCodes = backup.promoCodes as DatabaseState['promoCodes'];
+            restoredParts.push('promoCodes');
+            keysToPersist.push('promoCodes');
+          }
+          if (Array.isArray(backup.tutorials)) {
+            db.tutorials = backup.tutorials as DatabaseState['tutorials'];
+            restoredParts.push('tutorials');
+            keysToPersist.push('tutorials');
+          }
+
+          if (restoredParts.length === 0) {
+            return errJson('Backup contained no recognized store sections to restore', 400);
+          }
+
+          this.logAudit(
+            currentUser.email,
+            'IMPORT_BACKUP',
+            `${restoredParts.length} section(s)`,
+            `Restored store configuration & catalog (${restoredParts.join(', ')}) while preserving user accounts & balances`,
+          );
+          this.persistKeys(...keysToPersist);
+          return okJson({ ok: true, restoredParts });
+        }
+
         if (method === 'POST' && pathname === '/api/admin/alerts/read-all') {
           db.adminAlerts.forEach((a) => {
             a.read = true;
@@ -3371,7 +3759,11 @@ export class SureDealStoreDO {
             `Opened live user account session from Overwatch (${target.id})`,
           );
           this.persistKeys('auditLogs');
-          const token = await signTokenWeb(target.id, this.sessionSecret!);
+          const token = await signTokenWeb(
+            target.id,
+            this.sessionSecret!,
+            db.settings.authSessionEpoch ?? 1,
+          );
           return okJson({
             token,
             user: toPublicUser(target),
@@ -5217,8 +5609,15 @@ export class SureDealStoreDO {
               ]),
               cms: new Set([
                 ...copyAllowedKeys,
+                'siteName',
+                'siteTagline',
                 'siteLogoUrl',
                 'clearSiteLogo',
+                'brandColor',
+                'accentColor',
+                'surfaceBgLight',
+                'surfaceBgDark',
+                'colorPreset',
                 'siteNameColorMode',
                 'siteNameColor1',
                 'siteNameColor2',
@@ -5279,22 +5678,25 @@ export class SureDealStoreDO {
                 'smsOrderExpiryMinutes',
                 'referralBonusAmount',
                 'welcomePromoAmount',
+                'welcomePromoEnabled',
                 'blockedEmailDomains',
+                'blockedNameKeywords',
                 'supportCannedReplies',
                 'showPopularBadges',
                 'leaderboardVisible',
                 'maintenanceMode',
-                'pauseMarketplace',
-                'pauseSmsRentals',
-                'pauseBoosting',
-                'autoVerifySignup',
-                'allowRegistrations',
-                'requireLoginForCatalog',
-                'showSocialProofToast',
-                'showPromoPopups',
-                'requireApprovalForLargeDeposits',
-                'largeDepositThreshold',
-                'enforceUniqueEmail',
+                'allowNewSignups',
+                'requireEmailVerification',
+                'enableSmsService',
+                'enableBoostingService',
+                'enableMarketplace',
+                'allowPromoCodes',
+                'autoApproveDeposits',
+                'flashSaleEnabled',
+                'flashSaleLabel',
+                'flashSalePercent',
+                'flashSaleTarget',
+                'flashSaleEndsAt',
               ]),
             };
             const allowedKeys = tabWhitelists[currentUser.allowedAdminTab];
@@ -5536,6 +5938,33 @@ export class SureDealStoreDO {
               .slice(0, 100)
               .map((d: unknown) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
               .filter(Boolean);
+          }
+          if (Array.isArray(body.blockedNameKeywords)) {
+            s.blockedNameKeywords = body.blockedNameKeywords
+              .slice(0, 100)
+              .map((kw: unknown) => String(kw || '').trim().toLowerCase())
+              .filter(Boolean);
+          }
+          if (typeof body.flashSaleEnabled === 'boolean') {
+            s.flashSaleEnabled = body.flashSaleEnabled;
+          }
+          if (typeof body.flashSaleLabel === 'string') {
+            s.flashSaleLabel = body.flashSaleLabel.trim().slice(0, 48) || 'Flash Sale';
+          }
+          if (typeof body.flashSalePercent === 'number' && Number.isFinite(body.flashSalePercent)) {
+            s.flashSalePercent = Math.max(1, Math.min(80, Math.round(body.flashSalePercent)));
+          }
+          if (
+            body.flashSaleTarget === 'all' ||
+            body.flashSaleTarget === 'marketplace' ||
+            body.flashSaleTarget === 'sms' ||
+            body.flashSaleTarget === 'boosting'
+          ) {
+            s.flashSaleTarget = body.flashSaleTarget;
+          }
+          if (typeof body.flashSaleEndsAt === 'string') {
+            const trimmedEnd = body.flashSaleEndsAt.trim();
+            s.flashSaleEndsAt = trimmedEnd && Number.isFinite(Date.parse(trimmedEnd)) ? trimmedEnd : '';
           }
           if (
             typeof body.referralBonusAmount === 'number' &&

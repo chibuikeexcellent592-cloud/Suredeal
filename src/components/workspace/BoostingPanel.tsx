@@ -3,6 +3,7 @@ import { CheckCircle2, RefreshCw, RotateCcw, TrendingUp } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { apiFetch, formatNaira } from '../../lib/api';
 import { getSectionCopy } from '../../lib/sectionCopy';
+import { applyFlashSaleDiscount } from '../../../shared/pricing';
 import type { BoostingOrder, BoostingService } from '../../types';
 
 export function BoostingPanel() {
@@ -49,9 +50,11 @@ export function BoostingPanel() {
   const activeService =
     services.find((s) => s.id === selectedId) || visibleServices[0] || services[0];
 
-  const totalCost = activeService
+  const rawTotalCost = activeService
     ? Math.max(10, Math.round((activeService.ratePer1k * quantity) / 1000))
     : 0;
+  const flashResult = applyFlashSaleDiscount(rawTotalCost, catalog?.settings, 'boosting');
+  const totalCost = flashResult.finalAmount;
 
   const handleOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -218,10 +221,24 @@ export function BoostingPanel() {
 
           <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
             <div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Campaign Total</p>
-              <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
-                {formatNaira(totalCost, symbol)}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Campaign Total</p>
+                {flashResult.active && (
+                  <span className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-bold">
+                    {catalog?.settings?.flashSaleLabel?.trim() || 'Flash Sale'} -{flashResult.discountPercent}%
+                  </span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-2">
+                {flashResult.active && totalCost < rawTotalCost && (
+                  <span className="font-mono text-xs line-through text-slate-400 tabular-nums">
+                    {formatNaira(rawTotalCost, symbol)}
+                  </span>
+                )}
+                <p className="font-mono text-xl font-bold text-slate-900 dark:text-white tabular-nums">
+                  {formatNaira(totalCost, symbol)}
+                </p>
+              </div>
             </div>
             <button
               type="submit"

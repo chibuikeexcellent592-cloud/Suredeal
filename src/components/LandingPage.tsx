@@ -24,6 +24,7 @@ import { BrandLogo } from './BrandLogo';
 import { BrandNameText } from './BrandNameText';
 import { SafeImage } from './SafeImage';
 import { SeasonalRibbon } from './SeasonalEffects';
+import { applyFlashSaleDiscount, isFlashSaleActive } from '../../shared/pricing';
 
 interface LandingPageProps {
   onNavigateAuth: (mode: 'login' | 'signup') => void;
@@ -85,9 +86,7 @@ export function LandingPage({
 
   const rawHeroSub = settings?.heroSubheadline || '';
   const heroSubheadline =
-    rawHeroSub &&
-    rawHeroSub !== LEGACY_SUBHEADLINE &&
-    !/moniepoint/i.test(rawHeroSub)
+    rawHeroSub && rawHeroSub !== LEGACY_SUBHEADLINE
       ? rawHeroSub
       : 'Verify WhatsApp, Telegram, and global accounts with instant one-time codes, launch high-retention social boosting campaigns, and acquire CLiproxy, 9Proxy, PIAVPN, and verified accounts from one clean dashboard.';
 
@@ -204,7 +203,7 @@ export function LandingPage({
       title: 'Social Media Boosting',
       tag: 'Direct Dispatch',
       desc: 'Scale Instagram, TikTok, YouTube, and X profiles with fast followers, likes, and views delivered straight from our order desk.',
-      color: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400',
+      color: 'bg-sky-50 text-sky-600 dark:bg-sky-950/60 dark:text-sky-400',
     },
     {
       icon: KeyRound,
@@ -229,7 +228,14 @@ export function LandingPage({
       deliveryType: 'Creator Growth',
       title: 'Instagram & TikTok Viral Velocity',
       shortSpec: 'High-retention followers, reels views, and instant engagement campaigns.',
-      priceLabel: `From ${formatNaira(boostingServices[2]?.ratePer1k || boostingServices[0]?.ratePer1k || 800, symbol)} / 1K`,
+      priceLabel: `From ${formatNaira(
+        applyFlashSaleDiscount(
+          boostingServices[2]?.ratePer1k || boostingServices[0]?.ratePer1k || 800,
+          settings,
+          'boosting',
+        ).finalAmount,
+        symbol,
+      )} / 1K`,
       imageUrl: '/src/assets/images/social_creator_filming_1794991853059.jpg',
     },
     {
@@ -238,7 +244,14 @@ export function LandingPage({
       deliveryType: '10+ Countries',
       title: 'Instant Account Verification Numbers',
       shortSpec: 'Dedicated WhatsApp, Telegram, TikTok, Instagram, and OpenAI OTP routing.',
-      priceLabel: `From ${formatNaira(smsServices[0]?.basePrice ? Math.round(smsServices[0].basePrice * 0.65) : 900, symbol)} / OTP`,
+      priceLabel: `From ${formatNaira(
+        applyFlashSaleDiscount(
+          smsServices[0]?.basePrice ? Math.round(smsServices[0].basePrice * 0.65) : 900,
+          settings,
+          'sms',
+        ).finalAmount,
+        symbol,
+      )} / OTP`,
       imageUrl: '/src/assets/images/social_mobile_lifestyle_1794991853436.jpg',
     },
     {
@@ -247,7 +260,14 @@ export function LandingPage({
       deliveryType: 'Instant Vault',
       title: 'CLiproxy, 9Proxy & Creator Suites',
       shortSpec: 'Clean residential IPs, VPN licenses, and aged creator accounts for scaling.',
-      priceLabel: `From ${formatNaira(listings[1]?.price || listings[0]?.price || 2800, symbol)}`,
+      priceLabel: `From ${formatNaira(
+        applyFlashSaleDiscount(
+          listings[1]?.price || listings[0]?.price || 2800,
+          settings,
+          'marketplace',
+        ).finalAmount,
+        symbol,
+      )}`,
       imageUrl: '/src/assets/images/social_workspace_creators_1794991853444.jpg',
     },
   ];
@@ -581,13 +601,17 @@ export function LandingPage({
                         </div>
                       </div>
                       <span className="font-mono text-xs font-bold text-blue-600 dark:text-sky-400 shrink-0">
-                        From {formatNaira(900, symbol)}
+                        From{' '}
+                        {formatNaira(
+                          applyFlashSaleDiscount(900, settings, 'sms').finalAmount,
+                          symbol,
+                        )}
                       </span>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 flex items-center justify-center shrink-0">
+                        <div className="w-9 h-9 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-600 flex items-center justify-center shrink-0">
                           <TrendingUp className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
@@ -600,7 +624,16 @@ export function LandingPage({
                         </div>
                       </div>
                       <span className="font-mono text-xs font-bold text-blue-600 dark:text-sky-400 shrink-0">
-                        From {formatNaira(boostingServices[2]?.ratePer1k || 800, symbol)}/1K
+                        From{' '}
+                        {formatNaira(
+                          applyFlashSaleDiscount(
+                            boostingServices[2]?.ratePer1k || 800,
+                            settings,
+                            'boosting',
+                          ).finalAmount,
+                          symbol,
+                        )}
+                        /1K
                       </span>
                     </div>
 
@@ -619,10 +652,24 @@ export function LandingPage({
                         </div>
                       </div>
                       <span className="font-mono text-xs font-bold text-blue-600 dark:text-sky-400 shrink-0">
-                        From {formatNaira(listings[1]?.price || 2800, symbol)}
+                        From{' '}
+                        {formatNaira(
+                          applyFlashSaleDiscount(
+                            listings[1]?.price || 2800,
+                            settings,
+                            'marketplace',
+                          ).finalAmount,
+                          symbol,
+                        )}
                       </span>
                     </div>
                   </div>
+                  {isFlashSaleActive(settings) && (
+                    <div className="px-3.5 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 flex items-center justify-between text-xs font-bold text-blue-700 dark:text-sky-300">
+                      <span>{settings?.flashSaleLabel?.trim() || 'Flash Sale Live'}</span>
+                      <span>{settings?.flashSalePercent}% OFF</span>
+                    </div>
+                  )}
 
                   <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-sky-500 p-4 text-white flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -877,7 +924,11 @@ export function LandingPage({
                       </div>
                       <div className="flex items-center gap-4 shrink-0">
                         <span className="font-mono text-sm font-bold text-slate-900 dark:text-white tabular-nums">
-                          {formatNaira(svc.ratePer1k, symbol)} / 1K
+                          {formatNaira(
+                            applyFlashSaleDiscount(svc.ratePer1k, settings, 'boosting').finalAmount,
+                            symbol,
+                          )}{' '}
+                          / 1K
                         </span>
                         <button
                           type="button"
@@ -909,7 +960,15 @@ export function LandingPage({
                       </div>
                       <div className="flex items-center gap-4 shrink-0">
                         <span className="font-mono text-sm font-bold text-slate-900 dark:text-white tabular-nums">
-                          From {formatNaira(Math.round(svc.basePrice * 0.65), symbol)}
+                          From{' '}
+                          {formatNaira(
+                            applyFlashSaleDiscount(
+                              Math.round(svc.basePrice * 0.65),
+                              settings,
+                              'sms',
+                            ).finalAmount,
+                            symbol,
+                          )}
                         </span>
                         <button
                           type="button"
@@ -940,7 +999,10 @@ export function LandingPage({
                       </div>
                       <div className="flex items-center gap-4 shrink-0">
                         <span className="font-mono text-sm font-bold text-slate-900 dark:text-white tabular-nums">
-                          {formatNaira(item.price, symbol)}
+                          {formatNaira(
+                            applyFlashSaleDiscount(item.price, settings, 'marketplace').finalAmount,
+                            symbol,
+                          )}
                         </span>
                         <button
                           type="button"

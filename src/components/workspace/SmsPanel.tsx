@@ -17,6 +17,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { apiFetch, copyText, formatCountdown, formatNaira } from '../../lib/api';
 import { getSectionCopy } from '../../lib/sectionCopy';
+import { applyFlashSaleDiscount, isFlashSaleActive } from '../../../shared/pricing';
 import type { SmsCountry, SmsOrder, SmsService } from '../../types';
 
 function countryCodeToFlag(code?: string): string {
@@ -162,7 +163,10 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
     activeService && activeCountry
       ? Math.round(activeService.basePrice * activeCountry.multiplier)
       : 0;
-  const computedPrice = primePrice > 0 ? calcTierPrice(primePrice) : 0;
+  const tierPrice = primePrice > 0 ? calcTierPrice(primePrice) : 0;
+  const smsFlashActive = isFlashSaleActive(settings, 'sms');
+  const flashResult = applyFlashSaleDiscount(tierPrice, settings, 'sms');
+  const computedPrice = flashResult.finalAmount;
   const availableStock = activeService?.stock ?? 0;
   const shortfall = Math.max(0, computedPrice - walletBalance);
   const hasInsufficientBalance = computedPrice > 0 && walletBalance < computedPrice;
@@ -291,7 +295,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
               onClick={() => setTier('prime')}
               className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 tier === 'prime'
-                  ? 'bg-[#A594F9] text-slate-950 shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -302,7 +306,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
               onClick={() => setTier('alternate')}
               className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 tier === 'alternate'
-                  ? 'bg-[#A594F9] text-slate-950 shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -311,7 +315,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 <span
                   className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
                     tier === 'alternate'
-                      ? 'bg-slate-950/15 text-slate-950'
+                      ? 'bg-white/20 text-white'
                       : alternateMode === 'markup'
                         ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
                         : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
@@ -337,7 +341,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 value={selectedCountryId}
                 onChange={(e) => setSelectedCountryId(e.target.value)}
                 disabled={loading || countries.length === 0}
-                className="w-full appearance-none px-3.5 py-3 pr-9 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer"
+                className="w-full appearance-none px-3.5 py-3 pr-9 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer"
               >
                 {countries.length === 0 ? (
                   <option value="">Loading countries...</option>
@@ -349,7 +353,9 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                   ))
                 )}
               </select>
-              <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2" />
+              <span className="inset-y-0 right-3.5 flex items-center pointer-events-none absolute">
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              </span>
             </div>
           </div>
 
@@ -363,7 +369,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 Service
               </label>
               {services.length > 6 && (
-                <div className="w-44 flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus-within:ring-2 focus-within:ring-violet-500">
+                <div className="w-44 flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus-within:ring-2 focus-within:ring-blue-600">
                   <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <input
                     type="text"
@@ -391,7 +397,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 value={selectedServiceId}
                 onChange={(e) => setSelectedServiceId(e.target.value)}
                 disabled={loading || filteredServices.length === 0}
-                className="w-full appearance-none px-3.5 py-3 pr-9 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer"
+                className="w-full appearance-none px-3.5 py-3 pr-9 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-[#191B26] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer"
               >
                 {filteredServices.length === 0 ? (
                   <option value="">
@@ -400,7 +406,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                 ) : (
                   filteredServices.map((svc) => {
                     const base = Math.round(svc.basePrice * (activeCountry?.multiplier || 1));
-                    const shown = calcTierPrice(base);
+                    const shown = applyFlashSaleDiscount(calcTierPrice(base), settings, 'sms').finalAmount;
                     return (
                       <option key={svc.id} value={svc.id}>
                         {svc.name} · {formatNaira(shown, symbol)} ({svc.stock.toLocaleString()} ready)
@@ -409,20 +415,30 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
                   })
                 )}
               </select>
-              <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2" />
+              <span className="inset-y-0 right-3.5 flex items-center pointer-events-none absolute">
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              </span>
             </div>
           </div>
 
           {/* Bordered Summary Box: Payable Amount, Available Stock, Coupon + Wallet Balance Pill */}
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-[#161722] divide-y divide-slate-200/80 dark:divide-slate-800">
             <div className="px-4 py-3.5 flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                Payable Amount
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Payable Amount
+                </span>
+                {smsFlashActive && (
+                  <span className="px-2 py-0.5 rounded-md bg-blue-600 text-white text-[10px] font-bold">
+                    {settings?.flashSaleLabel?.trim() || 'Flash Sale'} -{flashResult.discountPercent}%
+                  </span>
+                )}
+              </div>
               <div className="text-right">
-                {tier === 'alternate' && primePrice !== computedPrice && (
+                {((tier === 'alternate' && primePrice !== computedPrice) ||
+                  (flashResult.active && computedPrice < tierPrice)) && (
                   <span className="font-mono text-xs line-through text-slate-400 mr-2 tabular-nums">
-                    {formatNaira(primePrice, symbol)}
+                    {formatNaira(flashResult.active ? tierPrice : primePrice, symbol)}
                   </span>
                 )}
                 <span className="font-mono text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tabular-nums">
@@ -467,14 +483,14 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
 
               {allowPromoCodes && couponOpen && (
                 <div className="flex items-center gap-2 pt-1">
-                  <div className="relative flex-1">
-                    <Tag className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11121B] focus-within:ring-2 focus-within:ring-blue-600 focus-within:border-blue-600">
+                    <Tag className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <input
                       type="text"
                       value={promoCode}
                       onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
                       placeholder="Enter promo code (e.g. SURE10)"
-                      className="w-full pl-8 pr-3 py-2 text-xs font-mono uppercase rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#11121B] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      className="flex-1 min-w-0 bg-transparent text-xs font-mono uppercase text-slate-900 dark:text-white focus:outline-none"
                     />
                   </div>
                   {promoCode.trim() && (
@@ -530,7 +546,7 @@ export function SmsPanel({ onFundWallet }: SmsPanelProps) {
               availableStock <= 0 ||
               hasInsufficientBalance
             }
-            className="w-full py-3.5 px-5 text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 dark:bg-[#6E63B6] dark:hover:bg-[#7D71CC] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl shadow-sm transition-colors cursor-pointer"
+            className="w-full py-3.5 px-5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl shadow-sm transition-colors cursor-pointer"
           >
             {smsPaused
               ? 'Service Paused'

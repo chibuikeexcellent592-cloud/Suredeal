@@ -3041,13 +3041,13 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <div className="lg:col-span-5 space-y-5">
             {/* AI Section Architect */}
-            <div className="bg-gradient-to-br from-violet-950 via-slate-900 to-blue-950 text-white border border-violet-700/50 rounded-2xl p-5 space-y-3 shadow-md">
+            <div className="bg-gradient-to-br from-blue-950 via-slate-900 to-slate-900 text-white border border-blue-700/50 rounded-2xl p-5 space-y-3 shadow-md">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-display text-sm font-bold flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-amber-400" />
                   AI Section Architect
                 </h3>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/10 text-violet-200">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/10 text-sky-200">
                   Gemini Ready
                 </span>
               </div>
@@ -3427,7 +3427,7 @@ export function AdminCatalogPanel({ data, onRefresh }: CatalogProps) {
                     </div>
                     <p className="text-xs text-slate-500">{sec.description}</p>
                     {sec.aiNotes && (
-                      <p className="text-[11px] text-violet-600 dark:text-violet-400">
+                      <p className="text-[11px] text-blue-600 dark:text-sky-400">
                         AI Note: {sec.aiNotes}
                       </p>
                     )}
@@ -4377,7 +4377,14 @@ export function AdminCommsAndSettingsPanel({
   }, [data.settings]);
 
   const CMS_SETTINGS_KEYS = new Set<string>([
+    'siteName',
+    'siteTagline',
     'siteLogoUrl',
+    'brandColor',
+    'accentColor',
+    'surfaceBgLight',
+    'surfaceBgDark',
+    'colorPreset',
     'landingVideoUrl',
     'heroKicker',
     'heroHeadline',
@@ -6220,7 +6227,7 @@ export function AdminCommsAndSettingsPanel({
                 <option value="blue">Blue Gradient</option>
                 <option value="dark">Obsidian Dark</option>
                 <option value="amber">Amber Alert</option>
-                <option value="purple">Purple Gradient</option>
+                <option value="purple">Cobalt Blue Gradient</option>
               </select>
             </div>
           </div>

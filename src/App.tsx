@@ -53,7 +53,7 @@ class AppErrorBoundary extends Component<
 }
 
 function AppRouter() {
-  const { user, authLoading, catalog, impersonatingFromAdmin, exitImpersonation } = useApp();
+  const { user, authLoading, catalog, catalogLoading, impersonatingFromAdmin, exitImpersonation } = useApp();
   const [view, setView] = useState<'landing' | 'auth' | 'workspace' | 'admin'>('landing');
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [previewMaintenance, setPreviewMaintenance] = useState(false);
@@ -160,10 +160,10 @@ function AppRouter() {
     }
   }, [user?.role, previewMaintenance]);
 
-  if (authLoading) {
+  if (authLoading || (!catalog && catalogLoading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--site-bg)] text-sm text-slate-500">
-        Loading SureDeal Store...
+        Loading {catalog?.settings?.siteName || 'SureDeal Store'}...
       </div>
     );
   }

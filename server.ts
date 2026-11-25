@@ -21,6 +21,7 @@ import {
   type StoredUser,
 } from './server/store.ts';
 import { HEAD_ADMIN_EMAIL } from './shared/initialData.ts';
+import { applyFlashSaleDiscount } from './shared/pricing.ts';
 import type {
   AdminFeatureTab,
   BoostingService,
@@ -32,7 +33,24 @@ import type {
   SmsService,
 } from './src/types.ts';
 
-const PORT = Number(process.env.PORT || 3000);
+function resolveServerPort(): number {
+  if (process.env.PORT) {
+    const envPort = Number(process.env.PORT);
+    if (Number.isFinite(envPort) && envPort > 0) return envPort;
+  }
+  const flagIdx = process.argv.findIndex((arg) => arg === '--port' || arg === '-p');
+  if (flagIdx !== -1 && process.argv[flagIdx + 1]) {
+    const argPort = Number(process.argv[flagIdx + 1]);
+    if (Number.isFinite(argPort) && argPort > 0) return argPort;
+  }
+  const eqFlag = process.argv.find((arg) => arg.startsWith('--port='));
+  if (eqFlag) {
+    const eqPort = Number(eqFlag.slice('--port='.length));
+    if (Number.isFinite(eqPort) && eqPort > 0) return eqPort;
+  }
+  return 3000;
+}
+const PORT = resolveServerPort();
 const TOKEN_SECRET =
   process.env.SESSION_SECRET ||
   crypto.createHash('sha256').update('suredeal-store-token-key-2026').digest('hex');
@@ -40,12 +58,24 @@ const TOKEN_SECRET =
 interface TokenPayload {
   userId: string;
   exp: number;
+  epoch?: number;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function signToken(userId: string): string {
+  const currentEpoch = Math.max(1, Math.floor(Number(store.db.settings.authSessionEpoch ?? 1)));
   const payload: TokenPayload = {
     userId,
     exp: Date.now() + 1000 * 60 * 60 * 24 * 14,
+    epoch: currentEpoch,
   };
   const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
@@ -101,6 +131,11 @@ function resolveAuthedUser(req: AuthedRequest, res: Response): StoredUser | null
     user.id === 'usr_head_admin' ||
     Boolean(user.isMainAdmin) ||
     user.email.toLowerCase() === (store.db.settings.mainAdminEmail || HEAD_ADMIN_EMAIL).toLowerCase();
+  const minEpoch = Math.max(1, Math.floor(Number(store.db.settings.authSessionEpoch ?? 1)));
+  if (!isHead && (payload.epoch ?? 1) < minEpoch) {
+    res.status(401).json({ error: 'Session reset by administrator. Please sign in again.' });
+    return null;
+  }
   if ((user.role === 'admin' || isHead) && user.status !== 'active') {
     user.status = 'active';
     store.save();
@@ -578,6 +613,14 @@ async function startServer() {
       res.status(403).json({ error: 'Registrations from this email domain are currently blocked.' });
       return;
     }
+    const blockedNames = (store.db.settings.blockedNameKeywords || [])
+      .map((kw) => String(kw || '').trim().toLowerCase())
+      .filter(Boolean);
+    const lowerName = name.toLowerCase();
+    if (blockedNames.some((kw) => lowerName.includes(kw))) {
+      res.status(403).json({ error: 'That display name contains a restricted keyword.' });
+      return;
+    }
     if (password.length < 6) {
       res.status(400).json({ error: 'Password must be at least 6 characters' });
       return;
@@ -992,8 +1035,10 @@ async function startServer() {
           ? Math.max(50, Math.round(basePrice * (1 + altPct / 100)))
           : Math.max(50, Math.round(basePrice * (1 - altPct / 100)))
         : basePrice;
+    const smsFlash = applyFlashSaleDiscount(tierPrice, store.db.settings, 'sms');
+    const saleTierPrice = smsFlash.active ? Math.max(50, smsFlash.finalAmount) : tierPrice;
 
-    let price = tierPrice;
+    let price = saleTierPrice;
     let appliedPromo: PromoCode | undefined;
     if (promoCodeStr) {
       if (store.db.settings.allowPromoCodes === false) {
@@ -1008,9 +1053,9 @@ async function startServer() {
         return;
       }
       if (appliedPromo.discountType === 'percent') {
-        price = Math.max(50, Math.round(tierPrice * (1 - appliedPromo.value / 100)));
+        price = Math.max(50, Math.round(saleTierPrice * (1 - appliedPromo.value / 100)));
       } else {
-        price = Math.max(50, tierPrice - appliedPromo.value);
+        price = Math.max(50, saleTierPrice - appliedPromo.value);
       }
     }
 
@@ -1255,7 +1300,9 @@ async function startServer() {
       return;
     }
 
-    const amount = Math.max(10, Math.round((service.ratePer1k * quantity) / 1000));
+    const rawBoostAmount = Math.max(10, Math.round((service.ratePer1k * quantity) / 1000));
+    const boostFlash = applyFlashSaleDiscount(rawBoostAmount, store.db.settings, 'boosting');
+    const amount = boostFlash.active ? Math.max(10, boostFlash.finalAmount) : rawBoostAmount;
     if (user.balance < amount) {
       res.status(400).json({
         error: `Insufficient wallet balance. Campaign costs ${store.db.settings.currencySymbol}${amount.toLocaleString()}.`,
@@ -1405,7 +1452,9 @@ async function startServer() {
       return;
     }
 
-    const baseTotal = listing.price * quantity;
+    const rawTotal = listing.price * quantity;
+    const mktFlash = applyFlashSaleDiscount(rawTotal, store.db.settings, 'marketplace');
+    const baseTotal = mktFlash.active ? mktFlash.finalAmount : rawTotal;
     let finalTotal = baseTotal;
     let appliedPromo: PromoCode | undefined;
     if (promoCodeStr) {
@@ -1585,7 +1634,9 @@ async function startServer() {
       });
       return;
     }
-    const totalPrice = product.price * quantity;
+    const rawSectionPrice = product.price * quantity;
+    const secFlash = applyFlashSaleDiscount(rawSectionPrice, store.db.settings, 'marketplace');
+    const totalPrice = secFlash.active ? secFlash.finalAmount : rawSectionPrice;
     if (user.balance < totalPrice) {
       res.status(400).json({
         error: `Insufficient wallet balance. Need ${store.db.settings.currencySymbol}${totalPrice.toLocaleString()}.`,
@@ -1597,8 +1648,11 @@ async function startServer() {
     user.balance -= totalPrice;
     product.stock -= quantity;
 
+    const secUnitPaid = quantity === 1 ? totalPrice : Math.round(totalPrice / quantity);
     const createdVaultItems: (typeof store.db.vaultItems)[number][] = [];
     for (let i = 0; i < quantity; i++) {
+      const itemPrice =
+        i === quantity - 1 ? Math.max(0, totalPrice - secUnitPaid * (quantity - 1)) : secUnitPaid;
       createdVaultItems.push({
         id: makeId('vlt'),
         userId: user.id,
@@ -1606,7 +1660,7 @@ async function startServer() {
         sourceId: product.id,
         title: quantity > 1 ? `${product.title} (${i + 1}/${quantity})` : product.title,
         category: section.name,
-        price: product.price,
+        price: itemPrice,
         deliveredCredential: buildCredentialFromTemplate(product.credentialTemplate),
         deliveryType: 'Vault Delivery',
         buyWarningShown:
@@ -2516,6 +2570,318 @@ async function startServer() {
     );
     store.save();
     res.json({ ok: true, verifiedUsers, verifiedCount: verifiedUsers, clearedPending });
+  });
+
+  app.post('/api/admin/tools/bulk-credit-users', requireAuth, requireAdminScope('power_suite', 'users', 'overview'), (req: AuthedRequest, res) => {
+    const segment = String(req.body?.segment || 'all');
+    const mode = req.body?.mode === 'debit' ? 'debit' : 'credit';
+    const amount = Math.round(Number(req.body?.amount || 0));
+    const note = String(req.body?.note || '').trim().slice(0, 140) || `Bulk ${mode} by Overwatch`;
+    if (!['all', 'verified', 'zero_balance', 'active_only'].includes(segment)) {
+      res.status(400).json({ error: 'Invalid user segment selected' });
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 1 || amount > 10_000_000) {
+      res.status(400).json({ error: 'Amount must be between 1 and 10,000,000' });
+      return;
+    }
+
+    const targets = store.db.users.filter((u) => {
+      if (u.role === 'admin' || isMainAdminUser(u)) return false;
+      if (segment === 'verified') return u.emailVerified !== false;
+      if (segment === 'zero_balance') return u.balance <= 0;
+      if (segment === 'active_only') return u.status === 'active';
+      return true;
+    });
+
+    const now = new Date().toISOString();
+    let affectedCount = 0;
+    let totalAmount = 0;
+    for (const u of targets) {
+      const delta = mode === 'credit' ? amount : Math.min(u.balance, amount);
+      if (mode === 'debit' && delta <= 0) continue;
+      u.balance = mode === 'credit' ? u.balance + delta : Math.max(0, u.balance - delta);
+      affectedCount += 1;
+      totalAmount += delta;
+      const txId = makeId('tx');
+      const txType = mode === 'credit' ? 'admin_credit' : 'admin_debit';
+      store.db.transactions.unshift({
+        id: txId,
+        userId: u.id,
+        userName: u.name,
+        userEmail: u.email,
+        type: txType,
+        amount: delta,
+        status: 'completed',
+        description: note,
+        adminNote: note,
+        createdAt: now,
+      });
+      store.recordAccountingEntry({
+        kind: 'transaction',
+        sourceId: txId,
+        category: txType,
+        userId: u.id,
+        userName: u.name,
+        userEmail: u.email,
+        title: mode === 'credit' ? 'BULK ADMIN CREDIT' : 'BULK ADMIN DEBIT',
+        detail: `${note} [${segment}]`,
+        amount: delta,
+        status: 'completed',
+        createdAt: now,
+      });
+      store.db.notifications.unshift({
+        id: makeId('ntf'),
+        title: mode === 'credit' ? 'Wallet Credited' : 'Wallet Adjusted',
+        message: `${mode === 'credit' ? 'Added' : 'Deducted'} ${store.db.settings.currencySymbol}${delta.toLocaleString()} — ${note}`,
+        type: mode === 'credit' ? 'success' : 'info',
+        targetUserId: u.id,
+        readBy: [],
+        createdAt: now,
+      });
+    }
+
+    store.logAudit(
+      req.currentUser!.email,
+      'BULK_WALLET_ADJUST',
+      `${affectedCount} users (${segment})`,
+      `${mode === 'credit' ? 'Credited' : 'Debited'} ${store.db.settings.currencySymbol}${amount.toLocaleString()} across ${affectedCount} accounts (Total ${store.db.settings.currencySymbol}${totalAmount.toLocaleString()})`,
+    );
+    store.save();
+    res.json({ ok: true, segment, mode, amount, affectedCount, totalAmount });
+  });
+
+  app.post('/api/admin/tools/bulk-process-orders', requireAuth, requireAdminScope('power_suite', 'orders', 'overview'), (req: AuthedRequest, res) => {
+    const action = String(req.body?.action || '');
+    if (action !== 'complete_boosting' && action !== 'cancel_refund_boosting') {
+      res.status(400).json({ error: 'Invalid bulk order action' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    let updatedCount = 0;
+    let refundedAmount = 0;
+
+    for (const order of store.db.boostingOrders) {
+      if (order.status !== 'pending' && order.status !== 'processing' && order.status !== 'refilling') {
+        continue;
+      }
+      if (action === 'complete_boosting') {
+        order.status = 'completed';
+        order.remains = 0;
+        order.updatedAt = now;
+        store.syncAccountingStatus(order.id, 'completed');
+        updatedCount += 1;
+      } else {
+        order.status = 'cancelled';
+        order.updatedAt = now;
+        store.syncAccountingStatus(order.id, 'cancelled');
+        const user = store.db.users.find((u) => u.id === order.userId);
+        if (user && order.amount > 0) {
+          user.balance += order.amount;
+          refundedAmount += order.amount;
+          const refTxId = makeId('tx');
+          store.db.transactions.unshift({
+            id: refTxId,
+            userId: user.id,
+            userName: user.name,
+            userEmail: user.email,
+            type: 'refund',
+            amount: order.amount,
+            status: 'completed',
+            description: `Bulk refund for cancelled boost order ${order.id}`,
+            createdAt: now,
+          });
+          store.recordAccountingEntry({
+            kind: 'transaction',
+            sourceId: refTxId,
+            category: 'refund',
+            userId: user.id,
+            userName: user.name,
+            userEmail: user.email,
+            title: 'BULK BOOST REFUND',
+            detail: `Bulk refund for cancelled boost order ${order.id}`,
+            amount: order.amount,
+            status: 'completed',
+            createdAt: now,
+          });
+        }
+        updatedCount += 1;
+      }
+    }
+
+    store.logAudit(
+      req.currentUser!.email,
+      'BULK_PROCESS_ORDERS',
+      `${updatedCount} boosting orders`,
+      action === 'complete_boosting'
+        ? `Marked ${updatedCount} active boosting orders completed`
+        : `Cancelled & refunded ${updatedCount} boosting orders (${store.db.settings.currencySymbol}${refundedAmount.toLocaleString()})`,
+    );
+    store.save();
+    res.json({ ok: true, action, updatedCount, refundedAmount });
+  });
+
+  app.post('/api/admin/tools/force-logout-all', requireAuth, requireAdminScope('power_suite', 'users', 'overview', 'settings'), (req: AuthedRequest, res) => {
+    const nextEpoch = Math.max(1, Math.floor(Number(store.db.settings.authSessionEpoch ?? 1))) + 1;
+    store.db.settings.authSessionEpoch = nextEpoch;
+    store.logAudit(
+      req.currentUser!.email,
+      'FORCE_LOGOUT_ALL',
+      `Epoch v${nextEpoch}`,
+      `Invalidated all non-main-admin active sessions (epoch ${nextEpoch})`,
+    );
+    store.save();
+    res.json({ ok: true, authSessionEpoch: nextEpoch });
+  });
+
+  app.post('/api/admin/tools/targeted-broadcast', requireAuth, requireAdminScope('power_suite', 'notifications', 'overview'), async (req: AuthedRequest, res) => {
+    const segment = String(req.body?.segment || 'all');
+    const title = String(req.body?.title || '').trim().slice(0, 120);
+    const message = String(req.body?.message || '').trim().slice(0, 1500);
+    const type =
+      req.body?.type === 'success' || req.body?.type === 'warning' ? req.body.type : 'info';
+    const sendEmail = Boolean(req.body?.sendEmail);
+
+    if (!['all', 'verified', 'unfunded', 'spenders'].includes(segment)) {
+      res.status(400).json({ error: 'Invalid broadcast segment' });
+      return;
+    }
+    if (!title || !message) {
+      res.status(400).json({ error: 'Campaign title and message are required' });
+      return;
+    }
+
+    const spenderIds = new Set(
+      store.db.transactions.filter((t) => t.type === 'purchase').map((t) => t.userId),
+    );
+
+    const targets = store.db.users.filter((u) => {
+      if (u.role === 'admin' || isMainAdminUser(u) || u.status !== 'active') return false;
+      if (segment === 'verified') return u.emailVerified !== false;
+      if (segment === 'unfunded') return u.balance <= 0;
+      if (segment === 'spenders') return spenderIds.has(u.id);
+      return true;
+    });
+
+    const now = new Date().toISOString();
+    let sentEmails = 0;
+    const safeTitleHtml = escapeHtml(title);
+    const safeMessageHtml = escapeHtml(message);
+
+    for (const u of targets) {
+      store.db.notifications.unshift({
+        id: makeId('ntf'),
+        title,
+        message,
+        type,
+        targetUserId: u.id,
+        readBy: [],
+        createdAt: now,
+      });
+
+      if (sendEmail && u.email) {
+        store.db.emailLogs.unshift({
+          id: makeId('eml'),
+          to: u.email,
+          subject: title,
+          body: message,
+          sentBy: req.currentUser!.email,
+          createdAt: now,
+        });
+        const mailRes = await sendTransactionalEmail({
+          to: u.email,
+          subject: title,
+          text: message,
+          html: `<div style="font-family:sans-serif;padding:24px;color:#0F172A;"><h2 style="margin:0 0 12px;">${safeTitleHtml}</h2><p style="white-space:pre-line;line-height:1.6;">${safeMessageHtml}</p></div>`,
+          settings: store.db.settings,
+        });
+        if (mailRes.delivered) sentEmails += 1;
+      }
+    }
+
+    store.logAudit(
+      req.currentUser!.email,
+      'TARGETED_BROADCAST',
+      `${targets.length} users (${segment})`,
+      `Sent "${title}" to ${targets.length} accounts (${sentEmails} emails delivered)`,
+    );
+    store.save();
+    res.json({ ok: true, segment, recipientCount: targets.length, sentEmails });
+  });
+
+  app.post('/api/admin/tools/import-backup', requireAuth, requireMainAdmin, (req: AuthedRequest, res) => {
+    const rawBackup = req.body?.backup;
+    if (!rawBackup || typeof rawBackup !== 'object' || Array.isArray(rawBackup)) {
+      res.status(400).json({ error: 'Invalid backup JSON object' });
+      return;
+    }
+    const backup = rawBackup as Record<string, unknown>;
+    const restoredParts: string[] = [];
+
+    if (backup.settings && typeof backup.settings === 'object' && !Array.isArray(backup.settings)) {
+      const preservedMainEmail = store.db.settings.mainAdminEmail;
+      const preservedEpoch = store.db.settings.authSessionEpoch ?? 1;
+      const incomingSettings = backup.settings as Record<string, unknown>;
+      const merged = { ...store.db.settings };
+      for (const [k, v] of Object.entries(incomingSettings)) {
+        if (k === 'mainAdminEmail' || k === 'authSessionEpoch') continue;
+        if (v !== undefined) {
+          (merged as Record<string, unknown>)[k] = v;
+        }
+      }
+      merged.mainAdminEmail = preservedMainEmail;
+      merged.authSessionEpoch = preservedEpoch;
+      store.db.settings = merged;
+      restoredParts.push('settings');
+    }
+
+    if (Array.isArray(backup.marketplaceCategories)) {
+      store.db.marketplaceCategories = backup.marketplaceCategories as typeof store.db.marketplaceCategories;
+      restoredParts.push('marketplaceCategories');
+    }
+    if (Array.isArray(backup.marketplaceListings)) {
+      store.db.marketplaceListings = backup.marketplaceListings as typeof store.db.marketplaceListings;
+      restoredParts.push('marketplaceListings');
+    }
+    if (Array.isArray(backup.smsCountries)) {
+      store.db.smsCountries = backup.smsCountries as typeof store.db.smsCountries;
+      restoredParts.push('smsCountries');
+    }
+    if (Array.isArray(backup.smsServices)) {
+      store.db.smsServices = backup.smsServices as typeof store.db.smsServices;
+      restoredParts.push('smsServices');
+    }
+    if (Array.isArray(backup.boostingServices)) {
+      store.db.boostingServices = backup.boostingServices as typeof store.db.boostingServices;
+      restoredParts.push('boostingServices');
+    }
+    if (Array.isArray(backup.customSections)) {
+      store.db.customSections = backup.customSections as typeof store.db.customSections;
+      restoredParts.push('customSections');
+    }
+    if (Array.isArray(backup.promoCodes)) {
+      store.db.promoCodes = backup.promoCodes as typeof store.db.promoCodes;
+      restoredParts.push('promoCodes');
+    }
+    if (Array.isArray(backup.tutorials)) {
+      store.db.tutorials = backup.tutorials as typeof store.db.tutorials;
+      restoredParts.push('tutorials');
+    }
+
+    if (restoredParts.length === 0) {
+      res.status(400).json({ error: 'Backup contained no recognized store sections to restore' });
+      return;
+    }
+
+    store.logAudit(
+      req.currentUser!.email,
+      'IMPORT_BACKUP',
+      `${restoredParts.length} section(s)`,
+      `Restored store configuration & catalog (${restoredParts.join(', ')}) while preserving user accounts & balances`,
+    );
+    store.save();
+    res.json({ ok: true, restoredParts });
   });
 
   app.post('/api/admin/alerts/read-all', requireAuth, requireAdmin, (_req, res) => {
@@ -4620,8 +4986,15 @@ async function startServer() {
         ]),
         cms: new Set([
           ...copyAllowedKeys,
+          'siteName',
+          'siteTagline',
           'siteLogoUrl',
           'clearSiteLogo',
+          'brandColor',
+          'accentColor',
+          'surfaceBgLight',
+          'surfaceBgDark',
+          'colorPreset',
           'siteNameColorMode',
           'siteNameColor1',
           'siteNameColor2',
@@ -4682,22 +5055,25 @@ async function startServer() {
           'smsOrderExpiryMinutes',
           'referralBonusAmount',
           'welcomePromoAmount',
+          'welcomePromoEnabled',
           'blockedEmailDomains',
+          'blockedNameKeywords',
           'supportCannedReplies',
           'showPopularBadges',
           'leaderboardVisible',
           'maintenanceMode',
-          'pauseMarketplace',
-          'pauseSmsRentals',
-          'pauseBoosting',
-          'autoVerifySignup',
-          'allowRegistrations',
-          'requireLoginForCatalog',
-          'showSocialProofToast',
-          'showPromoPopups',
-          'requireApprovalForLargeDeposits',
-          'largeDepositThreshold',
-          'enforceUniqueEmail',
+          'allowNewSignups',
+          'requireEmailVerification',
+          'enableSmsService',
+          'enableBoostingService',
+          'enableMarketplace',
+          'allowPromoCodes',
+          'autoApproveDeposits',
+          'flashSaleEnabled',
+          'flashSaleLabel',
+          'flashSalePercent',
+          'flashSaleTarget',
+          'flashSaleEndsAt',
         ]),
       };
       const allowedKeys = tabWhitelists[caller.allowedAdminTab];
@@ -4934,6 +5310,33 @@ async function startServer() {
         .slice(0, 100)
         .map((d: unknown) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
         .filter(Boolean);
+    }
+    if (Array.isArray(body.blockedNameKeywords)) {
+      s.blockedNameKeywords = body.blockedNameKeywords
+        .slice(0, 100)
+        .map((kw: unknown) => String(kw || '').trim().toLowerCase())
+        .filter(Boolean);
+    }
+    if (typeof body.flashSaleEnabled === 'boolean') {
+      s.flashSaleEnabled = body.flashSaleEnabled;
+    }
+    if (typeof body.flashSaleLabel === 'string') {
+      s.flashSaleLabel = body.flashSaleLabel.trim().slice(0, 48) || 'Flash Sale';
+    }
+    if (typeof body.flashSalePercent === 'number' && Number.isFinite(body.flashSalePercent)) {
+      s.flashSalePercent = Math.max(1, Math.min(80, Math.round(body.flashSalePercent)));
+    }
+    if (
+      body.flashSaleTarget === 'all' ||
+      body.flashSaleTarget === 'marketplace' ||
+      body.flashSaleTarget === 'sms' ||
+      body.flashSaleTarget === 'boosting'
+    ) {
+      s.flashSaleTarget = body.flashSaleTarget;
+    }
+    if (typeof body.flashSaleEndsAt === 'string') {
+      const trimmedEnd = body.flashSaleEndsAt.trim();
+      s.flashSaleEndsAt = trimmedEnd && Number.isFinite(Date.parse(trimmedEnd)) ? trimmedEnd : '';
     }
     if (
       typeof body.referralBonusAmount === 'number' &&
@@ -5205,13 +5608,6 @@ async function startServer() {
     });
   } else {
     const disableHmr = process.env.DISABLE_HMR === 'true';
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: disableHmr
-        ? { middlewareMode: true, hmr: false, ws: false }
-        : { middlewareMode: true, hmr: { server: httpServer }, ws: { server: httpServer } },
-      appType: 'spa',
-    });
 
     if (disableHmr) {
       app.get('/@vite/client', (_req, res) => {
@@ -5279,7 +5675,27 @@ export class ErrorOverlay {}
       });
     }
 
-    app.use(vite.middlewares);
+    const vitePromise = import('vite')
+      .then(({ createServer: createViteServer }) =>
+        createViteServer({
+          server: disableHmr
+            ? { middlewareMode: true, hmr: false, ws: false }
+            : { middlewareMode: true, hmr: true, ws: { server: httpServer } },
+          appType: 'spa',
+        }),
+      )
+      .catch((err) => {
+        console.error('Fatal Vite middleware startup error:', err);
+        process.exit(1);
+      });
+
+    app.use((req, res, next) => {
+      vitePromise
+        .then((vite) => {
+          vite.middlewares(req, res, next);
+        })
+        .catch(next);
+    });
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {

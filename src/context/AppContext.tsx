@@ -71,14 +71,75 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 const THEME_KEY = 'suredeal_theme';
+const PUBLIC_CATALOG_CACHE_KEY = 'suredeal_public_catalog_cache_v1';
+
+function readCachedCatalog(): PublicCatalogResponse | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_CATALOG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PublicCatalogResponse;
+    if (parsed && typeof parsed === 'object' && parsed.settings && typeof parsed.settings === 'object') {
+      applyWebsitePalette(parsed.settings);
+      setCachedSiteLogo(parsed.settings.siteLogoUrl || '');
+      return parsed;
+    }
+  } catch {
+    // ignore corrupt cache
+  }
+  return null;
+}
+
+function writeCachedCatalog(data: PublicCatalogResponse): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PUBLIC_CATALOG_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    // Fallback if oversized data URL images exceed localStorage quota: strip large base64 images
+    try {
+      const stripDataUrl = (u?: string) => (u && u.startsWith('data:') && u.length > 4096 ? '' : u || '');
+      const slim: PublicCatalogResponse = {
+        ...data,
+        settings: {
+          ...data.settings,
+          siteLogoUrl: stripDataUrl(data.settings.siteLogoUrl),
+          dashboardBanners: (data.settings.dashboardBanners || []).map((b) => ({
+            ...b,
+            imageUrl: stripDataUrl(b.imageUrl),
+          })),
+          landingShowcaseCards: (data.settings.landingShowcaseCards || []).map((c) => ({
+            ...c,
+            imageUrl: stripDataUrl(c.imageUrl),
+          })),
+        },
+        marketplaceListings: (data.marketplaceListings || []).map((l) => ({
+          ...l,
+          imageUrl: stripDataUrl(l.imageUrl),
+          logoUrl: stripDataUrl(l.logoUrl),
+        })),
+        customSections: (data.customSections || []).map((s) => ({
+          ...s,
+          products: (s.products || []).map((p) => ({
+            ...p,
+            imageUrl: stripDataUrl(p.imageUrl),
+            logoUrl: stripDataUrl(p.logoUrl),
+          })),
+        })),
+      };
+      window.localStorage.setItem(PUBLIC_CATALOG_CACHE_KEY, JSON.stringify(slim));
+    } catch {
+      // ignore storage quota errors
+    }
+  }
+}
 
 applyCachedPalette();
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PublicUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(() => readCachedCatalog());
+  const [catalogLoading, setCatalogLoading] = useState(() => !readCachedCatalog());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [impersonationMeta, setImpersonationMeta] = useState<ImpersonationSessionInfo | null>(null);
   const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
@@ -135,6 +196,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCatalog(data);
         applyWebsitePalette(data.settings);
         setCachedSiteLogo(data.settings.siteLogoUrl || '');
+        writeCachedCatalog(data);
       }
     } catch (err) {
       console.error('Failed to load catalog:', err);

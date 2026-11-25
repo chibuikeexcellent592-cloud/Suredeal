@@ -382,15 +382,18 @@ export function AuthView({ initialMode, onBack, onSuccess }: AuthViewProps) {
                   >
                     Email Address
                   </label>
-                  <input
-                    id="auth-email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
+                  <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2.5 focus-within:ring-2 focus-within:ring-blue-600 focus-within:border-blue-600">
+                    <Mail className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      id="auth-email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      className="flex-1 min-w-0 bg-transparent text-sm text-slate-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -400,7 +403,8 @@ export function AuthView({ initialMode, onBack, onSuccess }: AuthViewProps) {
                   >
                     Password
                   </label>
-                  <div className="relative">
+                  <div className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 focus-within:ring-2 focus-within:ring-blue-600 focus-within:border-blue-600">
+                    <Lock className="w-4 h-4 text-slate-400 shrink-0" />
                     <input
                       id="auth-password"
                       type={showPassword ? 'text' : 'password'}
@@ -408,12 +412,12 @@ export function AuthView({ initialMode, onBack, onSuccess }: AuthViewProps) {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Enter your password"
-                      className="w-full px-3.5 py-2.5 pr-10 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      className="flex-1 min-w-0 py-0.5 bg-transparent text-sm text-slate-900 dark:text-white focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((p) => !p)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      className="inline-flex items-center justify-center p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer shrink-0"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

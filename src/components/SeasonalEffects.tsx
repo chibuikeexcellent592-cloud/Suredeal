@@ -42,7 +42,7 @@ export const SEASONAL_PRESETS: Record<SeasonalThemeId, SeasonalPresetMeta> = {
     emoji: '🎆',
     defaultHeadline: 'Happy New Year — Fresh Growth Tools & VIP Wallet Perks All Year!',
     ribbonClass:
-      'bg-gradient-to-r from-slate-900 via-indigo-900 to-amber-700 text-white border-amber-500/30',
+      'bg-gradient-to-r from-slate-900 via-blue-900 to-amber-700 text-white border-amber-500/30',
     badgeClass: 'bg-amber-500 text-slate-950',
     particles: ['✨', '🎆', '⭐', '🥂', '🎊', '✨'],
     accentHex: '#F59E0B',
@@ -86,10 +86,10 @@ export const SEASONAL_PRESETS: Record<SeasonalThemeId, SeasonalPresetMeta> = {
     emoji: '🌸',
     defaultHeadline: 'Happy Easter — Spring Restocks & Fresh Accounts Ready in the Vault!',
     ribbonClass:
-      'bg-gradient-to-r from-sky-700 via-violet-700 to-emerald-700 text-white border-violet-800/40',
-    badgeClass: 'bg-violet-600 text-white',
+      'bg-gradient-to-r from-sky-700 via-blue-600 to-emerald-700 text-white border-sky-700/40',
+    badgeClass: 'bg-sky-600 text-white',
     particles: ['🌸', '🌷', '✨', '🌼', '🦋'],
-    accentHex: '#8B5CF6',
+    accentHex: '#0284C7',
   },
   custom: {
     id: 'custom',
@@ -97,7 +97,7 @@ export const SEASONAL_PRESETS: Record<SeasonalThemeId, SeasonalPresetMeta> = {
     emoji: '🎉',
     defaultHeadline: 'Special Store Celebration — Exclusive Deals Live Now!',
     ribbonClass:
-      'bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-900 text-white border-blue-700/40',
+      'bg-gradient-to-r from-slate-900 via-blue-900 to-sky-800 text-white border-blue-700/40',
     badgeClass: 'bg-blue-600 text-white',
     particles: ['🎉', '✨', '⭐', '🎊'],
     accentHex: '#2563EB',

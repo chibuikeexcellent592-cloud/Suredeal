@@ -133,7 +133,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
       cta: 'Open Vault',
       tab: 'marketplace',
       icon: KeyRound,
-      iconClass: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400',
+      iconClass: 'bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400',
     },
     {
       label: 'Referral Invites',
@@ -175,9 +175,9 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
         <button
           type="button"
           onClick={() => onNavigate('wallet')}
-          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
         >
-          <span className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-300 flex items-center justify-center shrink-0">
+          <span className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-300 flex items-center justify-center shrink-0">
             <Plus className="w-4 h-4" />
           </span>
           <span>Fund Account</span>
@@ -185,9 +185,9 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
         <button
           type="button"
           onClick={() => onNavigate('marketplace')}
-          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
         >
-          <span className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-300 flex items-center justify-center shrink-0">
+          <span className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-300 flex items-center justify-center shrink-0">
             <ShoppingBag className="w-4 h-4" />
           </span>
           <span>Buy Accounts</span>
@@ -195,7 +195,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
         <button
           type="button"
           onClick={() => onNavigate('sms')}
-          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
         >
           <span className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-300 flex items-center justify-center shrink-0">
             <Phone className="w-4 h-4" />
@@ -205,7 +205,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
         <button
           type="button"
           onClick={() => onNavigate('boosting')}
-          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-purple-300 dark:hover:border-purple-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+          className="inline-flex items-center gap-2.5 pl-2.5 pr-4 py-2 rounded-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-bold shadow-2xs whitespace-nowrap shrink-0 cursor-pointer transition-colors"
         >
           <span className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-300 flex items-center justify-center shrink-0">
             <TrendingUp className="w-4 h-4" />
@@ -237,7 +237,7 @@ export function OverviewPanel({ onNavigate }: OverviewPanelProps) {
               <button
                 type="button"
                 onClick={() => setHideBalance((v) => !v)}
-                className="p-1 rounded-md hover:bg-white/15 text-white/90 cursor-pointer"
+                className="inline-flex items-center justify-center w-6 h-6 rounded-md hover:bg-white/15 text-white/90 cursor-pointer"
                 aria-label={hideBalance ? 'Show balance' : 'Hide balance'}
               >
                 {hideBalance ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}

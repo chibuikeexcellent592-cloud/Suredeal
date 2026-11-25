@@ -11,7 +11,7 @@ export function PinnedMarquee() {
 
   const themeClass =
     settings.pinnedTickerTheme === 'purple'
-      ? 'bg-gradient-to-r from-violet-700 via-purple-600 to-fuchsia-600 text-white'
+      ? 'bg-gradient-to-r from-blue-700 via-blue-600 to-sky-500 text-white'
       : settings.pinnedTickerTheme === 'blue'
         ? 'bg-gradient-to-r from-blue-600 to-sky-500 text-white'
         : settings.pinnedTickerTheme === 'amber'

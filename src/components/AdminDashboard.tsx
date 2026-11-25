@@ -15,6 +15,7 @@ import {
   Crown,
   Download,
   Eye,
+  EyeOff,
   FileClock,
   FileSpreadsheet,
   FileText,
@@ -224,10 +225,12 @@ export function AdminDashboard({
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPass, setNewUserPass] = useState('');
+  const [showNewUserPass, setShowNewUserPass] = useState(false);
   const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
   const [newUserBal, setNewUserBal] = useState(0);
   const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
   const [resetPassInputs, setResetPassInputs] = useState<Record<string, string>>({});
+  const [showResetPasses, setShowResetPasses] = useState<Record<string, boolean>>({});
 
   // Promo Code Form
   const [promoCodeStr, setPromoCodeStr] = useState('');
@@ -267,6 +270,7 @@ export function AdminDashboard({
   const [editUserReferral, setEditUserReferral] = useState('');
   const [editUserAvatar, setEditUserAvatar] = useState('');
   const [editUserPass, setEditUserPass] = useState('');
+  const [showEditUserPass, setShowEditUserPass] = useState(false);
   const [savingUserEdit, setSavingUserEdit] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -1286,7 +1290,7 @@ export function AdminDashboard({
                 <button
                   type="button"
                   onClick={onOpenWorkspace}
-                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-xs font-bold text-white shadow-xs cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white shadow-xs cursor-pointer"
                   title="Switch to Full User View across the whole website"
                 >
                   <LayoutDashboard className="w-3.5 h-3.5" />
@@ -1385,8 +1389,8 @@ export function AdminDashboard({
                     onClick={() => selectTab(item.id)}
                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors shrink-0 cursor-pointer ${
                       active
-                        ? 'bg-purple-600 text-white shadow-xs'
-                        : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-purple-50 dark:hover:bg-purple-950/40'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/40'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -1396,7 +1400,7 @@ export function AdminDashboard({
                         className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none ${
                           active
                             ? 'bg-white/25 text-white'
-                            : 'bg-purple-600 text-white'
+                            : 'bg-blue-600 text-white'
                         }`}
                       >
                         {item.badge}
@@ -1695,14 +1699,14 @@ export function AdminDashboard({
                       onClick={handleExportJsonBackup}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
                     >
-                      <Archive className="w-3 h-3 text-purple-600" />
+                      <Archive className="w-3 h-3 text-blue-600" />
                       Full Backup JSON
                     </button>
                     {onOpenWorkspace && (
                       <button
                         type="button"
                         onClick={onOpenWorkspace}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-[11px] font-bold text-blue-700 dark:text-blue-300 cursor-pointer"
                       >
                         <LayoutDashboard className="w-3 h-3" />
                         Full User View
@@ -1716,12 +1720,12 @@ export function AdminDashboard({
                     { label: 'Revenue & Profit', sub: `${accountingRecordsList.length} ledger`, tab: 'revenue' as AdminTab, icon: TrendingUp, tint: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60' },
                     { label: 'Live Monitor', sub: `${visitorStats.totalVisits} visits`, tab: 'live' as AdminTab, icon: Activity, tint: 'bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900/60' },
                     { label: 'SMS Numbers', sub: `${readyPoolCount} pool · ${waitingSmsCount} wait`, tab: 'sms_numbers' as AdminTab, icon: Smartphone, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
-                    { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60' },
-                    { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900/60' },
+                    { label: 'Orders & Vault', sub: `${vaultItemsList.length} deliveries`, tab: 'orders' as AdminTab, icon: Receipt, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
+                    { label: 'Products & Pricing', sub: `${data.marketplaceListings.length} items`, tab: 'catalog' as AdminTab, icon: Package, tint: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900/60' },
                     { label: 'Accounting', sub: `${accountingRecordsList.length} archived`, tab: 'accounting' as AdminTab, icon: Archive, tint: 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700' },
                     { label: 'User Accounts', sub: `${data.users.length} members`, tab: 'users' as AdminTab, icon: Users, tint: 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-900/60' },
                     { label: 'Landing & Seasons', sub: 'Theme, Hero & Banners', tab: 'cms' as AdminTab, icon: Sparkles, tint: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/60' },
-                    { label: 'Wallet & Copy', sub: 'Edit all write-ups', tab: 'copy' as AdminTab, icon: FileText, tint: 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/60' },
+                    { label: 'Wallet & Copy', sub: 'Edit all write-ups', tab: 'copy' as AdminTab, icon: FileText, tint: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-900/60' },
                     { label: 'Promo Codes', sub: `${data.promoCodes.length} active`, tab: 'promos' as AdminTab, icon: Tag, tint: 'bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-300 border-pink-200 dark:border-pink-900/60' },
                     { label: 'Support Desk', sub: `${data.metrics.openTickets} open · Designer`, tab: 'support' as AdminTab, icon: LifeBuoy, tint: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900/60' },
                     ...(isMainAdmin
@@ -1838,7 +1842,7 @@ export function AdminDashboard({
                         title: 'Promo & Coupon Codes',
                         desc: 'Allow discount codes at checkout',
                         val: data.settings.allowPromoCodes !== false,
-                        onColor: 'bg-purple-600 text-white',
+                        onColor: 'bg-blue-600 text-white',
                       },
                       {
                         key: 'supportAllowTickets' as const,
@@ -1922,7 +1926,7 @@ export function AdminDashboard({
                   <button
                     type="submit"
                     disabled={airdropping}
-                    className="w-full py-2.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl shadow-sm disabled:opacity-60 cursor-pointer"
+                    className="w-full py-2.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-sky-600 hover:from-blue-700 hover:to-sky-700 rounded-xl shadow-sm disabled:opacity-60 cursor-pointer"
                   >
                     {airdropping ? 'Airdropping...' : `Airdrop ${formatNaira(airdropAmount || 0, symbol)} to Active Users`}
                   </button>
@@ -1978,7 +1982,7 @@ export function AdminDashboard({
                     <span className="text-[11px] font-bold uppercase text-slate-400">
                       Open Tickets
                     </span>
-                    <LifeBuoy className="w-4 h-4 text-indigo-600" />
+                    <LifeBuoy className="w-4 h-4 text-blue-600" />
                   </div>
                   <p className="font-display text-xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
                     {data.metrics.openTickets}
@@ -2389,14 +2393,24 @@ export function AdminDashboard({
                     placeholder="Email Address"
                     className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
                   />
-                  <input
-                    type="password"
-                    required
-                    value={newUserPass}
-                    onChange={(e) => setNewUserPass(e.target.value)}
-                    placeholder="Password"
-                    className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                  />
+                  <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                    <input
+                      type={showNewUserPass ? 'text' : 'password'}
+                      required
+                      value={newUserPass}
+                      onChange={(e) => setNewUserPass(e.target.value)}
+                      placeholder="Password"
+                      className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewUserPass((v) => !v)}
+                      className="inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                      aria-label={showNewUserPass ? 'Hide password' : 'Show password'}
+                    >
+                      {showNewUserPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select
                       value={newUserRole}
@@ -2741,15 +2755,27 @@ export function AdminDashboard({
                           </button>
                         )}
 
-                        <input
-                          type="password"
-                          placeholder="New pass (6+)"
-                          value={resetPassInputs[u.id] || ''}
-                          onChange={(e) =>
-                            setResetPassInputs({ ...resetPassInputs, [u.id]: e.target.value })
-                          }
-                          className="w-28 px-2 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                        />
+                        <div className="w-32 flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                          <input
+                            type={showResetPasses[u.id] ? 'text' : 'password'}
+                            placeholder="New pass (6+)"
+                            value={resetPassInputs[u.id] || ''}
+                            onChange={(e) =>
+                              setResetPassInputs({ ...resetPassInputs, [u.id]: e.target.value })
+                            }
+                            className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShowResetPasses((prev) => ({ ...prev, [u.id]: !prev[u.id] }))
+                            }
+                            className="inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                            aria-label={showResetPasses[u.id] ? 'Hide reset password' : 'Show reset password'}
+                          >
+                            {showResetPasses[u.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                          </button>
+                        </div>
                         <button
                           type="button"
                           onClick={async () => {
@@ -2777,7 +2803,7 @@ export function AdminDashboard({
                         <button
                           type="button"
                           onClick={() => openEditUser(u)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-100 cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 cursor-pointer"
                         >
                           <Pencil className="w-3 h-3" />
                           Edit User
@@ -2797,7 +2823,7 @@ export function AdminDashboard({
                             type="button"
                             disabled={impersonatingBusy}
                             onClick={() => void handleOpenLiveUserAccount(u)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 cursor-pointer disabled:opacity-60"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 rounded-lg hover:bg-sky-100 cursor-pointer disabled:opacity-60"
                           >
                             <LayoutDashboard className="w-3 h-3" />
                             Open Account
@@ -3667,7 +3693,7 @@ export function AdminDashboard({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="font-display text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <KeyRound className="w-4 h-4 text-purple-600" />
+                      <KeyRound className="w-4 h-4 text-blue-600" />
                       Marketplace &amp; Section Vault Deliveries ({filteredVaultItems.length} / {vaultItemsList.length})
                     </h2>
                     <p className="text-[11px] text-slate-500">
@@ -3748,7 +3774,7 @@ export function AdminDashboard({
                       <div key={v.id} className="py-3.5 flex flex-wrap items-start justify-between gap-3 text-xs">
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
                               {v.sourceType} · {v.category}
                             </span>
                             <span className="font-mono text-[11px] text-slate-400">#{v.id}</span>
@@ -3862,7 +3888,7 @@ export function AdminDashboard({
                         onClick={() => selectTab('catalog')}
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
                       >
-                        <Sliders className="w-3.5 h-3.5 text-purple-600" />
+                        <Sliders className="w-3.5 h-3.5 text-blue-600" />
                         Alternate Tier: {altMode === 'markup' ? `+${altPct}% Higher` : `-${altPct}% Lower`}
                       </button>
                     )}
@@ -4496,9 +4522,9 @@ export function AdminDashboard({
           {/* ACCOUNTING ARCHIVE TAB (Independent from Dashboard Clear / Refresh) */}
           {tab === 'accounting' && (
             <div className="space-y-5">
-              <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/30 p-4 flex items-start gap-3">
-                <Archive className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-                <div className="text-xs text-indigo-950 dark:text-indigo-200 leading-relaxed">
+              <div className="rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/30 p-4 flex items-start gap-3">
+                <Archive className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-blue-950 dark:text-blue-200 leading-relaxed">
                   <p className="font-bold">Permanent Accounting Ledger Archive</p>
                   <p className="mt-0.5 opacity-90">
                     Every order (SMS, Boosting, Marketplace &amp; Custom Vault) and wallet transaction is accounted for independently here. Clearing Orders &amp; Transactions or running Refresh Website on your dashboard never removes entries here unless you delete or clear them manually inside Accounting.
@@ -4535,7 +4561,7 @@ export function AdminDashboard({
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                     Archived Records
                   </p>
-                  <p className="font-display text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-1.5 tabular-nums">
+                  <p className="font-display text-2xl font-extrabold text-sky-600 dark:text-sky-400 mt-1.5 tabular-nums">
                     {accountingRecordsList.length}
                   </p>
                 </div>
@@ -4664,7 +4690,7 @@ export function AdminDashboard({
                             <span
                               className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                 rec.kind === 'order'
-                                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
+                                  ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300'
                                   : 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
                               }`}
                             >
@@ -4945,7 +4971,7 @@ export function AdminDashboard({
                     type="button"
                     disabled={impersonatingBusy}
                     onClick={() => void handleOpenLiveUserAccount(inspectedUser)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer disabled:opacity-60"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer disabled:opacity-60"
                   >
                     <LayoutDashboard className="w-3.5 h-3.5" />
                     {impersonatingBusy ? 'Opening...' : 'Open Live Account'}
@@ -5373,7 +5399,7 @@ export function AdminDashboard({
                     setInspectUserId(null);
                     openEditUser(target);
                   }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   Edit User
@@ -5496,13 +5522,23 @@ export function AdminDashboard({
                 <label className="text-[11px] font-semibold text-slate-500">
                   Set New Password (optional)
                 </label>
-                <input
-                  type="password"
-                  value={editUserPass}
-                  onChange={(e) => setEditUserPass(e.target.value)}
-                  placeholder="Leave blank to keep"
-                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                />
+                <div className="mt-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-blue-600">
+                  <input
+                    type={showEditUserPass ? 'text' : 'password'}
+                    value={editUserPass}
+                    onChange={(e) => setEditUserPass(e.target.value)}
+                    placeholder="Leave blank to keep"
+                    className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditUserPass((v) => !v)}
+                    className="inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                    aria-label={showEditUserPass ? 'Hide new user password' : 'Show new user password'}
+                  >
+                    {showEditUserPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -5551,7 +5587,7 @@ export function AdminDashboard({
               <button
                 type="submit"
                 disabled={savingUserEdit}
-                className="px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60 rounded-xl cursor-pointer"
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl cursor-pointer"
               >
                 {savingUserEdit ? 'Saving...' : 'Save User Changes'}
               </button>

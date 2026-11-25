@@ -532,7 +532,7 @@ export function AdminSectionCopyPanel({ settings, onRefresh }: AdminSectionCopyP
       {showGroup('marketplace') && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <ShoppingBag className="w-4 h-4 text-purple-600" />
+            <ShoppingBag className="w-4 h-4 text-blue-600" />
             <div>
               <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
                 Marketplace Section &amp; Buy-Page Warning Write-Ups
@@ -918,7 +918,7 @@ export function AdminSectionCopyPanel({ settings, onRefresh }: AdminSectionCopyP
 
               <div className="space-y-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800">
                 <p className="text-xs font-bold flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
-                  <Settings className="w-3.5 h-3.5 text-purple-600" />
+                  <Settings className="w-3.5 h-3.5 text-blue-600" />
                   Account Settings Section
                 </p>
                 <input

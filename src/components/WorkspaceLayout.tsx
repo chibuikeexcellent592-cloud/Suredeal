@@ -485,7 +485,7 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
               <button
                 type="button"
                 onClick={() => setMobileOpen(true)}
-                className="lg:hidden w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-900/70 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 cursor-pointer"
+                className="lg:hidden w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900/70 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 cursor-pointer"
                 aria-label="Open menu"
               >
                 <Menu className="w-5 h-5" />
@@ -629,13 +629,13 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                   <span className="text-slate-600 dark:text-slate-300">
                     Progress to Level {userLevel}
                   </span>
-                  <span className="text-purple-600 dark:text-purple-400 font-bold tabular-nums">
+                  <span className="text-blue-600 dark:text-blue-400 font-bold tabular-nums">
                     {levelProgressPct}%
                   </span>
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-purple-600 dark:bg-purple-500 transition-all duration-300"
+                    className="h-full rounded-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
                     style={{ width: `${Math.max(4, Math.min(100, levelProgressPct))}%` }}
                   />
                 </div>
@@ -674,9 +674,9 @@ export function WorkspaceLayout({ onBackHome, onOpenAdmin }: WorkspaceLayoutProp
                   <button
                     type="button"
                     onClick={() => selectTab('admin')}
-                    className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-950/60 text-sm font-bold text-purple-700 dark:text-purple-300 transition-colors cursor-pointer"
+                    className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-950/60 text-sm font-bold text-blue-700 dark:text-blue-300 transition-colors cursor-pointer"
                   >
-                    <ShieldCheck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                    <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                     <span>{impersonatingFromAdmin ? 'Exit to Overwatch' : 'Overwatch Console'}</span>
                   </button>
                 )}

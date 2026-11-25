@@ -362,26 +362,30 @@ function legacyCssCompatPlugin(): VitePlugin {
   };
 }
 
-export default defineConfig(() => {
+export default defineConfig(({command}) => {
   return {
     plugins: [
       react(),
       tailwindcss(),
-      legacy({
-        targets: [
-          'defaults',
-          'android >= 5',
-          'chrome >= 49',
-          'ios_saf >= 11',
-          'safari >= 11',
-          'samsung >= 6',
-          'edge >= 16',
-          'firefox >= 52',
-        ],
-        modernTargets: 'chrome >= 64, safari >= 12, firefox >= 60, edge >= 79',
-        modernPolyfills: true,
-        renderLegacyChunks: true,
-      }),
+      ...(command === 'build'
+        ? [
+            legacy({
+              targets: [
+                'defaults',
+                'android >= 5',
+                'chrome >= 49',
+                'ios_saf >= 11',
+                'safari >= 11',
+                'samsung >= 6',
+                'edge >= 16',
+                'firefox >= 52',
+              ],
+              modernTargets: 'chrome >= 64, safari >= 12, firefox >= 60, edge >= 79',
+              modernPolyfills: true,
+              renderLegacyChunks: true,
+            }),
+          ]
+        : []),
       legacyCssCompatPlugin(),
       // Copies src/assets into dist/ so root-relative URLs like
       // "/src/assets/images/..." (e.g. generate_image output) still resolve

@@ -137,6 +137,13 @@ export interface PlatformSettings {
   leaderboardVisible?: boolean;
   supportCannedReplies?: string[];
   blockedEmailDomains?: string[];
+  blockedNameKeywords?: string[];
+  authSessionEpoch?: number;
+  flashSaleEnabled?: boolean;
+  flashSaleLabel?: string;
+  flashSalePercent?: number;
+  flashSaleTarget?: 'all' | 'marketplace' | 'sms' | 'boosting';
+  flashSaleEndsAt?: string;
   referralBonusAmount: number;
   welcomePromoEnabled: boolean;
   welcomePromoAmount: number;
